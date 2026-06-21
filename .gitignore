@@ -1,0 +1,19 @@
+/ccwrap
+/dist/
+/claude-code/
+node_modules/
+/npm/platforms/*/bin/
+.DS_Store
+/.claude/
+/.playwright-mcp/
+/artifacts/
+/docs/ACCEPTANCE.md
+/.superpowers/
+
+# Local-only dev artifacts (keep out of releases)
+/docs/superpowers/
+/scripts/oauth-replay/
+# scratch review screenshots live at repo root; product images go under docs/images/
+/*.png
+/*.jpg
+/*.jpeg

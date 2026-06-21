@@ -1,0 +1,53 @@
+name: Fingerprint Drift Watch
+
+# ccwrap's whole value is that the upstream sees Claude Code's REAL undici TLS
+# fingerprint, not ccwrap's. That depends on matching undici's *current*
+# fingerprint — and when Node/undici updates, the fingerprint can shift and the
+# committed baseline goes stale. Normal CI skips the live check (it needs a real
+# node-undici process). This scheduled job runs it so drift surfaces proactively
+# instead of silently degrading anonymity in the field.
+on:
+  schedule:
+    - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC
+  workflow_dispatch: {} # allow on-demand runs
+
+permissions:
+  contents: read
+
+jobs:
+  livefp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+      - name: guard against a vacuous run
+        # The livefp test currently lives in internal/supervisor/livefp_test.go,
+        # which is a LOCAL-ONLY file (gitignored, never committed). `go test
+        # -run X` exits 0 when zero tests match, so without this guard a
+        # checkout missing the file makes the drift watch pass vacuously
+        # forever — a monitor that can never alert is worse than no monitor.
+        # Fail loudly instead, so the gap is a visible decision: either commit
+        # the livefp test or retire this workflow.
+        run: |
+          if [ ! -f internal/supervisor/livefp_test.go ]; then
+            echo "::error::internal/supervisor/livefp_test.go is not in the checkout (it is a local-only file). The fingerprint drift watch CANNOT run — commit the livefp test or remove this workflow."
+            exit 1
+          fi
+      - name: live mirror-fidelity + baseline check
+        # Hard-fails if ccwrap's mirrored ClientHello != live undici's (mirror
+        # broke); logs whether live undici still matches the committed baseline
+        # (Node/undici drift). The job's pass/fail + log is the alert.
+        # Belt-and-braces: also fail if the -run pattern matched nothing (e.g.
+        # the test was renamed) — see the vacuous-run guard above.
+        run: |
+          out=$(go test ./internal/supervisor/ -tags livefp -run 'TestLiveFingerprintCompare' -v 2>&1) || { echo "$out"; exit 1; }
+          echo "$out"
+          if echo "$out" | grep -q "no tests to run"; then
+            echo "::error::-run TestLiveFingerprintCompare matched no tests; the drift watch ran vacuously."
+            exit 1
+          fi

@@ -1,0 +1,70 @@
+name: Release
+
+# Dormant until a v* tag is pushed — that tag push is the deliberate "publish"
+# action. Until then nothing here runs. The GitHub release is created as a DRAFT
+# (see .goreleaser.yaml `release.draft: true`) for manual review before going live.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # create the GitHub release + upload assets
+  id-token: write # cosign keyless (Sigstore OIDC) signing
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so the changelog can diff against the prior tag
+      - uses: actions/setup-go@v5
+        with:
+          # Build released binaries with the latest patched Go so they don't ship
+          # known standard-library CVEs (see the CI govulncheck note).
+          go-version: "stable"
+      - uses: sigstore/cosign-installer@v3
+      - uses: anchore/sbom-action/download-syft@v0
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> 2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # npm distribution, signed with build provenance (Sigstore, via the
+      # id-token permission above). Skipped until NPM_TOKEN is set, so the GitHub
+      # release + Homebrew formula publish independently of npm being configured.
+      # Reuses the binaries GoReleaser already built into dist/ this run, so the
+      # npm payload is the SAME artifact as the release archives.
+      - uses: actions/setup-node@v4
+        if: ${{ env.NPM_TOKEN != '' }}
+        with:
+          node-version: "lts/*"
+          registry-url: "https://registry.npmjs.org"
+      - name: Publish npm packages with provenance
+        if: ${{ env.NPM_TOKEN != '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          node scripts/build-npm.mjs "$version"
+          # Prerelease versions (e.g. 0.1.0-rc.0) must NOT land on the `latest`
+          # dist-tag — npm requires an explicit --tag for them. Route prereleases
+          # to `next`; stable versions to `latest`.
+          case "$version" in
+            *-*) npm_tag="next" ;;
+            *)   npm_tag="latest" ;;
+          esac
+          # Platform packages first so the launcher's optionalDependencies resolve.
+          # ./-prefix the paths: npm reads a bare single-slash arg like `npm/ccwrap`
+          # as a github:owner/repo spec, not a local directory (the two-slash
+          # platform paths happen to dodge it, but be explicit for both).
+          for d in darwin-arm64 darwin-amd64 linux-arm64 linux-amd64; do
+            npm publish --provenance --access public --tag "$npm_tag" "./npm/platforms/$d"
+          done
+          npm publish --provenance --access public --tag "$npm_tag" ./npm/ccwrap

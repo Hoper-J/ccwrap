@@ -1,0 +1,98 @@
+# GoReleaser config for ccwrap — cross-platform release pipeline.
+# Local validation (no publish, no signing):
+#   goreleaser check
+#   goreleaser release --snapshot --clean --skip=publish,sign
+# A real release runs in CI on a pushed v* tag (see .github/workflows/release.yml).
+version: 2
+
+project_name: ccwrap
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: ccwrap
+    main: ./cmd/ccwrap
+    binary: ccwrap
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    # versionBase is a linker-set var (see cmd/ccwrap/version.go); inject the
+    # release tag so `ccwrap version` reports e.g. 0.2.0 (not the source baseline).
+    ldflags:
+      - -s -w -X main.versionBase={{ .Version }}
+    # Reproducible builds: stamp the binary mtime from the commit, not build time.
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: ccwrap
+    # Default file set already bundles README*/LICENSE*/CHANGELOG* when present
+    # and tolerates their absence, so no explicit `files:` is needed yet.
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}"
+
+changelog:
+  sort: asc
+  use: git
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Others
+      order: 999
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "merge conflict"
+      - Merge pull request
+      - Merge branch
+
+# --- The following only run on a real `goreleaser release` (skipped by
+# --- `--snapshot`/`--skip=sign`); they need CI secrets/identity, so they are
+# --- dormant until the release workflow runs on a pushed tag.
+
+# Keyless (Sigstore/OIDC) signature over the checksums file.
+signs:
+  - cmd: cosign
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--output-certificate=${certificate}"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
+
+sboms:
+  - artifacts: archive
+
+release:
+  github:
+    owner: Hoper-J
+    name: ccwrap
+  # Safety: even a pushed tag produces a DRAFT release for manual review before
+  # it goes live. Flip to false when you're ready for tags to publish directly.
+  draft: true
+  prerelease: auto
+  name_template: "v{{ .Version }}"

@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+      - name: gofmt
+        run: |
+          unformatted=$(git ls-files '*.go' | grep -v '^claude-code/' | xargs gofmt -l)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"; echo "$unformatted"; exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+      - uses: actions/setup-node@v4
+        with:
+          # The web dashboard's behavioral tests (web.go) run the rendered JS
+          # under a real `node` process and t.Skip silently when node is absent.
+          # Install it explicitly so those tests always run, instead of relying
+          # on the runner image happening to ship node.
+          node-version: "lts/*"
+      - name: build
+        run: go build ./...
+      - name: test
+        run: go test ./...
+
+  race:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*" # web.go behavioral tests need node, else they t.Skip
+      - name: test -race
+        run: go test -race ./...
+
+  scripts:
+    # The distribution entry points (install.sh, the npm launcher) aren't covered
+    # by `go test` but are exactly the files a user pipes into `sh` / runs via npx.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+      - name: shellcheck install.sh
+        run: shellcheck install.sh
+      - name: node --check (npm launcher + build script)
+        run: |
+          node --check npm/ccwrap/bin/ccwrap.js
+          node --check scripts/build-npm.mjs
+
+  release-config:
+    # Validate the release pipeline on every PR: `goreleaser check` catches a
+    # broken .goreleaser.yaml, and a snapshot build cross-compiles ALL targets
+    # (darwin/linux x amd64/arm64) — the host-only `test` job above would miss a
+    # linux/arm64 or darwin/amd64 cross-compile break.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> 2"
+          install-only: true
+      - name: goreleaser check
+        run: goreleaser check
+      - name: goreleaser build (snapshot, all platforms)
+        run: goreleaser build --snapshot --clean
+
+  govulncheck:
+    runs-on: ubuntu-latest
+    # Advisory, NOT a hard gate: govulncheck's findings against ccwrap are
+    # exclusively Go standard-library CVEs reached via crypto/tls + crypto/x509
+    # (zero in ccwrap's own code, zero in actually-called deps). Those clear by
+    # building with a newer Go patch — but there is almost always a just-disclosed
+    # stdlib CVE whose fix is in the very latest patch, so gating on it would red
+    # the build on toolchain-lag, not on a real ccwrap regression. We run it for
+    # visibility (the log tells you which Go patch to bump to) without blocking.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/govulncheck" ./...

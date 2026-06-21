@@ -1,0 +1,20 @@
+{
+  "name": "@hoper-j/ccwrap-linux-arm64",
+  "version": "0.0.0",
+  "description": "ccwrap binary for Linux arm64",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin/"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Hoper-J/ccwrap.git"
+  },
+  "homepage": "https://github.com/Hoper-J/ccwrap",
+  "license": "MIT"
+}

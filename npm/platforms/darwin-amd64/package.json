@@ -1,0 +1,20 @@
+{
+  "name": "@hoper-j/ccwrap-darwin-amd64",
+  "version": "0.0.0",
+  "description": "ccwrap binary for macOS x86_64",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin/"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Hoper-J/ccwrap.git"
+  },
+  "homepage": "https://github.com/Hoper-J/ccwrap",
+  "license": "MIT"
+}

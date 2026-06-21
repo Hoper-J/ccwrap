@@ -1,0 +1,9 @@
+{
+  "node_version": "v25.7.0",
+  "undici_version": "7.21.0",
+  "captured_at": "2026-06-03T17:12:00.270Z",
+  "ja3": "983846581fdb62fafdb21d2282592c57",
+  "ja4": "t13d5212h1_b262b3658495_8e6e362c5eac",
+  "peetprint": "20e60f2e3b9bcfc67c414021832c076e",
+  "note": "raw ClientHello for the offline utls parity test; ja3/ja4/peetprint are Go-computed (internal/tlsfp) AND tls.peet.ws-cross-checked on this node/undici; regenerate together when ccwrap's target Node/undici moves"
+}

@@ -1,0 +1,29 @@
+{
+  "name": "@hoper-j/ccwrap",
+  "version": "0.0.0",
+  "description": "Per-session launcher and local instrumentation proxy for Claude Code with native TLS-fingerprint fidelity",
+  "bin": {
+    "ccwrap": "bin/ccwrap.js"
+  },
+  "files": [
+    "bin/"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Hoper-J/ccwrap.git"
+  },
+  "homepage": "https://github.com/Hoper-J/ccwrap",
+  "bugs": {
+    "url": "https://github.com/Hoper-J/ccwrap/issues"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=16"
+  },
+  "optionalDependencies": {
+    "@hoper-j/ccwrap-darwin-arm64": "0.0.0",
+    "@hoper-j/ccwrap-darwin-amd64": "0.0.0",
+    "@hoper-j/ccwrap-linux-arm64": "0.0.0",
+    "@hoper-j/ccwrap-linux-amd64": "0.0.0"
+  }
+}

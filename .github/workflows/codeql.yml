@@ -1,0 +1,34 @@
+name: CodeQL
+
+# Static security analysis (SAST) for the Go code. ccwrap installs a CA, MITMs
+# TLS, and handles crypto/x509 directly, so SAST earns its keep here. Runs on
+# push/PR to main and weekly.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "27 3 * * 1"
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+      - uses: github/codeql-action/init@v3
+        with:
+          # languages: go already scopes analysis to Go, so the vendored
+          # claude-code (JS/TS) source is excluded automatically.
+          languages: go
+      - uses: github/codeql-action/autobuild@v3
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:go"
