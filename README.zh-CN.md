@@ -2,7 +2,7 @@
 
 简体中文 · [English](README.md)
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![npm](https://img.shields.io/npm/v/@hoper-j/ccwrap)](https://www.npmjs.com/package/@hoper-j/ccwrap)
 
 ccwrap 接管 Claude Code 与上游 API 之间的网络边界，路由到任何 Anthropic 兼容的网关并让 Claude Code 认为是第一方路径、允许按 provider 替换模型并检查每一次请求与响应。
 

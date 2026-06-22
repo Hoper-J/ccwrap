@@ -2,7 +2,7 @@
 
 English · [简体中文](README.zh-CN.md)
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![npm](https://img.shields.io/npm/v/@hoper-j/ccwrap)](https://www.npmjs.com/package/@hoper-j/ccwrap)
 
 ccwrap owns the network boundary between Claude Code and the upstream API: it routes to any Anthropic-compatible gateway while keeping Claude Code on what it believes is the first-party path, swaps models per provider, and inspects every request and response.
 
