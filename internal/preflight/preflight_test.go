@@ -39,7 +39,7 @@ func TestBuildChildEnvScrubsSensitiveVars(t *testing.T) {
 		"CLAUDE_CODE_SUBAGENT_MODEL=parent-subagent",
 		"CCWRAP_MODEL_ALIASES_JSON={\"claude-sonnet-4-6\":\"gateway/sonnet\"}",
 	}
-	env := strings.Join(BuildChildEnv(parent, "http://127.0.0.1:4444", "/tmp/ca-cert.pem", "/tmp/ca-bundle.pem", nil, ChildAuthBootstrap{}), "\n")
+	env := strings.Join(BuildChildEnv(parent, "http://127.0.0.1:4444", "/tmp/ca-cert.pem", "/tmp/ca-bundle.pem", nil, ChildAuthBootstrap{}, ""), "\n")
 	for _, forbidden := range []string{"ANTHROPIC_BASE_URL=", "ANTHROPIC_API_KEY=", "CLAUDE_CODE_USE_VERTEX=", "VERTEX_REGION_CLAUDE_3_5_HAIKU=", "HTTP_PROXY=http://corp-proxy:8080", "HTTPS_PROXY=http://corp-proxy:8443", "ALL_PROXY=", "SSL_CERT_FILE=/etc/custom.pem", "CCWRAP_MODEL_ALIASES_JSON="} {
 		if strings.Contains(env, forbidden) {
 			t.Fatalf("child env should scrub %s; got:\n%s", forbidden, env)
@@ -74,7 +74,7 @@ func TestBuildChildEnvAppliesTrustedModelEnvOverrides(t *testing.T) {
 	env := strings.Join(BuildChildEnv(parent, "http://127.0.0.1:4444", "/tmp/ca-cert.pem", "/tmp/ca-bundle.pem", map[string]string{
 		"CLAUDE_CODE_SUBAGENT_MODEL":     "settings-subagent",
 		"ANTHROPIC_DEFAULT_SONNET_MODEL": "settings-sonnet",
-	}, ChildAuthBootstrap{}), "\n")
+	}, ChildAuthBootstrap{}, ""), "\n")
 	for _, required := range []string{
 		"CLAUDE_CODE_SUBAGENT_MODEL=settings-subagent",
 		"ANTHROPIC_DEFAULT_SONNET_MODEL=settings-sonnet",
@@ -86,6 +86,38 @@ func TestBuildChildEnvAppliesTrustedModelEnvOverrides(t *testing.T) {
 	}
 	if strings.Contains(env, "parent-subagent") || strings.Contains(env, "parent-sonnet") {
 		t.Fatalf("trusted settings model env should override parent model env; got:\n%s", env)
+	}
+}
+
+func TestBuildChildEnvInjectsTimezone(t *testing.T) {
+	// A non-empty tz is injected and overrides any inherited TZ.
+	parent := []string{"PATH=/usr/bin", "TZ=Asia/Shanghai"}
+	env := strings.Join(BuildChildEnv(parent, "http://127.0.0.1:4444", "/tmp/ca-cert.pem", "/tmp/ca-bundle.pem", nil, ChildAuthBootstrap{}, "America/Los_Angeles"), "\n")
+	if !strings.Contains(env, "TZ=America/Los_Angeles") {
+		t.Fatalf("expected injected TZ=America/Los_Angeles; got:\n%s", env)
+	}
+	if strings.Contains(env, "TZ=Asia/Shanghai") {
+		t.Fatalf("injected TZ should override the inherited one; got:\n%s", env)
+	}
+}
+
+func TestBuildChildEnvEmptyTimezonePreservesInheritedTZ(t *testing.T) {
+	// Empty tz must not add a TZ and must leave the inherited one untouched.
+	parent := []string{"PATH=/usr/bin", "TZ=Asia/Shanghai"}
+	env := strings.Join(BuildChildEnv(parent, "http://127.0.0.1:4444", "/tmp/ca-cert.pem", "/tmp/ca-bundle.pem", nil, ChildAuthBootstrap{}, ""), "\n")
+	if !strings.Contains(env, "TZ=Asia/Shanghai") {
+		t.Fatalf("empty tz should preserve inherited TZ; got:\n%s", env)
+	}
+}
+
+func TestBuildChildEnvEmptyTimezoneNoTZWhenAbsent(t *testing.T) {
+	// Empty tz with no inherited TZ adds nothing.
+	parent := []string{"PATH=/usr/bin"}
+	env := strings.Join(BuildChildEnv(parent, "http://127.0.0.1:4444", "/tmp/ca-cert.pem", "/tmp/ca-bundle.pem", nil, ChildAuthBootstrap{}, ""), "\n")
+	for _, line := range strings.Split(env, "\n") {
+		if strings.HasPrefix(line, "TZ=") {
+			t.Fatalf("empty tz with no inherited TZ should add no TZ; got line %q", line)
+		}
 	}
 }
 
@@ -675,7 +707,7 @@ func TestRunRejectsAuthLikeCustomHeadersInThirdPartyHiddenMode(t *testing.T) {
 
 func TestBuildChildEnvInjectsPlaceholderAuth(t *testing.T) {
 	parent := []string{"PATH=/usr/bin", "ANTHROPIC_API_KEY=real-secret"}
-	env := strings.Join(BuildChildEnv(parent, "http://127.0.0.1:4444", "/tmp/ca-cert.pem", "/tmp/ca-bundle.pem", nil, ChildAuthBootstrap{EnvKey: "ANTHROPIC_API_KEY", Value: "ccwrap-placeholder"}), "\n")
+	env := strings.Join(BuildChildEnv(parent, "http://127.0.0.1:4444", "/tmp/ca-cert.pem", "/tmp/ca-bundle.pem", nil, ChildAuthBootstrap{EnvKey: "ANTHROPIC_API_KEY", Value: "ccwrap-placeholder"}, ""), "\n")
 	if strings.Contains(env, "real-secret") {
 		t.Fatalf("real upstream secret leaked into child env:\n%s", env)
 	}
@@ -718,7 +750,7 @@ func TestBuildChildEnvScrubsCCWRAPNativeGatewayConfig(t *testing.T) {
 		"CCWRAP_UPSTREAM_API_KEY=real-key",
 		`CCWRAP_UPSTREAM_HEADERS_JSON={"X-Gateway-Key":"secret"}`,
 	}
-	env := strings.Join(BuildChildEnv(parent, "http://127.0.0.1:4444", "/tmp/ca-cert.pem", "/tmp/ca-bundle.pem", nil, ChildAuthBootstrap{EnvKey: "ANTHROPIC_API_KEY", Value: "placeholder"}), "\n")
+	env := strings.Join(BuildChildEnv(parent, "http://127.0.0.1:4444", "/tmp/ca-cert.pem", "/tmp/ca-bundle.pem", nil, ChildAuthBootstrap{EnvKey: "ANTHROPIC_API_KEY", Value: "placeholder"}, ""), "\n")
 	for _, forbidden := range []string{"CCWRAP_UPSTREAM=", "CCWRAP_UPSTREAM_API_KEY=", "CCWRAP_UPSTREAM_HEADERS_JSON=", "real-key", "X-Gateway-Key"} {
 		if strings.Contains(env, forbidden) {
 			t.Fatalf("child env should scrub %s; got:\n%s", forbidden, env)

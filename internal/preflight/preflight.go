@@ -248,7 +248,13 @@ func InjectedEnv(proxyURL, caCertPath, caBundlePath string) map[string]string {
 	}
 }
 
-func BuildChildEnv(parentEnv []string, proxyURL, caCertPath, caBundlePath string, modelEnv map[string]string, authBootstrap ChildAuthBootstrap) []string {
+// BuildChildEnv composes the Claude Code child environment. The trailing tz
+// parameter, when non-empty, overrides any inherited TZ so the child stamps a
+// chosen timezone into its request prompt (Claude Code computes "Today's date"
+// from the LOCAL zone). An empty tz leaves the parent's TZ (if any) untouched —
+// byte-identical to the pre-feature environment. Callers are expected to have
+// already validated tz via time.LoadLocation; BuildChildEnv trusts it.
+func BuildChildEnv(parentEnv []string, proxyURL, caCertPath, caBundlePath string, modelEnv map[string]string, authBootstrap ChildAuthBootstrap, tz string) []string {
 	env := toMap(parentEnv)
 	for key := range env {
 		if envpolicy.IsSpawnScrubKey(key) {
@@ -264,6 +270,9 @@ func BuildChildEnv(parentEnv []string, proxyURL, caCertPath, caBundlePath string
 	env["CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"] = "1"
 	for k, v := range InjectedEnv(proxyURL, caCertPath, caBundlePath) {
 		env[k] = v
+	}
+	if tz != "" {
+		env["TZ"] = tz
 	}
 	keys := make([]string, 0, len(env))
 	for key := range env {

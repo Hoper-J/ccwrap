@@ -32,6 +32,10 @@ type captureOpts struct {
 	Timeout     time.Duration
 	ClaudeBin   string
 	ClaudeArgs  []string
+	// Timezone is the --timezone flag; it overrides CCWRAP_TZ but is still
+	// resolved through resolveEffectiveTimezone (persisted decision, validation)
+	// so a captured snapshot's dates match a real ccwrap session's.
+	Timezone string
 	// MainInference skips lightweight quota/title/warm-up calls (no tools in the
 	// request body) and captures the first substantive agent inference instead.
 	MainInference bool
@@ -92,6 +96,12 @@ func parseCaptureArgs(args []string) (captureOpts, error) {
 				return o, fmt.Errorf("--claude-bin needs a value")
 			}
 			o.ClaudeBin = args[i]
+		case "--timezone":
+			i++
+			if i >= len(args) {
+				return o, fmt.Errorf("--timezone needs a value")
+			}
+			o.Timezone = args[i]
 		case "--timeout":
 			i++
 			if i >= len(args) {
@@ -668,6 +678,15 @@ func captureCommand(paths app.Paths, args []string) error {
 		ClaudeBin:     opts.ClaudeBin,
 		ClaudeArgs:    opts.ClaudeArgs,
 		NativeTLS:     nativeTLSEnabled(os.Getenv("CCWRAP_NATIVE_TLS")),
+		// Seed the flag/env TZ the same way parseLaunchArgs does for runClaude:
+		// CCWRAP_TZ is the default, --timezone (opts.Timezone) overrides it below.
+		// resolveEffectiveTimezone (after the migrate step) then folds in the
+		// persisted decision and validates. NoInit=true suppresses the first-run
+		// prompt, so capture stays non-interactive.
+		Timezone: strings.TrimSpace(os.Getenv("CCWRAP_TZ")),
+	}
+	if tz := strings.TrimSpace(opts.Timezone); tz != "" {
+		launch.Timezone = tz
 	}
 	if launch.ClaudeBin == "" {
 		launch.ClaudeBin = envDefault("CLAUDE_BIN", "claude")
@@ -698,6 +717,12 @@ func captureCommand(paths app.Paths, args []string) error {
 		fmt.Fprintf(os.Stderr, "ccwrap: ensure official profile: %v\n", err)
 	}
 	maybeMigrateFromEnv(paths.StateDir, os.Environ(), cwd, launch.ClaudeArgs, launch.NoInit)
+	// Align the captured child's timezone exactly like runClaude does: resolve
+	// --timezone/CCWRAP_TZ over the persisted decision and validate it. NoInit is
+	// true, so the first-run China-TZ prompt never fires; "" leaves the child env
+	// byte-identical to today's. This keeps a captured snapshot's stamped date
+	// consistent with a real ccwrap session's.
+	launch.Timezone = resolveEffectiveTimezone(paths.StateDir, launch.Timezone, os.Environ(), launch.NoInit)
 	profileOverlay, err := resolveLaunchProfile(profiles.DefaultPath(paths.StateDir), launch.Profile)
 	if err != nil {
 		return err

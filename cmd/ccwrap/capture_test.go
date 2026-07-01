@@ -80,6 +80,23 @@ func TestParseCaptureArgs_AllRejected(t *testing.T) {
 	}
 }
 
+func TestParseCaptureArgs_TimezoneFlag(t *testing.T) {
+	got, err := parseCaptureArgs([]string{"--timezone", "Europe/Berlin", "--", "-p", "hi"})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got.Timezone != "Europe/Berlin" {
+		t.Errorf("Timezone = %q; want Europe/Berlin", got.Timezone)
+	}
+	// The value must be consumed as the flag argument, not leak into ClaudeArgs.
+	if reflect.DeepEqual(got.ClaudeArgs, []string{"Europe/Berlin", "-p", "hi"}) {
+		t.Errorf("timezone value leaked into ClaudeArgs: %v", got.ClaudeArgs)
+	}
+	if _, err := parseCaptureArgs([]string{"--timezone"}); err == nil {
+		t.Fatalf("--timezone with no value must error")
+	}
+}
+
 func TestParseCaptureArgs_UserPromptOverridesProbe(t *testing.T) {
 	got, _ := parseCaptureArgs([]string{"--", "-p", "do a thing"})
 	if reflect.DeepEqual(got.ClaudeArgs, []string{"-p", "hello"}) {

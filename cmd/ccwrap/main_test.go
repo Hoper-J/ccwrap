@@ -1909,3 +1909,215 @@ func TestSP4a_AppendsToExistingFile(t *testing.T) {
 			f.Default, profiles.OfficialProfileName)
 	}
 }
+
+// --- Timezone alignment ------------------------------------------------------
+
+func TestIsChinaTimezone(t *testing.T) {
+	cases := []struct {
+		name   string
+		zone   string
+		offset int
+		want   bool
+	}{
+		{"shanghai name", "Asia/Shanghai", 28800, true},
+		{"urumqi name", "Asia/Urumqi", 21600, true}, // name wins over offset
+		{"los angeles name", "America/Los_Angeles", -28800, false},
+		{"tokyo +9 name", "Asia/Tokyo", 32400, false},
+		{"offset +8 fallback (no name)", "", 28800, true},
+		{"offset +9 no name", "", 32400, false},
+		{"empty", "", 0, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isChinaTimezone(tc.zone, tc.offset); got != tc.want {
+				t.Errorf("isChinaTimezone(%q, %d) = %v; want %v", tc.zone, tc.offset, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestResolveInjectedTimezone(t *testing.T) {
+	cases := []struct {
+		name                               string
+		flag, env, persisted, promptResult string
+		want                               string
+	}{
+		{"flag wins", "Asia/Tokyo", "Europe/Paris", "America/New_York", "America/Los_Angeles", "Asia/Tokyo"},
+		{"env over persisted+prompt", "", "Europe/Paris", "America/New_York", "America/Los_Angeles", "Europe/Paris"},
+		{"persisted over prompt", "", "", "America/New_York", "America/Los_Angeles", "America/New_York"},
+		{"prompt last", "", "", "", "America/Los_Angeles", "America/Los_Angeles"},
+		{"all empty", "", "", "", "", ""},
+		{"whitespace flag ignored", "   ", "Europe/Paris", "", "", "Europe/Paris"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveInjectedTimezone(tc.flag, tc.env, tc.persisted, tc.promptResult); got != tc.want {
+				t.Errorf("resolveInjectedTimezone(%q,%q,%q,%q) = %q; want %q",
+					tc.flag, tc.env, tc.persisted, tc.promptResult, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestResolveEffectiveTimezone_ValidAndInvalid(t *testing.T) {
+	// Non-TTY so no prompt fires; drive resolution via the flag/env slot.
+	restore := stubIsTerminal(false)
+	defer restore()
+
+	// Valid IANA → injected.
+	dir := t.TempDir()
+	if got := resolveEffectiveTimezone(dir, "America/Los_Angeles", []string{"PATH=/usr/bin"}, false); got != "America/Los_Angeles" {
+		t.Errorf("valid TZ: got %q; want America/Los_Angeles", got)
+	}
+
+	// Invalid IANA → warned + dropped (not injected).
+	dir2 := t.TempDir()
+	var got string
+	out := captureStderrFn(t, func() {
+		got = resolveEffectiveTimezone(dir2, "Not/AZone", []string{"PATH=/usr/bin"}, false)
+	})
+	if got != "" {
+		t.Errorf("invalid TZ: got %q; want empty (not injected)", got)
+	}
+	if !strings.Contains(out, "invalid timezone") {
+		t.Errorf("invalid TZ: stderr missing warning; got: %s", out)
+	}
+}
+
+func TestResolveEffectiveTimezone_PersistedSkipSentinel(t *testing.T) {
+	restore := stubIsTerminal(false)
+	defer restore()
+	dir := t.TempDir()
+	if err := writePersistedTimezone(dir, timezoneSkipSentinel); err != nil {
+		t.Fatalf("persist: %v", err)
+	}
+	if got := resolveEffectiveTimezone(dir, "", []string{"TZ=Asia/Shanghai"}, false); got != "" {
+		t.Errorf("skip sentinel: got %q; want empty (no injection)", got)
+	}
+}
+
+func TestTimezonePersistenceRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	// No decision yet.
+	if got := readPersistedTimezone(dir); got != "" {
+		t.Errorf("fresh state: got %q; want empty", got)
+	}
+	// Chosen value round-trips.
+	if err := writePersistedTimezone(dir, "America/Los_Angeles"); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if got := readPersistedTimezone(dir); got != "America/Los_Angeles" {
+		t.Errorf("round-trip value: got %q; want America/Los_Angeles", got)
+	}
+	// Skip sentinel round-trips.
+	if err := writePersistedTimezone(dir, timezoneSkipSentinel); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+	if got := readPersistedTimezone(dir); got != timezoneSkipSentinel {
+		t.Errorf("round-trip sentinel: got %q; want %q", got, timezoneSkipSentinel)
+	}
+}
+
+func TestMaybePromptTimezone_EnterDefault(t *testing.T) {
+	restore := stubIsTerminal(true)
+	defer restore()
+	dir := t.TempDir()
+	parent := []string{"TZ=Asia/Shanghai", "PATH=/usr/bin"}
+	var got string
+	captureStderrFn(t, func() {
+		got = maybePromptTimezone(dir, parent, false, strings.NewReader("\n"))
+	})
+	if got != defaultInjectTimezone {
+		t.Errorf("Enter: got %q; want %q", got, defaultInjectTimezone)
+	}
+	if p := readPersistedTimezone(dir); p != defaultInjectTimezone {
+		t.Errorf("Enter: persisted %q; want %q", p, defaultInjectTimezone)
+	}
+}
+
+func TestMaybePromptTimezone_CustomInput(t *testing.T) {
+	restore := stubIsTerminal(true)
+	defer restore()
+	dir := t.TempDir()
+	parent := []string{"TZ=Asia/Shanghai", "PATH=/usr/bin"}
+	var got string
+	captureStderrFn(t, func() {
+		got = maybePromptTimezone(dir, parent, false, strings.NewReader("Europe/Paris\n"))
+	})
+	if got != "Europe/Paris" {
+		t.Errorf("custom: got %q; want Europe/Paris", got)
+	}
+	if p := readPersistedTimezone(dir); p != "Europe/Paris" {
+		t.Errorf("custom: persisted %q; want Europe/Paris", p)
+	}
+}
+
+func TestMaybePromptTimezone_Skip(t *testing.T) {
+	restore := stubIsTerminal(true)
+	defer restore()
+	dir := t.TempDir()
+	parent := []string{"TZ=Asia/Shanghai", "PATH=/usr/bin"}
+	var got string
+	captureStderrFn(t, func() {
+		got = maybePromptTimezone(dir, parent, false, strings.NewReader("n\n"))
+	})
+	if got != timezoneSkipSentinel {
+		t.Errorf("skip: got %q; want %q", got, timezoneSkipSentinel)
+	}
+	if p := readPersistedTimezone(dir); p != timezoneSkipSentinel {
+		t.Errorf("skip: persisted %q; want %q", p, timezoneSkipSentinel)
+	}
+}
+
+func TestMaybePromptTimezone_NonChinaNoPrompt(t *testing.T) {
+	restore := stubIsTerminal(true)
+	defer restore()
+	dir := t.TempDir()
+	parent := []string{"TZ=America/Los_Angeles", "PATH=/usr/bin"}
+	// Reader would supply Enter, but a non-China zone must not prompt/persist.
+	got := maybePromptTimezone(dir, parent, false, strings.NewReader("\n"))
+	if got != "" {
+		t.Errorf("non-China: got %q; want empty (no prompt)", got)
+	}
+	if p := readPersistedTimezone(dir); p != "" {
+		t.Errorf("non-China: persisted %q; want empty (no write)", p)
+	}
+}
+
+func TestMaybePromptTimezone_NonTTYNoPrompt(t *testing.T) {
+	restore := stubIsTerminal(false)
+	defer restore()
+	dir := t.TempDir()
+	parent := []string{"TZ=Asia/Shanghai", "PATH=/usr/bin"}
+	got := maybePromptTimezone(dir, parent, false, strings.NewReader("\n"))
+	if got != "" {
+		t.Errorf("non-TTY: got %q; want empty (no prompt)", got)
+	}
+	if p := readPersistedTimezone(dir); p != "" {
+		t.Errorf("non-TTY: persisted %q; want empty", p)
+	}
+}
+
+func TestMaybePromptTimezone_OptOut(t *testing.T) {
+	restore := stubIsTerminal(true)
+	defer restore()
+	dir := t.TempDir()
+	parent := []string{"TZ=Asia/Shanghai", "CCWRAP_NO_TZ_PROMPT=1", "PATH=/usr/bin"}
+	got := maybePromptTimezone(dir, parent, false, strings.NewReader("\n"))
+	if got != "" {
+		t.Errorf("opt-out: got %q; want empty (no prompt)", got)
+	}
+	if p := readPersistedTimezone(dir); p != "" {
+		t.Errorf("opt-out: persisted %q; want empty", p)
+	}
+}
+
+func TestParseLaunchArgs_TimezoneFlag(t *testing.T) {
+	got, err := parseLaunchArgs([]string{"--timezone", "Europe/Berlin"})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got.Timezone != "Europe/Berlin" {
+		t.Errorf("Timezone = %q; want Europe/Berlin", got.Timezone)
+	}
+}
