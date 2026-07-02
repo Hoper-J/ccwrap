@@ -264,10 +264,21 @@ func BuildChildEnv(parentEnv []string, proxyURL, caCertPath, caBundlePath string
 	for k, v := range modelEnv {
 		env[k] = v
 	}
+	// CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST declares "the host supplies the
+	// credentials via env" — current Claude Code enforces it as a credential
+	// lockdown, refusing every LOCAL credential source (stored claude.ai
+	// OAuth, the /login keychain key, settings apiKeyHelper) and failing 401s
+	// without offering re-login. Declare it only when the bootstrap actually
+	// puts a CCWRAP-owned credential in the child env; in every other posture
+	// (first-party passthrough, proxy-side override, fail-closed missing
+	// auth) the child must keep reaching its own local credentials or it
+	// launches with none at all. Env pollution is not lost by omitting the
+	// flag: the spawn scrub above and the generated-settings strip already
+	// close the routing/auth env paths on CCWRAP's side.
 	if authBootstrap.Enabled() {
 		env[authBootstrap.EnvKey] = authBootstrap.Value
+		env["CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"] = "1"
 	}
-	env["CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"] = "1"
 	for k, v := range InjectedEnv(proxyURL, caCertPath, caBundlePath) {
 		env[k] = v
 	}

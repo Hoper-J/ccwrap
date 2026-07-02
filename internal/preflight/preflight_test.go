@@ -38,15 +38,15 @@ func TestBuildChildEnvScrubsSensitiveVars(t *testing.T) {
 		"SSL_CERT_FILE=/etc/custom.pem",
 		"CLAUDE_CODE_SUBAGENT_MODEL=parent-subagent",
 		"CCWRAP_MODEL_ALIASES_JSON={\"claude-sonnet-4-6\":\"gateway/sonnet\"}",
+		"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1",
 	}
 	env := strings.Join(BuildChildEnv(parent, "http://127.0.0.1:4444", "/tmp/ca-cert.pem", "/tmp/ca-bundle.pem", nil, ChildAuthBootstrap{}, ""), "\n")
-	for _, forbidden := range []string{"ANTHROPIC_BASE_URL=", "ANTHROPIC_API_KEY=", "CLAUDE_CODE_USE_VERTEX=", "VERTEX_REGION_CLAUDE_3_5_HAIKU=", "HTTP_PROXY=http://corp-proxy:8080", "HTTPS_PROXY=http://corp-proxy:8443", "ALL_PROXY=", "SSL_CERT_FILE=/etc/custom.pem", "CCWRAP_MODEL_ALIASES_JSON="} {
+	for _, forbidden := range []string{"ANTHROPIC_BASE_URL=", "ANTHROPIC_API_KEY=", "CLAUDE_CODE_USE_VERTEX=", "VERTEX_REGION_CLAUDE_3_5_HAIKU=", "HTTP_PROXY=http://corp-proxy:8080", "HTTPS_PROXY=http://corp-proxy:8443", "ALL_PROXY=", "SSL_CERT_FILE=/etc/custom.pem", "CCWRAP_MODEL_ALIASES_JSON=", "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST="} {
 		if strings.Contains(env, forbidden) {
 			t.Fatalf("child env should scrub %s; got:\n%s", forbidden, env)
 		}
 	}
 	for _, required := range []string{
-		"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1",
 		"HTTPS_PROXY=http://127.0.0.1:4444",
 		"http_proxy=http://127.0.0.1:4444",
 		"NODE_EXTRA_CA_CERTS=/tmp/ca-cert.pem",
@@ -78,7 +78,6 @@ func TestBuildChildEnvAppliesTrustedModelEnvOverrides(t *testing.T) {
 	for _, required := range []string{
 		"CLAUDE_CODE_SUBAGENT_MODEL=settings-subagent",
 		"ANTHROPIC_DEFAULT_SONNET_MODEL=settings-sonnet",
-		"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1",
 	} {
 		if !strings.Contains(env, required) {
 			t.Fatalf("child env missing %s; got:\n%s", required, env)
@@ -713,6 +712,30 @@ func TestBuildChildEnvInjectsPlaceholderAuth(t *testing.T) {
 	}
 	if !strings.Contains(env, "ANTHROPIC_API_KEY=ccwrap-placeholder") {
 		t.Fatalf("placeholder auth missing from child env:\n%s", env)
+	}
+}
+
+// CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST tells Claude Code that the host
+// supplies its credentials via env; current Claude Code then refuses to
+// read ANY local credential source (stored claude.ai OAuth, the /login
+// keychain key, settings apiKeyHelper). CCWRAP may therefore declare it
+// ONLY when it actually injects a bootstrap credential — in every other
+// posture (first-party passthrough, proxy-side override, fail-closed
+// missing auth) the child must keep reaching its own local credentials
+// or it launches with none at all ("Not logged in", /login cannot heal).
+func TestManagedByHostFlagFollowsAuthBootstrap(t *testing.T) {
+	// No bootstrap (e.g. first-party passthrough): the flag must be absent,
+	// and an ambient copy from the parent env must still be scrubbed.
+	parent := []string{"PATH=/usr/bin", "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1"}
+	env := strings.Join(BuildChildEnv(parent, "http://127.0.0.1:4444", "/tmp/ca-cert.pem", "/tmp/ca-bundle.pem", nil, ChildAuthBootstrap{}, ""), "\n")
+	if strings.Contains(env, "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=") {
+		t.Fatalf("flag must not be declared when CCWRAP supplies no credential:\n%s", env)
+	}
+
+	// Bootstrap active (CCWRAP-owned auth): the contract is true, declare it.
+	env = strings.Join(BuildChildEnv(parent, "http://127.0.0.1:4444", "/tmp/ca-cert.pem", "/tmp/ca-bundle.pem", nil, ChildAuthBootstrap{EnvKey: "ANTHROPIC_AUTH_TOKEN", Value: "ccwrap-placeholder"}, ""), "\n")
+	if !strings.Contains(env, "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1") {
+		t.Fatalf("flag missing while CCWRAP owns the child credential:\n%s", env)
 	}
 }
 

@@ -472,7 +472,7 @@ Activity 区是单一的实时列表 + 类别筛选器：
 
 Claude 和它继承的子进程启动时会带上：
 
-- `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1`
+- `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1` —— **仅在 ccwrap 拥有上游凭据时注入**（profile 声明了 auth → 占位符 bootstrap）。当前版本的 Claude Code 会把这个 flag 理解成"凭据由宿主供给"，从而完全不再读取本地凭据（钥匙串里的订阅 OAuth、`/login` 存的 key、`apiKeyHelper`），所以一方透传时 ccwrap 不注入它，你的订阅登录照常工作
 - `HTTPS_PROXY` / `https_proxy` / `HTTP_PROXY` / `http_proxy` → 会话代理
 - `NODE_EXTRA_CA_CERTS` → ccwrap 的根证书
 - 复合 CA bundle env（`系统根 + ccwrap 根`）给 Python / curl / Git
@@ -577,7 +577,7 @@ State：
 - 仪表盘/info 监听拒绝 `Host` header 非 loopback 形态的请求（DNS-rebinding 防护，HTTP 421）。隧道/反代主机名需用 `CCWRAP_WEB_ALLOWED_HOSTS` 显式放行
 - **经隧道访问 = 无鉴权仪表盘。** 一旦用 `CCWRAP_WEB_ALLOWED_HOSTS` 放行隧道/反代访问，**任何拿到该 URL 的人**都能读 `/recent`（请求元数据 + 脱敏 body）、抓取页面里的 CSRF token 并驱动 mutation（切 profile、改 alias、开关抓取）。凭据已脱敏，但 prompt / response body、profile 名、上游 host 都是明文——只在受信网络 / 受信隧道上开放，别把该 URL 贴到公开处
 - Linux 上 `XDG_RUNTIME_DIR` 未设时，runtime 目录 fallback 到 `/tmp/ccwrap-<uid>`，其中的请求/响应 body 是**明文落盘**（文件 `0600`、目录 `0700`，同机他人读不到，会话结束即清）；裸 SSH / `su` 等场景建议设 `XDG_RUNTIME_DIR`
-- 注入 `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1` 后，Claude-protected env key（proxy、CA）不会被 Claude 自己的设置源覆盖；例外是"企业 proxy / CA 注意事项"里列的那几类不受保护
+- ccwrap 拥有上游凭据时会注入 `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1`，此时 Claude-protected env key（proxy、CA）不会被 Claude 自己的设置源覆盖；例外是"企业 proxy / CA 注意事项"里列的那几类不受保护。一方透传时不注入该 flag（当前版本的 Claude Code 会因它彻底拒读本地登录凭据）；路由/auth 的 env 通路仍由 ccwrap 自己的 spawn 清洗和生成 settings 剥离兜住
 - 会话监听只服务 `/`、`/healthz`、`/recent`、`/recent/body`、`/events`、`/native-tls`、`/native-tls/clienthello.bin`，加上 `/profile/*` 下的 profile API endpoint 和抓取开关 `/capture/bodies`、`/capture/telemetry`。其他路径返回 404
 
 ## TODO

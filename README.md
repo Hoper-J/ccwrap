@@ -472,7 +472,7 @@ Live updates flow via SSE (`/events`).
 
 Claude and inherited child processes are launched with:
 
-- `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1`
+- `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1` — **only when ccwrap owns the upstream credential** (profile-declared auth → placeholder bootstrap). Current Claude Code treats this flag as "credentials come from the host" and stops reading local credentials entirely (stored subscription OAuth, the `/login` key, `apiKeyHelper`), so in first-party passthrough ccwrap omits it and your subscription login keeps working
 - `HTTPS_PROXY` / `https_proxy` / `HTTP_PROXY` / `http_proxy` → session proxy
 - `NODE_EXTRA_CA_CERTS` → ccwrap root certificate
 - a composite CA bundle env (`system roots + ccwrap root`) for Python / curl / Git
@@ -577,7 +577,7 @@ Default `<runtime>` and `<state>`:
 - The dashboard/info listener refuses requests whose `Host` header is not loopback-shaped (DNS-rebinding guard, HTTP 421). Tunnel / reverse-proxy hostnames must be allowlisted explicitly via `CCWRAP_WEB_ALLOWED_HOSTS`.
 - **Tunneled access = an unauthenticated dashboard.** Once you allowlist tunnel / reverse-proxy access via `CCWRAP_WEB_ALLOWED_HOSTS`, **anyone with the URL** can read `/recent` (request metadata + redacted bodies), scrape the CSRF token from the page, and drive mutations (switch profiles, edit aliases, toggle capture). Credentials are redacted, but prompt / response bodies, profile names, and upstream hosts are plaintext — only expose it on a trusted network / trusted tunnel, and don't post the URL anywhere public.
 - On Linux, when `XDG_RUNTIME_DIR` is unset the runtime dir falls back to `/tmp/ccwrap-<uid>`, where request/response bodies are written **in plaintext** (files `0600`, dirs `0700` — not readable by others on the machine, cleared when the session ends); set `XDG_RUNTIME_DIR` on bare SSH / `su` setups.
-- With `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1` injected, Claude-protected env keys (proxy, CA) cannot be overridden by Claude's own settings sources — except for the unprotected categories listed under "Enterprise proxy / CA notes."
+- When ccwrap owns the upstream credential it injects `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1`, and Claude-protected env keys (proxy, CA) cannot be overridden by Claude's own settings sources — except for the unprotected categories listed under "Enterprise proxy / CA notes." In first-party passthrough the flag is omitted (current Claude Code would otherwise refuse local login credentials entirely); ccwrap's spawn scrub and generated-settings sanitisation still close the routing/auth env paths on ccwrap's side.
 - The session listener only serves `/`, `/healthz`, `/recent`, `/recent/body`, `/events`, `/native-tls`, `/native-tls/clienthello.bin`, plus the profile API endpoints under `/profile/*` and the capture toggles `/capture/bodies` and `/capture/telemetry`. Other paths return 404.
 
 ## TODO
