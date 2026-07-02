@@ -48,22 +48,48 @@ var providerControlKeys = map[string]struct{}{
 	"CLAUDE_CODE_USE_BEDROCK":              {},
 	"CLAUDE_CODE_USE_VERTEX":               {},
 	"CLAUDE_CODE_USE_FOUNDRY":              {},
+	"CLAUDE_CODE_USE_ANTHROPIC_AWS":        {},
+	"CLAUDE_CODE_USE_MANTLE":               {},
+	"CLAUDE_CODE_USE_GATEWAY":              {},
 	"ANTHROPIC_BASE_URL":                   {},
 	"ANTHROPIC_BEDROCK_BASE_URL":           {},
 	"ANTHROPIC_VERTEX_BASE_URL":            {},
 	"ANTHROPIC_FOUNDRY_BASE_URL":           {},
-	"ANTHROPIC_FOUNDRY_RESOURCE":           {},
-	"ANTHROPIC_VERTEX_PROJECT_ID":          {},
-	"CLOUD_ML_REGION":                      {},
-	"ANTHROPIC_API_KEY":                    {},
-	"ANTHROPIC_AUTH_TOKEN":                 {},
-	"CLAUDE_CODE_OAUTH_TOKEN":              {},
-	"AWS_BEARER_TOKEN_BEDROCK":             {},
-	"ANTHROPIC_FOUNDRY_API_KEY":            {},
-	"CLAUDE_CODE_SKIP_BEDROCK_AUTH":        {},
-	"CLAUDE_CODE_SKIP_VERTEX_AUTH":         {},
-	"CLAUDE_CODE_SKIP_FOUNDRY_AUTH":        {},
-	"ANTHROPIC_BEDROCK_SERVICE_TIER":       {},
+	"ANTHROPIC_AWS_BASE_URL":               {},
+	"ANTHROPIC_BEDROCK_MANTLE_BASE_URL":    {},
+	// Treats any custom base URL as the first-party endpoint — inert in the
+	// child today (ANTHROPIC_BASE_URL is scrubbed) but it flips Claude's
+	// first-party detection and is injectable via the host-creds channel.
+	"_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL": {},
+	// Redirects the artifacts side traffic independently of the main API
+	// base URL, so scrubbing ANTHROPIC_BASE_URL alone does not cover it.
+	"CLAUDE_CODE_ARTIFACTS_API_BASE_URL":  {},
+	"ANTHROPIC_FOUNDRY_RESOURCE":          {},
+	"ANTHROPIC_VERTEX_PROJECT_ID":         {},
+	"ANTHROPIC_AWS_WORKSPACE_ID":          {},
+	"CLOUD_ML_REGION":                     {},
+	"ANTHROPIC_API_KEY":                   {},
+	"ANTHROPIC_AUTH_TOKEN":                {},
+	"CLAUDE_CODE_OAUTH_TOKEN":             {},
+	"AWS_BEARER_TOKEN_BEDROCK":            {},
+	"ANTHROPIC_FOUNDRY_API_KEY":           {},
+	"ANTHROPIC_AWS_API_KEY":               {},
+	"ANTHROPIC_BEDROCK_MANTLE_API_KEY":    {},
+	"CLAUDE_CODE_SKIP_BEDROCK_AUTH":       {},
+	"CLAUDE_CODE_SKIP_VERTEX_AUTH":        {},
+	"CLAUDE_CODE_SKIP_FOUNDRY_AUTH":       {},
+	"CLAUDE_CODE_SKIP_ANTHROPIC_AWS_AUTH": {},
+	"CLAUDE_CODE_SKIP_MANTLE_AUTH":        {},
+	"ANTHROPIC_BEDROCK_SERVICE_TIER":      {},
+	// Host-auth channel: HOST_CREDS_FILE is only honoured when
+	// CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST is set — which CCWRAP itself sets
+	// in placeholder sessions — and then injects base URLs and credentials
+	// inside the child, past the spawn scrub. HOST_AUTH_ENV_VAR flips
+	// Claude's host-managed semantics on its own, without the flag.
+	"CLAUDE_CODE_HOST_AUTH_ENV_VAR":            {},
+	"CLAUDE_CODE_HOST_CREDS_FILE":              {},
+	"CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH":    {},
+	"CLAUDE_CODE_HOST_AUTH_REFRESH_TIMEOUT_MS": {},
 }
 
 var providerControlPrefixes = []string{

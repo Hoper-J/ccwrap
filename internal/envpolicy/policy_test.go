@@ -120,6 +120,46 @@ func TestCertStoreIsTrustKeyAndBedrockServiceTierIsProviderControl(t *testing.T)
 	}
 }
 
+// The anthropic_aws / mantle / gateway provider families, the two extra
+// base-URL overrides, and the host-auth channel keys are all provider
+// selection/routing/auth controls in the Claude Code reference set. Ambient
+// copies must never reach the child: the provider switches reroute the whole
+// session past CCWRAP's launch contract, ARTIFACTS_API_BASE_URL redirects a
+// side traffic flow independently of ANTHROPIC_BASE_URL, and the host-auth
+// keys open credential channels inside the child (HOST_CREDS_FILE is armed
+// by the very MANAGED_BY_HOST flag CCWRAP sets in placeholder sessions;
+// HOST_AUTH_ENV_VAR flips Claude's host-managed semantics all by itself).
+func TestProviderFamiliesAndHostAuthChannelAreProviderControls(t *testing.T) {
+	for _, key := range []string{
+		"CLAUDE_CODE_USE_ANTHROPIC_AWS",
+		"ANTHROPIC_AWS_BASE_URL",
+		"ANTHROPIC_AWS_API_KEY",
+		"ANTHROPIC_AWS_WORKSPACE_ID",
+		"CLAUDE_CODE_SKIP_ANTHROPIC_AWS_AUTH",
+		"CLAUDE_CODE_USE_MANTLE",
+		"ANTHROPIC_BEDROCK_MANTLE_BASE_URL",
+		"ANTHROPIC_BEDROCK_MANTLE_API_KEY",
+		"CLAUDE_CODE_SKIP_MANTLE_AUTH",
+		"CLAUDE_CODE_USE_GATEWAY",
+		"_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL",
+		"CLAUDE_CODE_ARTIFACTS_API_BASE_URL",
+		"CLAUDE_CODE_HOST_AUTH_ENV_VAR",
+		"CLAUDE_CODE_HOST_CREDS_FILE",
+		"CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH",
+		"CLAUDE_CODE_HOST_AUTH_REFRESH_TIMEOUT_MS",
+	} {
+		if !IsProviderControlKey(key) {
+			t.Fatalf("expected %s to be a provider control key", key)
+		}
+		if !IsSpawnScrubKey(key) {
+			t.Fatalf("expected %s to be spawn-scrubbed", key)
+		}
+		if !IsGeneratedSessionSettingsStripKey(key) {
+			t.Fatalf("expected %s to be stripped from generated settings", key)
+		}
+	}
+}
+
 func TestOTELEndpointsAreManagedNetworkTrustKeys(t *testing.T) {
 	for _, key := range []string{
 		"OTEL_EXPORTER_OTLP_ENDPOINT",
