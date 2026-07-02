@@ -24,6 +24,7 @@ var trustKeys = map[string]struct{}{
 	"CURL_CA_BUNDLE":                      {},
 	"GIT_SSL_CAINFO":                      {},
 	"NODE_TLS_REJECT_UNAUTHORIZED":        {},
+	"CLAUDE_CODE_CERT_STORE":              {},
 	"OTEL_EXPORTER_OTLP_ENDPOINT":         {},
 	"OTEL_EXPORTER_OTLP_LOGS_ENDPOINT":    {},
 	"OTEL_EXPORTER_OTLP_METRICS_ENDPOINT": {},
@@ -62,6 +63,7 @@ var providerControlKeys = map[string]struct{}{
 	"CLAUDE_CODE_SKIP_BEDROCK_AUTH":        {},
 	"CLAUDE_CODE_SKIP_VERTEX_AUTH":         {},
 	"CLAUDE_CODE_SKIP_FOUNDRY_AUTH":        {},
+	"ANTHROPIC_BEDROCK_SERVICE_TIER":       {},
 }
 
 var providerControlPrefixes = []string{
@@ -73,6 +75,14 @@ var providerControlPrefixes = []string{
 // intent by injecting them into the child process env after sanitising settings.
 var modelPreferenceKeys = map[string]struct{}{
 	"ANTHROPIC_MODEL":                                       {},
+	"ANTHROPIC_CUSTOM_MODEL_OPTION":                         {},
+	"ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION":             {},
+	"ANTHROPIC_CUSTOM_MODEL_OPTION_NAME":                    {},
+	"ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES":  {},
+	"ANTHROPIC_DEFAULT_FABLE_MODEL":                         {},
+	"ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION":             {},
+	"ANTHROPIC_DEFAULT_FABLE_MODEL_NAME":                    {},
+	"ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES":  {},
 	"ANTHROPIC_DEFAULT_HAIKU_MODEL":                         {},
 	"ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION":             {},
 	"ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME":                    {},

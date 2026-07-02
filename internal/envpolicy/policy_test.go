@@ -72,6 +72,54 @@ func TestCCWRAPInternalKeysAreScrubbedFromChildAndGeneratedSettings(t *testing.T
 	}
 }
 
+// The Fable model tier and the custom-model-option catalog keys are model
+// preferences like the existing tiers and must flow the same way — preserved
+// into the child env (NOT spawn-scrubbed) but stripped from generated
+// session settings.
+func TestFableAndCustomModelOptionKeysAreModelPreferences(t *testing.T) {
+	for _, key := range []string{
+		"ANTHROPIC_DEFAULT_FABLE_MODEL",
+		"ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION",
+		"ANTHROPIC_DEFAULT_FABLE_MODEL_NAME",
+		"ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES",
+		"ANTHROPIC_CUSTOM_MODEL_OPTION",
+		"ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION",
+		"ANTHROPIC_CUSTOM_MODEL_OPTION_NAME",
+		"ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES",
+	} {
+		if !IsModelPreferenceKey(key) {
+			t.Fatalf("expected %s to be a model preference key", key)
+		}
+		if IsSpawnScrubKey(key) {
+			t.Fatalf("%s is user model intent and must survive into the child env", key)
+		}
+		if !IsGeneratedSessionSettingsStripKey(key) {
+			t.Fatalf("expected %s to be stripped from generated settings", key)
+		}
+	}
+}
+
+// CLAUDE_CODE_CERT_STORE selects the child's certificate store — a
+// trust-surface control that must not bypass the CCWRAP-pinned CA;
+// ANTHROPIC_BEDROCK_SERVICE_TIER is a provider tuning control that belongs
+// with the Bedrock switches.
+func TestCertStoreIsTrustKeyAndBedrockServiceTierIsProviderControl(t *testing.T) {
+	if !IsTrustKey("CLAUDE_CODE_CERT_STORE") {
+		t.Fatal("expected CLAUDE_CODE_CERT_STORE to be a trust key")
+	}
+	if !IsProviderControlKey("ANTHROPIC_BEDROCK_SERVICE_TIER") {
+		t.Fatal("expected ANTHROPIC_BEDROCK_SERVICE_TIER to be a provider control key")
+	}
+	for _, key := range []string{"CLAUDE_CODE_CERT_STORE", "ANTHROPIC_BEDROCK_SERVICE_TIER"} {
+		if !IsSpawnScrubKey(key) {
+			t.Fatalf("expected %s to be spawn-scrubbed", key)
+		}
+		if !IsGeneratedSessionSettingsStripKey(key) {
+			t.Fatalf("expected %s to be stripped from generated settings", key)
+		}
+	}
+}
+
 func TestOTELEndpointsAreManagedNetworkTrustKeys(t *testing.T) {
 	for _, key := range []string{
 		"OTEL_EXPORTER_OTLP_ENDPOINT",
