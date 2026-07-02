@@ -5,25 +5,28 @@ import (
 	"strings"
 )
 
-// versionBase is the semver baseline. For local/dev builds it is the
-// source-declared default below and debug.ReadBuildInfo appends the git
-// short-SHA and a +dirty suffix from the VCS info Go embeds during
-// `go build`. For tagged releases the GoReleaser pipeline overrides it via
-// -ldflags "-X main.versionBase={{.Version}}" so `ccwrap version` reports the
-// release tag (e.g. 0.2.0) instead of this baseline. It is a var (not const)
-// precisely so the linker can set it; do not make it const.
-var versionBase = "0.1.0"
+// versionBase is the linker injection point for the release pipeline:
+// GoReleaser sets -ldflags "-X main.versionBase={{.Version}}" so released
+// binaries report the tag (plus the +SHA metadata appended below). The source
+// default is a sentinel, NOT a maintained baseline — every other build shape
+// derives its version automatically from debug.ReadBuildInfo, so nothing here
+// needs bumping at release time. It is a var (not const) precisely so the
+// linker can set it; do not make it const.
+var versionBase = "0.0.0"
 
-// versionString returns a semver-2.0 compliant version with build
-// metadata appended:
+// versionString returns a semver-2.0 compliant version. Derivation order:
 //
-//	0.1.0                       — clean build, no VCS info available
-//	0.1.0+9944cdc               — built from a clean working tree
-//	0.1.0+9944cdc.dirty         — built with uncommitted changes
+//	0.1.1+9944cdc[.dirty]                        — release build (linker-injected tag + VCS SHA)
+//	0.1.1                                        — `go install module@v0.1.1`
+//	0.1.1 / 0.1.2-0.20260702…-9944cdc[+dirty]    — in-tree `go build`, Go ≥1.24 VCS stamp
+//	                                               (exact tag, or pseudo-version past it)
+//	0.0.0+9944cdc[.dirty]                        — in-tree build without a stamp
+//	                                               (older toolchain or -buildvcs=false)
+//	0.0.0                                        — no build info at all
 //
-// The "+" separator marks build metadata per semver 2.0 §10 (build
-// metadata is ignored when determining version precedence — fine, the
-// short-SHA is for telemetry / bug reports, not ordering).
+// The "+" separator marks build metadata per semver 2.0 §10 (build metadata
+// is ignored when determining version precedence — fine, the short-SHA is for
+// telemetry / bug reports, not ordering).
 func versionString() string {
 	info, ok := debug.ReadBuildInfo()
 	return formatVersion(info, ok)
@@ -47,15 +50,17 @@ func formatVersion(info *debug.BuildInfo, ok bool) string {
 			}
 		}
 	}
-	if rev == "" {
-		// `go install module@vX.Y.Z` embeds the module version but no VCS
-		// settings — report the tag (e.g. 0.2.0) instead of the source
-		// baseline. An in-tree `go build` sets rev (handled below); a
-		// GoReleaser build sets versionBase via ldflags and Main.Version is
-		// "(devel)", so it falls through to versionBase.
+	if versionBase == "0.0.0" {
+		// No linker injection. Go stamps Main.Version for `go install
+		// module@vX.Y.Z` and, since Go 1.24, for in-tree `go build` too. The
+		// stamp already encodes the commit (pseudo-version) and dirtiness
+		// ("+dirty"), so report it verbatim instead of decorating it with a
+		// second SHA.
 		if v := strings.TrimPrefix(info.Main.Version, "v"); v != "" && info.Main.Version != "(devel)" {
 			return v
 		}
+	}
+	if rev == "" {
 		return versionBase
 	}
 	short := rev

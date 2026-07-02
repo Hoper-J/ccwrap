@@ -29,15 +29,15 @@ func TestVersionBase_IsSemverShape(t *testing.T) {
 }
 
 // TestVersionString_NeverEmpty — the formatter must always return a
-// non-empty string. The fallback (no VCS info) returns versionBase
-// alone, which is enough for `ccwrap version` to print something.
+// non-empty string without a leading "v" (the module-version prefix is
+// stripped), whichever derivation path the test binary happened to take.
 func TestVersionString_NeverEmpty(t *testing.T) {
 	v := versionString()
 	if v == "" {
 		t.Fatal("versionString returned empty string")
 	}
-	if !strings.HasPrefix(v, versionBase) {
-		t.Errorf("versionString %q must start with versionBase %q", v, versionBase)
+	if strings.HasPrefix(v, "v") {
+		t.Errorf("versionString %q must not keep the module-version 'v' prefix", v)
 	}
 }
 
@@ -96,33 +96,28 @@ func TestHelpDispatchEarly(t *testing.T) {
 	}
 }
 
-// TestVersionString_BuildMetadataFormat — when VCS info is present
-// (typical for go-built binaries from a git checkout), the string
-// looks like "0.1.0+SHA" or "0.1.0+SHA.dirty". Either matches the
-// "MAJOR.MINOR.PATCH" prefix followed by an optional "+" build
-// metadata segment.
-func TestVersionString_BuildMetadataFormat(t *testing.T) {
+// TestVersionString_StartsWithSemverDigits — whichever derivation path the
+// test binary took (stamped module version, linker injection, or the
+// sentinel fallback), the string must start with a MAJOR.MINOR.PATCH core so
+// downstream tooling that splits on "+"/"-" gets a parseable prefix.
+func TestVersionString_StartsWithSemverDigits(t *testing.T) {
 	v := versionString()
-	if v == versionBase {
-		return // no VCS info — fallback path, nothing more to check
+	core := v
+	if i := strings.IndexAny(core, "-+"); i >= 0 {
+		core = core[:i]
 	}
-	plus := strings.Index(v, "+")
-	if plus < 0 {
-		t.Fatalf("expected '+' separator when VCS info present, got %q", v)
+	parts := strings.Split(core, ".")
+	if len(parts) != 3 {
+		t.Fatalf("version %q core %q is not MAJOR.MINOR.PATCH", v, core)
 	}
-	if v[:plus] != versionBase {
-		t.Errorf("prefix %q != versionBase %q", v[:plus], versionBase)
-	}
-	meta := v[plus+1:]
-	if meta == "" {
-		t.Errorf("empty build metadata after '+': %q", v)
-	}
-	// SHA portion is hex; .dirty suffix is optional.
-	sha := strings.TrimSuffix(meta, ".dirty")
-	for _, c := range sha {
-		isHex := (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
-		if !isHex {
-			t.Errorf("non-hex char %q in SHA portion of %q", c, v)
+	for _, p := range parts {
+		if p == "" {
+			t.Fatalf("version %q has empty core component", v)
+		}
+		for _, c := range p {
+			if c < '0' || c > '9' {
+				t.Fatalf("version %q core component %q has non-digit %q", v, p, c)
+			}
 		}
 	}
 }
@@ -146,9 +141,32 @@ func TestFormatVersion_DevelFallsBackToBase(t *testing.T) {
 	}
 }
 
-// TestFormatVersion_VCSRevisionWins — an in-tree VCS revision takes precedence
-// over Main.Version (the dev-build path) and yields versionBase+SHA[.dirty].
-func TestFormatVersion_VCSRevisionWins(t *testing.T) {
+// TestFormatVersion_StampedVersionWinsOverVCSDecoration — Go ≥1.24 stamps
+// Main.Version for in-tree builds (exact tag, or a pseudo-version past it,
+// with +dirty when modified). The stamp already encodes commit and dirtiness,
+// so it is reported verbatim (minus the "v") instead of decorating the
+// baseline with a second SHA.
+func TestFormatVersion_StampedVersionWinsOverVCSDecoration(t *testing.T) {
+	info := &debug.BuildInfo{
+		Main: debug.Module{Version: "v0.1.1-0.20260702104853-94175b8ba737+dirty"},
+		Settings: []debug.BuildSetting{
+			{Key: "vcs.revision", Value: "94175b8ba737abcdef"},
+			{Key: "vcs.modified", Value: "true"},
+		},
+	}
+	if got := formatVersion(info, true); got != "0.1.1-0.20260702104853-94175b8ba737+dirty" {
+		t.Fatalf("stamped module version should be reported verbatim, got %q", got)
+	}
+}
+
+// TestFormatVersion_LinkerInjectionWins — the GoReleaser pipeline injects the
+// release tag via -X main.versionBase; that explicit intent beats the VCS
+// stamp (snapshots inject e.g. "0.1.2-snapshot-abc" while the stamp would be
+// an unrelated pseudo-version) and keeps the released "TAG+SHA" shape.
+func TestFormatVersion_LinkerInjectionWins(t *testing.T) {
+	saved := versionBase
+	versionBase = "0.5.0"
+	defer func() { versionBase = saved }()
 	info := &debug.BuildInfo{
 		Main: debug.Module{Version: "v9.9.9"},
 		Settings: []debug.BuildSetting{
@@ -156,7 +174,22 @@ func TestFormatVersion_VCSRevisionWins(t *testing.T) {
 			{Key: "vcs.modified", Value: "true"},
 		},
 	}
-	if got := formatVersion(info, true); got != versionBase+"+abcdef0.dirty" {
-		t.Fatalf("VCS revision should win, got %q", got)
+	if got := formatVersion(info, true); got != "0.5.0+abcdef0.dirty" {
+		t.Fatalf("linker-injected version should win with SHA metadata, got %q", got)
+	}
+}
+
+// TestFormatVersion_NoStampFallsBackToSentinelPlusSHA — old toolchains or
+// -buildvcs=false leave Main.Version at "(devel)"; the sentinel baseline is
+// decorated with the revision so the build is still identifiable.
+func TestFormatVersion_NoStampFallsBackToSentinelPlusSHA(t *testing.T) {
+	info := &debug.BuildInfo{
+		Main: debug.Module{Version: "(devel)"},
+		Settings: []debug.BuildSetting{
+			{Key: "vcs.revision", Value: "abcdef0123456"},
+		},
+	}
+	if got := formatVersion(info, true); got != versionBase+"+abcdef0" {
+		t.Fatalf("(devel) with VCS revision should decorate the sentinel, got %q", got)
 	}
 }
