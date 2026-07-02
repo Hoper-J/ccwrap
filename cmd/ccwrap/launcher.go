@@ -250,11 +250,10 @@ func (l *sessionLauncher) WriteSessionSettings() error {
 	}
 	authBootstrap := preflight.ChildAuthBootstrap{}
 	if l.pre.AuthBootstrap == model.AuthBootstrapPlaceholderActive {
-		placeholder, err := newAuthPlaceholder(l.sessionID)
-		if err != nil {
-			return fmt.Errorf("generate auth placeholder: %w", err)
+		authBootstrap = preflight.ChildAuthBootstrap{
+			EnvKey: l.pre.AuthBootstrapEnvKey,
+			Value:  newAuthPlaceholder(l.pre.ActiveProfileName),
 		}
-		authBootstrap = preflight.ChildAuthBootstrap{EnvKey: l.pre.AuthBootstrapEnvKey, Value: placeholder}
 	}
 	// l.launch.Timezone is the resolved + validated effective TZ (runClaude
 	// overwrote it via resolveEffectiveTimezone); "" means no override.

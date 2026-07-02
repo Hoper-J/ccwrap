@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -2093,12 +2094,37 @@ func fallbackText(v, d string) string {
 	return v
 }
 
-func newAuthPlaceholder(sessionID string) (string, error) {
-	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
+// newAuthPlaceholder returns the non-secret bootstrap credential injected
+// into the child env (hidden-auth contract: the session proxy replaces
+// upstream auth fail-closed, so this value carries no authority and gains
+// nothing from being unpredictable). It is stable per profile rather than
+// per session: interactive Claude Code gates env ANTHROPIC_API_KEY behind a
+// one-time approval keyed by the value's fingerprint (customApiKeyResponses
+// in ~/.claude.json), so a per-session random value re-triggered the
+// "Detected a custom API key" dialog on every launch.
+//
+// The child echoes the value back in x-api-key/Authorization headers to the
+// loopback proxy, so it must stay within header-safe token characters no
+// matter what the profile is named; the short digest keeps sanitized names
+// ("a b" vs "ab") and the no-profile sentinel from colliding.
+func newAuthPlaceholder(profileName string) string {
+	name := strings.TrimSpace(profileName)
+	if name == "" {
+		name = "<inherit-env>"
 	}
-	return "ccwrap-placeholder-" + sessionID + "-" + hex.EncodeToString(buf), nil
+	var safe strings.Builder
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-' {
+			safe.WriteRune(r)
+		}
+	}
+	sum := sha256.Sum256([]byte(name))
+	out := "ccwrap-placeholder-"
+	if safe.Len() > 0 {
+		out += safe.String() + "-"
+	}
+	return out + hex.EncodeToString(sum[:4])
 }
 
 func newID() string {
