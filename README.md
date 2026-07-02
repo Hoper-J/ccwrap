@@ -134,7 +134,27 @@ Ctrl+click the local URL after `inspect` in the launch banner to open the dashbo
 
    A vanilla Go forward would swap the TLS fingerprint for Go's `crypto/tls` one — undici-shaped headers under a Go fingerprint, and that mismatch is itself a tell. ccwrap uses [utls](https://github.com/refraction-networking/utls) to replay Claude Code's own ClientHello upstream byte-for-byte.
 
-7. **Read requests and responses**
+7. **Align the timezone so the request date doesn't reveal your region**
+
+   When Claude Code decides `ANTHROPIC_BASE_URL` points somewhere non-official, it steganographically encodes three identity bits into the `Today's date is …` line of the system prompt, using near-indistinguishable **apostrophe variants** (`'` U+0027 / `'` U+2019 / `ʼ` U+02BC / `ʹ` U+02B9) and the **date separator** (`-` swapped for `/`); one of them checks whether the system timezone is China (`Asia/Shanghai` / `Asia/Urumqi`).
+
+   Because that steganography is gated on `isFirstParty()`, ccwrap keeps Claude Code believing it talks straight to `api.anthropic.com`, so the whole path is skipped and the timezone bit is never written either.
+
+   On top of that, ccwrap optionally lets you set Claude Code's timezone to a non-China one (without touching your actual terminal environment), so the system timezone itself also falls outside that check — and it incidentally fixes the region tell where a UTC+8 date can be a day ahead of a US session.
+
+   The first run in a China timezone currently prompts:
+
+   ```text
+   ccwrap: 检测到当前为中国时区，Claude Code 会把本机当天日期写进请求，
+   ccwrap:   这可能暴露会话所在地区（+8 时区的日期可能比美国早一天）。
+   ccwrap:   (Detected a China timezone; the stamped date can reveal your region.)
+   ccwrap:   是否为 Claude Code 指定时区（让请求里的日期按该时区计算）？
+   ccwrap:   回车=America/Los_Angeles，或输入一个 IANA 时区名，输入 n 跳过：
+   ```
+
+   Enter accepts the default `America/Los_Angeles`, or type any [IANA](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) name (e.g. `Europe/Paris`), or `n` to skip. The choice is remembered and never re-prompted. You can also set it directly via `--timezone IANA` or `CCWRAP_TZ`; precedence is `--timezone` > `CCWRAP_TZ` > remembered choice > first-run prompt. An invalid zone warns and is ignored (no injection). `ccwrap capture` reuses the same alignment, so a captured snapshot's dates match a real session's.
+
+8. **Read requests and responses**
 
    With `--capture-bodies` (or the bodies checkbox in the dashboard), you can read every `/v1/messages` Claude Code emits, verbatim:
 
@@ -157,7 +177,7 @@ ccwrap stop       [--session ID | --all]
 ccwrap gc         [--json]
 ccwrap capture    [--with-tls|--tls-only] [--main-inference] [--full] [--headers]
                   [--no-response] [--unmask] [--host H] [--path P] [--timeout DUR]
-                  [--print-diff-filter] [--claude-bin PATH] [-- CLAUDE_ARGS]
+                  [--print-diff-filter] [--claude-bin PATH] [--timezone IANA] [-- CLAUDE_ARGS]
 ccwrap profile    {ls | status | switch <name> | test [name] | test-egress [name] |
                    add <name> | edit <name> | rm <name> | set-default <name>}
                   [--session ID]
@@ -179,7 +199,8 @@ Without a management subcommand, `ccwrap` launches Claude Code directly. In laun
 | `--capture-bodies` (or `CCWRAP_CAPTURE_BODIES=1`) | Capture request + response bodies for the inspector. Default OFF. Alias: `--capture-request-bodies`. |
 | `--capture-telemetry` (or `CCWRAP_CAPTURE_TELEMETRY=1`) | Transparently MITM Claude Code's allowlisted telemetry hosts (datadog us5, sentry) and capture those bodies for the inspector. Default OFF — telemetry is otherwise blind-tunneled. |
 | `--quiet` (or `CCWRAP_QUIET=1`) | Collapse the launch banner to one line (`ccwrap → host · profile · inspect URL`). Default off. |
-| `--no-init` (or `CCWRAP_NO_INIT=1`) | Skip the first-run env → profiles.json auto-migration prompt. Default off. |
+| `--timezone IANA` (or `CCWRAP_TZ`) | Set Claude Code's timezone so the request's `Today's date` is computed in that zone. The first run in a China timezone prompts whether to align to `America/Los_Angeles`; suppress the prompt with `CCWRAP_NO_TZ_PROMPT=1` or `--no-init`. No injection by default. |
+| `--no-init` (or `CCWRAP_NO_INIT=1`) | Skip the first-run env → profiles.json auto-migration prompt, and the first-run timezone prompt. Default off. |
 | `--allow-provider-model-passthrough` | Let Claude Code see provider-side model IDs. |
 | `--allow-auth-passthrough-to-third-party` | Debug-only: let Claude-side auth pass through to a third-party upstream. |
 
@@ -403,6 +424,8 @@ ccwrap capture --print-diff-filter                # canonical jq filter that str
 
 Everything after `--` is passed to Claude verbatim (always pass `-p "..."` so exactly one exchange fires and capture exits). Credential headers are masked structure-preservingly by default; `--unmask` emits credential VALUES in cleartext for BOTH request headers and OAuth body fields (`refresh_token`/`access_token`) — nothing is redacted, so don't share the output. stdout carries only the JSON; progress and errors go to stderr. Under `--main-inference`, if the real inference never lands, the relaxed fallback still emits the closest exchange and flags the degradation in `meta.notes`.
 
+`ccwrap capture` also aligns the timezone like a normal session (`--timezone` / `CCWRAP_TZ` / the remembered choice), but being non-interactive it never shows the first-run prompt.
+
 </details>
 
 ## Activity feed
@@ -481,7 +504,9 @@ User-facing:
 | `CCWRAP_QUIET=1` | Collapse the launch banner to one line (= `--quiet`). Default off. |
 | `CCWRAP_KEEP_CLAUDE_METADATA=1` | Disable Claude Code system-prompt stripping on non-claude-* upstreams. |
 | `CCWRAP_UNMASK_CREDENTIALS=1` | ⚠ Disable header + body credential redaction in the inspector. ccwrap prints a stderr warning. |
-| `CCWRAP_NO_INIT=1` | Skip the first-run auto-migration prompt (env → profiles.json). |
+| `CCWRAP_TZ` | Timezone injected into Claude Code (= `--timezone`). `--timezone` wins. |
+| `CCWRAP_NO_TZ_PROMPT=1` | Suppress only the first-run timezone prompt (keeps the profiles-migration prompt). |
+| `CCWRAP_NO_INIT=1` | Skip the first-run auto-migration prompt (env → profiles.json) and the timezone prompt. |
 
 Internal / advanced:
 
