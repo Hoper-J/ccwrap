@@ -1,8 +1,13 @@
-# ccwrap
+<h1 align="center">ccwrap</h1>
 
-English · [简体中文](README.zh-CN.md)
+<p align="center">English · <a href="README.zh-CN.md">简体中文</a></p>
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![npm](https://img.shields.io/npm/v/@hoper-j/ccwrap)](https://www.npmjs.com/package/@hoper-j/ccwrap)
+<p align="center">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
+  <a href="https://www.npmjs.com/package/@hoper-j/ccwrap"><img alt="npm" src="https://img.shields.io/npm/v/@hoper-j/ccwrap"></a>
+  <a href="https://github.com/Hoper-J/ccwrap/releases"><img alt="Release" src="https://img.shields.io/github/v/release/Hoper-J/ccwrap"></a>
+  <a href="https://github.com/Hoper-J/ccwrap/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Hoper-J/ccwrap/actions/workflows/ci.yml/badge.svg"></a>
+</p>
 
 ccwrap owns the network boundary between Claude Code and the upstream API: it routes to any Anthropic-compatible gateway while keeping Claude Code on what it believes is the first-party path, swaps models per provider, and inspects every request and response.
 
@@ -74,6 +79,16 @@ Ctrl+click the local URL after `inspect` in the launch banner to open the dashbo
 1. **Make Claude Code believe it's talking to `api.anthropic.com`**
 
    For cost, region, self-hosted model, or compliance reasons, you sometimes need to route Claude Code to an Anthropic-compatible gateway. ccwrap keeps Claude Code's behavior matched to that choice, instead of silently downgrading the request body because the first-party check didn't pass.
+
+   For example, on a third-party path Claude Code drops some request features — e.g. `advanced-tool-use` — and inlines every MCP tool (spending a lot of tokens) instead of lazy-loading them via `ToolSearch`, which can nearly double the first request's tokens:
+
+   | Official | ccwrap disguise | Plain third-party |
+   | --- | --- | --- |
+   | ![image-20260701145024608](assets/20260701160500187.png) | ![image-20260701144101020](assets/20260701160452215.png) | ![image-20260701143808100](assets/20260701160456859.png) |
+
+   The clip below (built on 2.1.193, capturing `claude -p hi` from an official subscription account vs. a plain third-party path) shows the third-party first request carrying up to 82% more tokens:
+
+   ![Third-Party Downgrade](assets/third-party-downgrade-en.webp)
 
 2. **Model aliases**
 
