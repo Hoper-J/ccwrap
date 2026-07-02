@@ -1,6 +1,9 @@
 package main
 
 import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Hoper-J/ccwrap/internal/control"
 	"github.com/Hoper-J/ccwrap/internal/model"
+	"github.com/Hoper-J/ccwrap/internal/supervisor"
+	"github.com/Hoper-J/ccwrap/internal/testutil"
 )
 
 // recentServer is a stand-in for the per-session supervisor's HTTP surface
@@ -336,8 +342,138 @@ func TestRunCaptureLoop_ChildExitAborts(t *testing.T) {
 	}
 }
 
-// ensure url import is used even if a future edit drops the only reference.
-var _ = url.QueryEscape
+// TestRunCaptureLoop_MatesWithRealSupervisor is the mating proof between the
+// capture poller and the real per-session supervisor surface. The
+// TestRunCaptureLoop_* gates above pin the poller against an httptest
+// stand-in, which shares wire TYPES with the supervisor (internal/model) but
+// not SEMANTICS — if the recording behavior behind /recent drifts (when
+// BodyRef is set, how spilled bodies are served, what logical host/path a
+// record carries), the stand-in keeps passing while real `ccwrap capture`
+// breaks. This test closes that gap without the launcher scaffolding the
+// full E2E below needs: it boots a real supervisor in-process, drives a real
+// MITM round-trip through the session proxy (the same fixture
+// internal/supervisor's proxy_test locks), then points runCaptureLoop at the
+// session's REAL listener — the exact base URL captureCommand derives.
+func TestRunCaptureLoop_MatesWithRealSupervisor(t *testing.T) {
+	paths := testutil.ShortAppPaths(t, "m.sock")
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: message_start\ndata: {}\n\n"))
+	}))
+	defer upstream.Close()
+
+	srv, err := supervisor.New(paths, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Run(ctx) }()
+	// Deterministic teardown (LIFO: before cancel): the supervisor stops
+	// writing before ShortAppPaths' cleanup removes its directories.
+	defer func() { _ = srv.Shutdown(context.Background()) }()
+	client := control.NewClient(paths.SocketPath)
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer waitCancel()
+	if err := waitForControl(waitCtx, client); err != nil {
+		t.Fatal(err)
+	}
+
+	sess, err := client.CreateSession(context.Background(),
+		model.SessionCreateRequest{LauncherPID: os.Getpid(), Name: "capture-mating"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	up, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.SetRoute(context.Background(), sess.ID, model.SessionRouteRequest{
+		APIBaseURL:        upstream.URL,
+		RouteClass:        model.RouteClassThirdPartyHidden,
+		RouteSource:       model.RouteSourceExplicit,
+		AuthMode:          model.AuthModeOverrideXAPIKey,
+		AuthSource:        model.AuthSourceAnthropicAPIKey,
+		ExactUpstreamHost: up.Hostname(),
+		ExactUpstreamBase: upstream.URL,
+		FailPolicy:        model.FailClosed,
+		// The initial /route publish is authoritative for the launch-scoped
+		// toggles (setRoute takes the live half straight from the request), so
+		// body capture is enabled HERE — mirroring how captureCommand's
+		// CaptureBodies launch flag reaches the session. A pre-route
+		// SetCaptureBodies call would be clobbered by this publish, by design.
+		CaptureRequestBodies: true,
+		OverrideAuth: &model.AuthOverride{
+			Mode:        model.AuthModeOverrideXAPIKey,
+			Source:      model.AuthSourceAnthropicAPIKey,
+			HeaderName:  "X-API-Key",
+			HeaderValue: "sekret",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	pool := x509.NewCertPool()
+	pem, err := os.ReadFile(paths.CABundlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pool.AppendCertsFromPEM(pem) {
+		t.Fatal("append CA bundle")
+	}
+	proxyURL, err := url.Parse("http://" + sess.ProxyListenAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hc := &http.Client{Transport: &http.Transport{
+		Proxy:           http.ProxyURL(proxyURL),
+		TLSClientConfig: &tls.Config{RootCAs: pool},
+	}}
+	req, err := http.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages",
+		strings.NewReader(`{"model":"claude-x","max_tokens":7}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := hc.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected proxy round-trip status: %d", resp.StatusCode)
+	}
+
+	base := "http://" + sess.ProxyListenAddr
+	opts := captureOpts{Response: true, Host: "api.anthropic.com", Path: "/v1/messages"}
+	res, synthetic, err := runCaptureLoop(base, opts, time.Now().Add(10*time.Second), nil)
+	if err != nil {
+		t.Fatalf("runCaptureLoop against the real supervisor: %v", err)
+	}
+	if synthetic {
+		t.Fatal("a real MITM round-trip must not be reported synthetic")
+	}
+	if res.Request == nil || res.Request.Host != "api.anthropic.com" || res.Request.Path != "/v1/messages" {
+		t.Fatalf("request block mismatch: %+v", res.Request)
+	}
+	// Content-exact equality on the request body: capture stores the decoded
+	// value, so this proves the value round-trips losslessly through the real
+	// tee/bodystore/spill/serve path (re-marshal sorts keys, so the literal is
+	// key-sorted — this is value equality, not original-byte preservation). A
+	// Contains check would let truncation or a masking mutation slide.
+	b, _ := json.Marshal(res.Request.Body)
+	if string(b) != `{"max_tokens":7,"model":"claude-x"}` {
+		t.Fatalf("request body did not survive the real record/spill/poll path: %s", b)
+	}
+	if res.Response == nil || res.Response.BodyEncoding != "sse" || res.Response.Status != 200 {
+		t.Fatalf("response block mismatch: %+v", res.Response)
+	}
+	// Byte-exact on the response: SSE is carried as an opaque string, so this
+	// is true byte-for-byte preservation through the real tee/spill/poll path.
+	if got, ok := res.Response.Body.(string); !ok || got != "event: message_start\ndata: {}\n\n" {
+		t.Fatalf("response body did not survive the real tee/spill/poll path: %#v", res.Response.Body)
+	}
+}
 
 // TestCaptureCommand_FullLauncherE2E is the deferred end-to-end gate that would
 // run captureCommand with a real fake-claude --claude-bin that POSTs
@@ -358,11 +494,15 @@ var _ = url.QueryEscape
 //     performs a real MITM round-trip rather than emitting the auth-missing
 //     502 short-circuit.
 //
-// The deterministic acceptance gate for the orchestration is
-// TestRunCaptureLoop_* above, which exercises the exact polling/assembly logic
-// against an httptest stand-in for the session proxy without needing real
-// TLS/CA/launch. Landing the full launcher E2E would require exporting a
-// test-only upstream-remap + egress-trust seam from internal/supervisor.
+// The deterministic acceptance gates for the orchestration are
+// TestRunCaptureLoop_* above (polling/assembly against an httptest stand-in)
+// plus TestRunCaptureLoop_MatesWithRealSupervisor (the same poller against a
+// REAL in-process supervisor and a real MITM round-trip, so /recent recording
+// semantics cannot drift past the stand-in unnoticed). The only ground left
+// to this E2E is the launcher handoff itself — fake-claude spawn plus the
+// HTTPS_PROXY / NODE_EXTRA_CA_CERTS env injection. Landing it would require
+// exporting a test-only upstream-remap + egress-trust seam from
+// internal/supervisor.
 func TestCaptureCommand_FullLauncherE2E(t *testing.T) {
 	t.Skip("full fake-claude launcher E2E deferred: needs an exported upstream-remap + egress-trust test seam from internal/supervisor (see doc comment); runCaptureLoop httptest gate is the primary acceptance test")
 }

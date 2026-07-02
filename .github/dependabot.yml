@@ -1,0 +1,9 @@
+# The workflows pin actions to commit SHAs (tags are mutable, and the release
+# workflow holds NPM_TOKEN + id-token:write). Dependabot keeps those pins from
+# rotting: it PRs SHA bumps and rewrites the trailing `# vX.Y.Z` comments.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

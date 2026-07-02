@@ -8,12 +8,19 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same branch/PR supersedes the in-flight run; cancel it
+# instead of paying for both. github.ref is unique per branch and per PR.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "stable"
       - name: gofmt
@@ -31,12 +38,13 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "stable"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           # The web dashboard's behavioral tests (web.go) run the rendered JS
           # under a real `node` process and t.Skip silently when node is absent.
@@ -50,12 +58,13 @@ jobs:
 
   race:
     runs-on: ubuntu-latest
+    timeout-minutes: 30 # -race is several× slower than the plain suite
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "stable"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "lts/*" # web.go behavioral tests need node, else they t.Skip
       - name: test -race
@@ -65,9 +74,10 @@ jobs:
     # The distribution entry points (install.sh, the npm launcher) aren't covered
     # by `go test` but are exactly the files a user pipes into `sh` / runs via npx.
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "lts/*"
       - name: shellcheck install.sh
@@ -79,29 +89,46 @@ jobs:
 
   release-config:
     # Validate the release pipeline on every PR: `goreleaser check` catches a
-    # broken .goreleaser.yaml, and a snapshot build cross-compiles ALL targets
+    # broken .goreleaser.yaml, and a snapshot release cross-compiles ALL targets
     # (darwin/linux x amd64/arm64) — the host-only `test` job above would miss a
-    # linux/arm64 or darwin/amd64 cross-compile break.
+    # linux/arm64 or darwin/amd64 cross-compile break — and produces the real
+    # archives, so the npm staging step below can prove it still mates with them.
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "stable"
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "lts/*"
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
         with:
           distribution: goreleaser
           version: "~> 2"
           install-only: true
       - name: goreleaser check
         run: goreleaser check
-      - name: goreleaser build (snapshot, all platforms)
-        run: goreleaser build --snapshot --clean
+      - name: goreleaser release (snapshot — all platforms, real archives)
+        # Same skips as the local rehearsal documented in .goreleaser.yaml:
+        # signing/SBOM need CI identity + syft, and a snapshot has nothing to
+        # publish anyway.
+        run: goreleaser release --snapshot --clean --skip=publish,sign,sbom
+      - name: stage npm packages against the snapshot archives
+        # build-npm.mjs locates the tar.gz archives by reconstructing their
+        # name_template-derived filenames. Exercise that coupling here so a
+        # name_template (or build-npm) change fails on the PR — previously it
+        # was executed for the first time halfway through a real release.
+        run: |
+          version=$(node -p "require('./dist/metadata.json').version")
+          node scripts/build-npm.mjs "$version"
 
   govulncheck:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # Advisory, NOT a hard gate: govulncheck's findings against ccwrap are
     # exclusively Go standard-library CVEs reached via crypto/tls + crypto/x509
     # (zero in ccwrap's own code, zero in actually-called deps). Those clear by
@@ -111,8 +138,8 @@ jobs:
     # visibility (the log tells you which Go patch to bump to) without blocking.
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "stable"
       - name: govulncheck

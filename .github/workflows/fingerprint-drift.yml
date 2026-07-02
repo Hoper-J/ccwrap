@@ -6,6 +6,11 @@ name: Fingerprint Drift Watch
 # committed baseline goes stale. Normal CI skips the live check (it needs a real
 # node-undici process). This scheduled job runs it so drift surfaces proactively
 # instead of silently degrading anonymity in the field.
+#
+# NOTE: GitHub auto-disables `schedule` workflows after ~60 days without repo
+# activity — exactly the maintenance-lull window when undici drift is most
+# likely to go unnoticed. If the repo goes quiet, this watch silently stops;
+# re-enable it under the Actions tab (or push any commit).
 on:
   schedule:
     - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC
@@ -17,25 +22,26 @@ permissions:
 jobs:
   livefp:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "stable"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "lts/*"
       - name: guard against a vacuous run
-        # The livefp test currently lives in internal/supervisor/livefp_test.go,
-        # which is a LOCAL-ONLY file (gitignored, never committed). `go test
-        # -run X` exits 0 when zero tests match, so without this guard a
-        # checkout missing the file makes the drift watch pass vacuously
-        # forever — a monitor that can never alert is worse than no monitor.
-        # Fail loudly instead, so the gap is a visible decision: either commit
-        # the livefp test or retire this workflow.
+        # internal/supervisor/livefp_test.go is committed, but keep this guard
+        # as defense in depth against it being deleted or re-gitignored:
+        # `go test -run X` exits 0 when zero tests match. The "no tests to run"
+        # check on the live step below would also catch that — but only after
+        # spending a live-network run; this one fails first, with a message
+        # that names the remediation. Removing the test has to be a visible
+        # decision: restore it or retire this workflow with it.
         run: |
           if [ ! -f internal/supervisor/livefp_test.go ]; then
-            echo "::error::internal/supervisor/livefp_test.go is not in the checkout (it is a local-only file). The fingerprint drift watch CANNOT run — commit the livefp test or remove this workflow."
+            echo "::error::internal/supervisor/livefp_test.go is missing from the checkout. The fingerprint drift watch CANNOT run — restore the livefp test or remove this workflow."
             exit 1
           fi
       - name: live mirror-fidelity + baseline check

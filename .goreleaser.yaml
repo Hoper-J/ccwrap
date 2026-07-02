@@ -94,5 +94,8 @@ release:
   # Safety: even a pushed tag produces a DRAFT release for manual review before
   # it goes live. Flip to false when you're ready for tags to publish directly.
   draft: true
+  # A workflow re-run for the same tag (e.g. after a post-GoReleaser npm
+  # failure) replaces the existing draft instead of stacking a duplicate.
+  replace_existing_draft: true
   prerelease: auto
   name_template: "v{{ .Version }}"
