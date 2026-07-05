@@ -1,61 +1,61 @@
 <h1 align="center">ccwrap</h1>
 
-<p align="center">English · <a href="README.zh-CN.md">简体中文</a></p>
+<p align="center">简体中文 · <a href="README.en.md">English</a></p>
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
   <a href="https://www.npmjs.com/package/@hoper-j/ccwrap"><img alt="npm" src="https://img.shields.io/npm/v/@hoper-j/ccwrap"></a>
   <a href="https://github.com/Hoper-J/ccwrap/releases"><img alt="Release" src="https://img.shields.io/github/v/release/Hoper-J/ccwrap"></a>
-  <a href="https://github.com/Hoper-J/ccwrap/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Hoper-J/ccwrap/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/Hoper-J/ccwrap/pulls"><img alt="PRs Welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg"></a>
 </p>
 
-ccwrap owns the network boundary between Claude Code and the upstream API: it routes to any Anthropic-compatible gateway while keeping Claude Code on what it believes is the first-party path, swaps models per provider, and inspects every request and response.
+ccwrap 接管 Claude Code 与上游 API 之间的网络边界，路由到任何 Anthropic 兼容的网关并让 Claude Code 认为是第一方路径、允许按 provider 替换模型并检查每一次请求与响应。
 
-## Background
+## 背景
 
-Thanks to the officially "open-sourced" 2.1.88 source, a number of restrictions aimed at third-party APIs and non-official models were found and shared — which is how this project came to be. Back then Claude Code gated some new features behind the first-party API path. For example: Auto Mode required *both* a non-third-party provider (not BEDROCK / VERTEX / FOUNDRY) *and* a model matching `/^claude-(opus|sonnet)-4-6/`, which also meant other vendors' models couldn't turn on auto mode and would error out. ccwrap started as nothing more than a path + model-alias mapping to get around the auto-mode gate :)
+得益于官方“开源”的 2.1.88 版本源码，一些针对第三方 API 和非官方模型的限制被发现和分享，故也有了当前项目的诞生。当时 Claude Code 把一些新的特性限制在了第一方 API 路径上才能打开。比如：Auto mode 需要同时满足非第三方（BEDROCK / VERTEX / FOUNDRY）和 `/^claude-(opus|sonnet)-4-6/` 才能使用，这同样使得当时其他厂商的模型无法直接开启 auto mode，会直接报错。最初 ccwrap 只是为了简单地做个路径和模型别名映射绕过 auto mode 的限制 :)
 
-## Install
+## 安装
 
 ```bash
 npm install -g @hoper-j/ccwrap
 
-# or: install script (downloads the prebuilt binary)
+# 或：安装脚本（下载预编译二进制）
 curl -fsSL https://raw.githubusercontent.com/Hoper-J/ccwrap/main/install.sh | sh
 
-# or: install with Go
+# 或：用 Go 直接装
 go install github.com/Hoper-J/ccwrap/cmd/ccwrap@latest
 ```
 
-Or build from source:
+或从源码构建：
 
 ```bash
 git clone https://github.com/Hoper-J/ccwrap && cd ccwrap && go build -o ccwrap ./cmd/ccwrap
 ```
 
-## Quick start
+## 快速开始
 
-ccwrap can launch Claude Code directly, or load a saved configuration (profile):
+ccwrap 可以直接启动 Claude Code，也可以加载一个已保存的配置（profile）：
 
 ```bash
-# 1) Launch directly: uses your existing Claude auth (first-party); ccwrap only inspects in the middle, no rerouting
+# 1) 直接启动：走你现有的 Claude 认证（第一方），ccwrap 只在中间做检查、不改路由
 ccwrap
 
-# 2) Route through a gateway: save it as a profile, then launch by name
+# 2) 接一个网关：存成 profile，再按名字启动
 ccwrap profile add gateway \
   --base-url https://gateway.example \
   --auth-mode ccwrap_bearer --auth-key sk-xxxxxxxx
 ccwrap --profile gateway
 
-# 3) Set it as default
+# 3) 设为默认
 ccwrap profile set-default gateway && ccwrap
 ```
 
-### Wiring up a provider (DeepSeek as an example)
+### 怎么接一个 provider（以 DeepSeek 为例）
 
-#### CLI
+#### 命令行
 
-DeepSeek exposes an `https://api.deepseek.com/anthropic` endpoint:
+DeepSeek 有 `https://api.deepseek.com/anthropic` 端点：
 
 ```bash
 ccwrap profile add deepseek \
@@ -66,98 +66,98 @@ ccwrap profile add deepseek \
 ccwrap --profile deepseek
 ```
 
-You can also pass an env var name: `--auth-key-env DEEPSEEK_KEY`.
+也可以写环境变量名：`--auth-key-env DEEPSEEK_KEY`。
 
 #### web
 
-Ctrl+click the local URL after `inspect` in the launch banner to open the dashboard, then click `profile` → `new profile`:
+Ctrl + 点击启动横幅里 `inspect` 后面那个本地 URL 打开 dashboard，然后点 `profile` -> `new profile`：
 
 ![image-20260620180955100](assets/image-20260620180955100.png)
 
-## Features
+## 特性
 
-1. **Make Claude Code believe it's talking to `api.anthropic.com`**
+1. **让 Claude Code 认为自己在和  `api.anthropic.com`  进行交互**
 
-   For cost, region, self-hosted model, or compliance reasons, you sometimes need to route Claude Code to an Anthropic-compatible gateway. ccwrap keeps Claude Code's behavior matched to that choice, instead of silently downgrading the request body because the first-party check didn't pass.
+   出于成本、地域、自托管模型、合规等原因，有时候需要把 Claude Code 路由到一个 Anthropic 兼容网关，ccwrap 负责让 Claude Code 的行为继续匹配这个选择，而不会因为第一方判定没过就静默降级请求体。
 
-   For example, on a third-party path Claude Code drops some request features — e.g. `advanced-tool-use` — and inlines every MCP tool (spending a lot of tokens) instead of lazy-loading them via `ToolSearch`, which can nearly double the first request's tokens:
+   举个例子，第三方路径下的 Claude Code 会在请求头去掉一些特性，比如：`advanced-tool-use`，同时 mcp 会变成全部内联占用大量 token 而非使用 `ToolSearch` 工具延迟加载，这可能会导致首请求多出接近一倍的 token：
 
-   | Official | ccwrap disguise | Plain third-party |
-   | --- | --- | --- |
+   | 官方                                                         | ccwrap 伪装                                                  | 正常途径使用第三方                                           |
+   | ------------------------------------------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
    | ![image-20260701145024608](assets/20260701160500187.png) | ![image-20260701144101020](assets/20260701160452215.png) | ![image-20260701143808100](assets/20260701160456859.png) |
 
-   The clip below (built on 2.1.193, capturing `claude -p hi` from an official subscription account vs. a plain third-party path) shows the third-party first request carrying up to 82% more tokens:
+   下面的动画基于 2.1.193 版本，在 `claude -p hi` 下分别捕捉官方订阅账户和直接使用第三方的请求制作，可以看到第三方的首请求甚至会多出 82% 的 token：
 
-   ![Third-Party Downgrade](assets/third-party-downgrade-en.webp)
+   ![Third-Party Downgrade](assets/third-party-downgrade.webp)
 
-2. **Model aliases**
+2. **使用 Model 别名**
 
-   Make Claude Code think it's talking to an official model — which may get around some non-official-model restrictions.
+   让 Claude Code 认为自己在和官方模型对话，这可能会绕过某些非官模的限制。
 
    ![image-20260618143526134](assets/image-20260618143526134.png)
 
-   Locally, Claude Code only ever sees Claude model IDs (`claude-sonnet-4-6`, `claude-opus-4-8`, etc.); the actual request is rewritten to the mapped model. Source precedence:
+   本地的 Claude Code 只会看到 Claude model id（`claude-sonnet-4-6`、`claude-opus-4-8` 等)，实际请求的时候会被替换为映射的模型。来源优先级：
 
-   1. The active profile's `model_aliases`
-   2. `--model-alias-file PATH` or `CCWRAP_MODEL_ALIASES_FILE`
-   3. `--model-alias LOGICAL=PROVIDER` or `CCWRAP_MODEL_ALIASES_JSON`
+   1. 活动 profile 的 `model_aliases`
+   2. `--model-alias-file PATH` 或 `CCWRAP_MODEL_ALIASES_FILE`
+   3. `--model-alias LOGICAL=PROVIDER` 或 `CCWRAP_MODEL_ALIASES_JSON`
 
-   The MITM proxy rewrites:
+   具体由 MITM 代理改写：
 
-   - the top-level `model` field of `/v1/messages` and `/v1/messages/count_tokens`
-   - `requests[*].params.model` of `/v1/messages/batches`
+   - `/v1/messages` 和 `/v1/messages/count_tokens` 顶层 `model` 字段
+   - `/v1/messages/batches` 的 `requests[*].params.model`
 
-   Response-side model fields (JSON / SSE / batch JSONL) are normalized back to the Claude model too, so Claude only ever sees official model IDs.
+   响应端（JSON / SSE / batch JSONL）的 model 字段也会反向归一化回 Claude 模型，Claude 始终只看到官方模型 id。
 
-   **Bonus: study a model's request shape**
+   **拓展：研究某个模型的请求形态**
 
-   With a model name that hasn't "shipped" yet, you can see how Claude Code organizes a request for it, then use an alias to route the actual call to a model that can answer:
+   用一个还没“开放”的模型名，可以看到 Claude Code 会怎么为它组织请求，接着用 alias 把实际调用路由到一个能应答的模型上：
 
    ```bash
    ccwrap --model-alias claude-fable-5=claude-opus-4-8 --model claude-fable-5 --capture-bodies
    ```
 
-   `--model claude-fable-5` makes Claude Code assemble the request as `fable-5`, which opens up request shapes it wouldn't otherwise send (model-related betas, system / harness blocks). The alias rewrites the upstream call to `claude-opus-4-8` so the request can actually return (`claude-fable-5` is currently retired). Together with `--capture-bodies`, you can see the request body Claude Code actually emits, for study.
+   `--model claude-fable-5` 让 Claude Code 按 `fable-5` 来组装请求，会因此打开一些原本不会发的请求形态（model 相关的 beta、system / harness 块）。alias 会实际把上游调用改写成 `claude-opus-4-8`，这样请求才能返回（因为 `claude-fable-5` 目前已经停用）。配合 `--capture-bodies`，能看到 Claude Code 实际发出的请求体，供参考学习。
 
-   Note that newer clients (>2.1.176) hard-intercept the fable-5 model, so you need to downgrade to 2.1.176:
+   不过需要注意，新版本的客户端（>2.1.176）会硬拦截 fable-5 模型，所以你需要降到 2.1.176：
 
-   | 2.1.176 | >2.1.176 |
-   | --- | --- |
+   | 2.1.176                                                      | >2.1.176                                                     |
+   | ------------------------------------------------------------ | ------------------------------------------------------------ |
    | ![image-20260618145054775](assets/image-20260618145054775.png) | ![image-20260618144849100](assets/image-20260618144849100.png) |
 
-3. **Fix third-party caching**
+3. **修复第三方缓存**
 
-   Remove the cache-breaking key from requests rewritten to a non-`claude-*` provider. In every recent version, Claude Code's request body looks like this:
+   对改写到非 `claude-*` provider 的请求移除破坏缓存的键。在近期所有的版本中，Claude Code 的请求体都类似于下方：
 
    ![image-20260618143246261](assets/image-20260618143246261.png)
 
-   The `cch` in there differs on every request, which invalidates the KV cache for non-official (unhandled) models — so ccwrap removes this block whenever an alias rewrites the model to a non-`claude-*` provider.
+   其中的 cch 每次请求都不一样，这会让非官方版本（未特殊处理）模型的 KV 缓存失效，所以当 alias 把模型改写成非 `claude-*` provider 时，ccwrap 会去除这一 block。
 
-4. **Pinned egress proxy**
+4. **固定出口代理**
 
-   For official setups you usually want a fixed proxy, so ccwrap supports an egress config that routes the selected provider plus official telemetry (`http-intake.logs.us5.datadoghq.com`) through a chosen network egress:
+   对于官方配置，我们通常更希望走一个固定的代理，所以 ccwrap 也同样支持 egress 出口的配置项，这会让选定的提供商以及官方遥测的 `http-intake.logs.us5.datadoghq.com` 都走指定的网络出口：
 
    ![image-20260618142721442](assets/image-20260618142721442.png)
 
-5. **Live config hot-swap**
+5. **配置热切换**
 
-   Switching the upstream profile or editing a model alias in the browser inspector (or via `ccwrap profile switch <name>`) takes effect in the current session immediately:
+   在浏览器检查器里（或命令行 `ccwrap profile switch <name>`）切换上游 profile、改 model alias，会在当前会话立即生效：
 
    ![image-20260619210619928](assets/image-20260619210619928.png)
 
-6. **Keep Claude Code's native TLS fingerprint**
+6. **保持 Claude Code 的原生 TLS 指纹**
 
-   A vanilla Go forward would swap the TLS fingerprint for Go's `crypto/tls` one — undici-shaped headers under a Go fingerprint, and that mismatch is itself a tell. ccwrap uses [utls](https://github.com/refraction-networking/utls) to replay Claude Code's own ClientHello upstream byte-for-byte.
+   普通 Go 转发时会把 TLS 指纹换成 Go `crypto/tls` 的——header 是 undici 的形状、指纹却是 Go 的，这个错位本身是识别特征。ccwrap 用 [utls](https://github.com/refraction-networking/utls) 把 Claude Code 自己的 ClientHello 原样复刻到上游。
 
-7. **Align the timezone so the request date doesn't reveal your region**
+7. **对齐时区，避免请求日期暴露地区**
 
-   When Claude Code decides `ANTHROPIC_BASE_URL` points somewhere non-official, it steganographically encodes three identity bits into the `Today's date is …` line of the system prompt, using near-indistinguishable **apostrophe variants** (`'` U+0027 / `'` U+2019 / `ʼ` U+02BC / `ʹ` U+02B9) and the **date separator** (`-` swapped for `/`); one of them checks whether the system timezone is China (`Asia/Shanghai` / `Asia/Urumqi`).
+   Claude Code 在判定 `ANTHROPIC_BASE_URL` 指向非官方时，会在注入系统提示词的 `Today's date is …` 里，用肉眼几乎无法分辨的**撇号变体**（`'` U+0027 / `'` U+2019 / `ʼ` U+02BC / `ʹ` U+02B9）和**日期分隔符**（`-` 换成 `/`）隐写 3 个身份判断，其中一位查看系统时区是不是中国（`Asia/Shanghai` / `Asia/Urumqi`）。
 
-   Because that steganography is gated on `isFirstParty()`, ccwrap keeps Claude Code believing it talks straight to `api.anthropic.com`, so the whole path is skipped and the timezone bit is never written either.
+   由于这套隐写基于 `isFirstParty()` 判断，ccwrap 能够让 Claude Code 照常认为自己在直连 `api.anthropic.com`，不会进入这套逻辑，时区这一位自然也不会写入。
 
-   On top of that, ccwrap optionally lets you set Claude Code's timezone to a non-China one (without touching your actual terminal environment), so the system timezone itself also falls outside that check — and it incidentally fixes the region tell where a UTC+8 date can be a day ahead of a US session.
+   这里再额外做一层，允许用户可选地把 Claude Code 的时区改为非中国时区（不影响当前终端环境），让系统时区本身也不落在判断范围内，同时解决在 UTC+8 下当天日期可能比美国会话早一天的地区标识。
 
-   The first run in a China timezone currently prompts:
+   当前首次在中国时区启动时会弹出：
 
    ```text
    ccwrap: 检测到当前为中国时区，Claude Code 会把本机当天日期写进请求，
@@ -167,24 +167,24 @@ Ctrl+click the local URL after `inspect` in the launch banner to open the dashbo
    ccwrap:   回车=America/Los_Angeles，或输入一个 IANA 时区名，输入 n 跳过：
    ```
 
-   Enter accepts the default `America/Los_Angeles`, or type any [IANA](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) name (e.g. `Europe/Paris`), or `n` to skip. The choice is remembered and never re-prompted. You can also set it directly via `--timezone IANA` or `CCWRAP_TZ`; precedence is `--timezone` > `CCWRAP_TZ` > remembered choice > first-run prompt. An invalid zone warns and is ignored (no injection). `ccwrap capture` reuses the same alignment, so a captured snapshot's dates match a real session's.
+   回车用默认 `America/Los_Angeles`，或输入任意 [IANA](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) 名（如 `Europe/Paris`），或 `n` 跳过。选择会记住，以后不再问。也可以直接用 `--timezone IANA` 或 `CCWRAP_TZ` 指定，优先级 `--timezone` > `CCWRAP_TZ` > 记住的选择 > 首次提示；非法时区会警告并忽略（不注入）。`ccwrap capture` 也沿用这套对齐，保证抓到的快照日期和真实会话一致。
 
-8. **Read requests and responses**
+8. **请求和响应阅读**
 
-   With `--capture-bodies` (or the bodies checkbox in the dashboard), you can read every `/v1/messages` Claude Code emits, verbatim:
+   使用 `--capture-bodies`（或在 dashboard 勾选 bodies），可以逐字读到 Claude Code 发出的每一条 `/v1/messages`：
 
    ![image-20260620115343451](assets/image-20260620115343451.png)
 
-Note: using this tool may trigger some first-party features (e.g. sending `cache_control: { scope: "global" }`, or adding `eager_input_streaming: true` to tool schemas to avoid hangs on large tool inputs), but if the upstream server doesn't handle those requests, unexpected behavior may occur.
+注意：使用当前工具有可能会触发一些官方特性（比如发送 `cache_control: { scope: "global" }`，tool schema 里加 `eager_input_streaming: true`，避免大 tool input 卡死），但如果上游服务器并没有处理这方面的请求，可能会出现预期外的情况。
 
-Also, ccwrap can't get around capabilities that depend on the server side: Fast Mode needs to pass an `orgStatus` check, `max` effort requires upstream model capability, Web Search depends on Anthropic's backend search service, the Advisor tool needs its beta header. What ccwrap does is make Claude Code's emitted request body match what it sends when the upstream is `api.anthropic.com` — so whether it works depends on whether the gateway itself handles those requests.
+另外，ccwrap 绕不开一些依赖于服务端的额外能力：Fast Mode 需要通过 `orgStatus` 检查、`max` effort 对上游模型能力有要求、Web Search 依赖 Anthropic 后端的搜索服务、Advisor tool 的 beta header。ccwrap 本身做的是让 Claude Code 发出去的请求体和上游是 `api.anthropic.com` 时发的一致，所以能否工作取决于网关本身是否处理了这些请求。
 
-## Commands
+## 命令
 
 ```bash
-ccwrap [CCWRAP_FLAGS...] [CLAUDE_ARGS...]      # launch a Claude session
-ccwrap [CCWRAP_FLAGS...] -- [CLAUDE_ARGS...]   # explicit boundary
-ccwrap run [CCWRAP_FLAGS...] [--] [CLAUDE_ARGS...]   # disambiguate
+ccwrap [CCWRAP_FLAGS...] [CLAUDE_ARGS...]      # 启动一个 Claude 会话
+ccwrap [CCWRAP_FLAGS...] -- [CLAUDE_ARGS...]   # 显式分隔
+ccwrap run [CCWRAP_FLAGS...] [--] [CLAUDE_ARGS...]   # 消除歧义
 ccwrap status     [--json] [--session ID]
 ccwrap dashboard  [--session ID] [--view overview|requests|errors|diagnostics]
 ccwrap doctor     [--json] [--verbose] [--session ID] [--profile NAME]
@@ -198,33 +198,33 @@ ccwrap profile    {ls | status | switch <name> | test [name] | test-egress [name
                   [--session ID]
 ```
 
-Without a management subcommand, `ccwrap` launches Claude Code directly. In launch mode it consumes only the flags it recognizes; unknown flags, positional arguments, or `--` are passed to Claude verbatim.
+不带管理子命令时，`ccwrap` 会直接启动 Claude Code。在启动模式下，ccwrap 只消费它认识的flag，不认识的 flag、位置参数或 `--` 会原封不动传给 Claude。
 
-## Launch flags
+## 启动 flags
 
-| Flag | Description |
-|------|-------------|
-| `--upstream URL` | Equivalent to the base URL (otherwise auto-loaded from profile / env). |
-| `--egress-proxy auto\|direct\|URL` | Route outbound traffic through a proxy. |
-| `--session-name NAME` | Session label (shown in status / dashboard). |
-| `--claude-bin PATH` | Path to the Claude Code binary (otherwise resolved from PATH). |
-| `--profile NAME` | Pick a profile from `profiles.json`; can be a profile name or a provider group. |
-| `--model-alias-file PATH` / `--model-alias LOGICAL=PROVIDER` | Inline / file model alias map. Profile-defined aliases take precedence. |
-| `--upstream-headers-file PATH` / `--upstream-header NAME=VALUE` | ccwrap-owned upstream headers, never Claude-visible. |
-| `--capture-bodies` (or `CCWRAP_CAPTURE_BODIES=1`) | Capture request + response bodies for the inspector. Default OFF. Alias: `--capture-request-bodies`. |
-| `--capture-telemetry` (or `CCWRAP_CAPTURE_TELEMETRY=1`) | Transparently MITM Claude Code's allowlisted telemetry hosts (datadog us5, sentry) and capture those bodies for the inspector. Default OFF — telemetry is otherwise blind-tunneled. |
-| `--quiet` (or `CCWRAP_QUIET=1`) | Collapse the launch banner to one line (`ccwrap → host · profile · inspect URL`). Default off. |
-| `--timezone IANA` (or `CCWRAP_TZ`) | Set Claude Code's timezone so the request's `Today's date` is computed in that zone. The first run in a China timezone prompts whether to align to `America/Los_Angeles`; suppress the prompt with `CCWRAP_NO_TZ_PROMPT=1` or `--no-init`. No injection by default. |
-| `--no-init` (or `CCWRAP_NO_INIT=1`) | Skip the first-run env → profiles.json auto-migration prompt, and the first-run timezone prompt. Default off. |
-| `--allow-provider-model-passthrough` | Let Claude Code see provider-side model IDs. |
-| `--allow-auth-passthrough-to-third-party` | Debug-only: let Claude-side auth pass through to a third-party upstream. |
+| Flag | 说明 |
+|------|------|
+| `--upstream URL` | 等价于 base URL（不指定则从 profile / env 自动加载） |
+| `--egress-proxy auto\|direct\|URL` | 出站流量走 proxy |
+| `--session-name NAME` | 会话名（status / dashboard 里显示） |
+| `--claude-bin PATH` | 指定 Claude Code 可执行文件路径（默认从 PATH 解析）|
+| `--profile NAME` | 从 `profiles.json` 选 profile，可以是 profile 名或 provider 组名 |
+| `--model-alias-file PATH` / `--model-alias LOGICAL=PROVIDER` | 内联 / 文件的 model alias 表。profile 里定义的 alias 优先 |
+| `--upstream-headers-file PATH` / `--upstream-header NAME=VALUE` | ccwrap 所有的上游 header，永不对 Claude 可见 |
+| `--capture-bodies`（或 `CCWRAP_CAPTURE_BODIES=1`）| 抓取请求与响应 body 查看。默认关。别名：`--capture-request-bodies` |
+| `--capture-telemetry`（或 `CCWRAP_CAPTURE_TELEMETRY=1`）| 对 Claude Code 的遥测 host 白名单（datadog us5、sentry）做透明 MITM 并抓取 body 查看。默认关，不开启时遥测走盲隧道 |
+| `--quiet`（或 `CCWRAP_QUIET=1`）| 把启动横幅收成一行（`ccwrap → host · profile · inspect URL`）。默认关 |
+| `--timezone IANA`（或 `CCWRAP_TZ`）| 给 Claude Code 指定时区，让请求里的 `Today's date` 按该时区计算。首次在中国时区启动会提示是否对齐到 `America/Los_Angeles`，可用 `CCWRAP_NO_TZ_PROMPT=1` 或 `--no-init` 关掉提示。默认不注入 |
+| `--no-init`（或 `CCWRAP_NO_INIT=1`）| 跳过首次启动 env → profiles.json 的自动迁移提示，以及首次时区提示。默认关 |
+| `--allow-provider-model-passthrough` | 允许 Claude Code 看到 provider 端的 model id |
+| `--allow-auth-passthrough-to-third-party` | 调试用：让 Claude-side auth 透传到第三方上游 |
 
 ## Profiles
 
 <details>
-<summary>schema · resolution precedence · CLI · hot-swap · egress self-test</summary>
+<summary>schema · 解析优先级 · CLI · 热切换 · Egress 自检</summary>
 
-A profile is a named bundle of config: base URL, auth, model aliases, upstream headers, egress mode. Profiles live in `~/Library/Application Support/ccwrap/profiles.json` on macOS, `~/.config/ccwrap/profiles.json` or `$XDG_STATE_HOME/ccwrap/profiles.json` on Linux.
+profile 是预定义的配置：base URL、auth、model alias、上游 header、egress mode。macOS 放在 `~/Library/Application Support/ccwrap/profiles.json`，Linux 放在 `~/.config/ccwrap/profiles.json` 或 `$XDG_STATE_HOME/ccwrap/profiles.json`。
 
 ### Schema
 
@@ -249,61 +249,61 @@ A profile is a named bundle of config: base URL, auth, model aliases, upstream h
 }
 ```
 
-Auth modes:
+Auth 模式：
 
-- `ccwrap_bearer` — inject `Authorization: Bearer <key>`
-- `ccwrap_x_api_key` — inject `X-API-Key: <key>`
-- omit the `auth` block entirely — ccwrap does not own auth for this profile (Claude's own OAuth / API key reaches the upstream directly)
+- `ccwrap_bearer` — 注入 `Authorization: Bearer <key>`
+- `ccwrap_x_api_key` — 注入 `X-API-Key: <key>`
+- 整个 `auth` 块省略 — ccwrap 不为这个 profile 接管 auth（Claude 自己的 OAuth / API key 直达上游）
 
-Auth key source: inline `key` value OR `key_env` (env var name; resolved at launch). The two are mutually exclusive.
+Auth key 来源：内联 `key` 字段或 `key_env`（环境变量名，启动时解析）。两者互斥。
 
-Egress modes: `inherit` (use the launch-time resolved proxy), `direct`, `http` (URL scheme must be `http://` or `https://`), `socks5` (URL scheme must be `socks5://`, DNS resolved locally), `socks5h` (URL scheme must be `socks5h://`, DNS resolved at the proxy). The URL scheme must match the mode — a `mode=socks5` + `url=http://...` combination is rejected.
+Egress 模式：`inherit`（用启动时解析的 proxy）、`direct`、`http`（URL scheme 必须是 `http://` 或 `https://`）、`socks5`（URL scheme 必须是 `socks5://`，DNS 在本地解析）、`socks5h`（URL scheme 必须是 `socks5h://`，DNS 在 proxy 端解析）。URL scheme 必须跟 mode 匹配，`mode=socks5` + `url=http://...` 这种组合会被拒绝。
 
-### Reserved profile: `official`
+### 默认配置：`official`
 
-The `official` profile is auto-seeded on first launch when `profiles.json` does not exist. It represents the first-party Claude Code path: no `base_url`, no `auth` block, Claude's own credentials reach `api.anthropic.com` directly. When you remove the current default, the dashboard's `chooseFallbackDefault` prefers `official` if it is still present (else the first remaining profile, else inherit-env); the CLI `ccwrap profile rm` simply resets the default to inherit-env, and `official` is re-seeded on the next launch.
+`official` profile 在 `profiles.json` 不存在时首次启动自动 seed。它代表官方 Claude Code 路径：无 `base_url`、无 `auth` 块、Claude 自己的凭据直达 `api.anthropic.com`。删掉当前 default 时，dashboard 的 `chooseFallbackDefault` 会优先回到 `official`（若它还在；否则取剩下的第一个 profile，再否则 inherit-env）；而 CLI 的 `ccwrap profile rm` 删 default 时直接重置为 inherit-env，`official` 下次启动自动重新 seed。
 
-### Resolution precedence
+### 解析优先级
 
 1. `--profile NAME`
-2. `CCWRAP_PROFILE=NAME` env var
-3. `file.default` from `profiles.json`
-4. `official` (first-party path)
+2. `CCWRAP_PROFILE=NAME` 环境变量
+3. `profiles.json` 里的 `file.default`
+4. `official`（官方路径）
 
-### CLI
+### CLI 相关
 
 ```bash
-ccwrap profile ls                          # list profiles + which is default
-ccwrap profile status                      # the profile the active session is using
+ccwrap profile ls                          # 列出 profile + 哪个是 default
+ccwrap profile status                      # 当前会话用的 profile
 ccwrap profile add gateway \
   --base-url https://gateway.example \
   --auth-mode ccwrap_bearer --auth-key "$KEY" \
   --model-alias claude-opus-4-8=gpt-5.5 \
   --upstream-header X-Gateway-Tenant=team-a
 ccwrap profile edit gateway --auth-key-env GATEWAY_KEY
-ccwrap profile switch gateway              # live hot-swap (no Claude relaunch)
-ccwrap profile test                        # probe the upstream with a no-op request
-ccwrap profile test gateway                # specific profile
-ccwrap profile set-default gateway         # persist as file.default
+ccwrap profile switch gateway              # 实时热切换（不需重启 Claude）
+ccwrap profile test                        # 用一个空请求探测上游
+ccwrap profile test gateway                # 指定 profile
+ccwrap profile set-default gateway         # 持久化为 file.default
 ccwrap profile rm old-gateway
 ```
 
-### Hot-swap vs needs-relaunch
+### 热切换 vs 需要重启
 
-Most profile switches (1P → gateway, gateway → gateway, etc.) are hot-swaps: the proxy rebinds the route internally and the Claude process keeps running. The one transition that needs a relaunch is switching from a third-party back to first-party, where the dashboard / CLI shows `refused_needs_relaunch`.
+profile 切换大多数（1P → 网关、网关 → 网关等）是热切换：代理在内部重新绑定路由，Claude 进程会正常运行。唯一一种需要重启的转换是从第三方切回第一方，这时 dashboard / CLI 会显示 `refused_needs_relaunch`。
 
-### Egress self-test
+### Egress 出口自检
 
-`ccwrap profile test-egress [name]` probes each profile's egress connectivity and returns:
+`ccwrap profile test-egress [name]` 探测每个 profile 的 egress 出口连通性，返回:
 
-- status, latency
-- the public IP the egress is exiting through
-- geographic location (country, region, city)
-- ASN / organization
+- 状态、延迟
+- 出口公网 IP
+- 地理位置（国家、地区、城市）
+- ASN / 运营商
 
-Default probe target: `https://ipinfo.io/json`. Override with `CCWRAP_EGRESS_TEST_URL=<your-endpoint>` — any HTTPS endpoint that returns the ipinfo schema (`{ip, country, region, city, org}`) works.
+默认探测目标 `https://ipinfo.io/json`。可用 `CCWRAP_EGRESS_TEST_URL=<自托管端点>` 覆盖 — 任何返回 ipinfo schema (`{ip, country, region, city, org}`) 的 HTTPS endpoint 都可以。
 
-The probe sends NO Claude API traffic and carries NONE of the profile's credentials — it tests only the egress path. It complements `ccwrap profile test` (which tests upstream auth).
+该探测不发送任何 Claude API 流量，也不携带 profile 的任何凭据，只测出口路径。与 `ccwrap profile test`（测上游 auth）互补。
 
 ```
 $ ccwrap profile test-egress gateway
@@ -311,90 +311,90 @@ PROFILE  STATUS  LATENCY  EGRESS_VIA                 PUBLIC_IP   GEO            
 gateway  OK        142ms  socks5h://corp-proxy:1080  52.34.x.x   Seattle, WA, US  AS16509 Amazon.com, Inc.  -
 ```
 
-You can also click the ⚡ button on the Egress cell in the web UI to probe the current session's actual network egress.
+也可以点击 Web UI 中 Egress 格的⚡按钮，它会检测当前 session 的实际网络出口。
 
-**Privacy note:** out of the box, ipinfo.io sees your egress IP — that's inherent to how the probe works. If you don't want a third party to see it, set `CCWRAP_EGRESS_TEST_URL` to a self-hosted endpoint.
+**隐私提示**：开箱即用时 ipinfo.io 会看到你的 egress 出口 IP，这是探测方式决定的。如不希望第三方可见，设置 `CCWRAP_EGRESS_TEST_URL` 指向自托管端点。
 
 </details>
 
-## Path-aware third-party routing
+## 第三方路由
 
 <details>
-<summary>path-aware third-party routing</summary>
+<summary>按路径区分第三方路由</summary>
 
-ccwrap does not rewrite every `api.anthropic.com` request to the gateway. Only the actual model gateway paths are routed upstream:
+ccwrap 不会把每个 `api.anthropic.com` 请求都改写到网关。只有实际的模型网关路径才路由到上游：
 
 - `POST /v1/messages`
 - `POST /v1/messages/count_tokens`
-- `/v1/messages/batches` create / retrieve / results / cancel paths
+- `/v1/messages/batches` 的 create / retrieve / results / cancel 路径
 
-`GET /v1/models` is served locally from the active alias map so provider IDs do not leak into Claude. First-party service paths that need shaped responses (`/api/claude_cli/bootstrap`, `/v1/mcp_servers`, `/mcp-registry/v0/servers`) are answered locally by ccwrap too.
+`GET /v1/models` 由 ccwrap 本地从活动 alias 表回，避免 provider id 泄漏给 Claude。需要 shaped response 的 first-party 服务路径（`/api/claude_cli/bootstrap`、`/v1/mcp_servers`、`/mcp-registry/v0/servers`）也在 ccwrap 本地回。
 
-Other non-gateway `api.anthropic.com` paths receive a silent `204 No Content`: recorded as synthetic requests, no error, no session degradation, no gateway call.
+其他非网关的 `api.anthropic.com` 路径收到一个无声的 `204 No Content`：记录为 synthetic 请求，不报错、不降级会话、不打到网关。
 
-`--allow-provider-model-passthrough` remains a compatibility / debug mode. In that mode `/v1/models` may be passed through and provider model IDs may be Claude-visible.
+`--allow-provider-model-passthrough` 保持为兼容 / 调试模式。该模式下 `/v1/models` 可能透传到 provider，provider model id 也可能对 Claude 可见。
 
 </details>
 
-## Claude Code system-prompt stripping
+## Claude Code 系统提示词裁剪
 
 <details>
-<summary>why strip · what gets stripped</summary>
+<summary>为什么裁剪 · 裁剪什么</summary>
 
-When the alias-rewritten model is **not** `claude-*` (typical with gateway routing like `claude-opus-4-8 → gpt-5.5`, `deepseek`, etc.), ccwrap additionally drops two Claude Code-specific system blocks from the request body:
+当 alias 改写后的 model 不是 `claude-*` 开头时（如 `claude-opus-4-8 → gpt-5.5`、`deepseek` 等），ccwrap 还会从请求 body 里额外裁掉两类 Claude Code 特有的 system block：
 
-1. `x-anthropic-billing-header: cc_version=...; cc_entrypoint=cli; cch=...` — Anthropic's billing/attestation pixel; non-Anthropic upstreams treat it as a literal system instruction.
-2. `You are Claude Code, Anthropic's official CLI for Claude.` (and the two Agent-SDK variants) — Claude Code's identity preamble; for a non-Claude model it amounts to telling it to impersonate Claude Code.
+1. `x-anthropic-billing-header: cc_version=...; cc_entrypoint=cli; cch=...` — Anthropic 用的计费/签名 pixel。非 Anthropic 上游会当作字面 system 指令理解
+2. `You are Claude Code, Anthropic's official CLI for Claude.`（以及两个 Agent SDK 变体）— Claude Code 的身份前缀。因为对非 Claude 模型而言，这是在让它扮演 Claude Code
 
-Detection is content-based (exact-match for the identity, prefix-match for the billing-header), so a user-crafted `You are Claude Code, but speak Spanish.` override is not killed by mistake, and a later Claude Code release that reorders the system prompt does not over-strip.
+识别按内容（identity 用精确匹配、billing-header 用前缀匹配），所以用户自定义的 "You are Claude Code, but speak Spanish." 不会被误杀，后续 Claude Code 版本升级改了 system prompt 顺序也不会过度裁剪。
 
-Set `CCWRAP_KEEP_CLAUDE_METADATA=1` to turn this behavior off.
+设 `CCWRAP_KEEP_CLAUDE_METADATA=1` 可关闭这个行为。
 
-In the web UI, when a body is captured the drawer offers a side-by-side toggle: **received** (what Claude Code sent) and **forwarded** (what the upstream actually receives).
+Web UI 中 body 被捕获时会并排切换的视图：**received**（Claude Code 发出）和 **forwarded**（上游实际收到的）。
 
-### Q: why is stripping needed?
+### Q：为什么需要裁剪？
 
-The system prompt sits at the start of the body, before user content and tools. A per-request hash (`cch`) there means the first ~80 bytes of every request differ, which defeats prefix-based KV caching on non-official upstreams. unsloth and vLLM both document this:
+system prompt 在 body 最前面，排在用户内容和 tools 之前。这里塞个 per-request hash（cch）意味着每次请求的前 ~80 字节都不一样，非官方上游基于 prefix 的 KV cache 会因此失效，unsloth 和 vllm 官方都提及了这一点：
 
-- unsloth[^1]:
+- unsloth[^1]：
 
   > *"Claude Code recently prepends and adds a Claude Code Attribution header, which **invalidates the KV Cache, making inference 90% slower with local models**."*
 
-  Their workaround is editing `~/.claude/settings.json` to add `"CLAUDE_CODE_ATTRIBUTION_HEADER": "0"` (and they note `export CLAUDE_CODE_ATTRIBUTION_HEADER=0` does NOT work — the env has to be set inside Claude's own settings.json to apply in all code paths).
+  编辑 `~/.claude/settings.json` 加 `"CLAUDE_CODE_ATTRIBUTION_HEADER": "0"`（使用 `export CLAUDE_CODE_ATTRIBUTION_HEADER=0` 不行，env 必须放进 Claude 自己的 settings.json 才能在所有代码路径生效）。
 
-- vLLM[^2]:
+- vLLM[^2] ：
 
-  > *"Claude Code recently started injecting a per-request hash in the system prompt, which can defeat prefix caching because the prompt changes on every request, causing greatly reduced performance."*
+  > *"Claude Code recently started injecting a per-request hash in the system prompt, which can defeat prefix caching because the prompt changes on every request"*
 
-  vLLM > 0.17.1 strips it server-side automatically.
+  目前 vLLM > 0.17.1 会在服务端自动剥离。
 
 [^1]: [🕵️Fixing 90% slower inference in Claude Code](https://unsloth.ai/docs/basics/claude-code#fixing-90-slower-inference-in-claude-code)
 [^2]: [Configuring Claude Code](https://docs.vllm.ai/en/v0.20.0/serving/integrations/claude_code/#configuring-claude-code)
 
-ccwrap's strip is the same fix applied at the proxy layer, before the request reaches the gateway:
+ccwrap 的裁剪是类似的修复方式，实现在代理层，会在请求到达网关之前处理：
 
-- Works against any non-Anthropic upstream (vLLM, sglang, llama.cpp server, OpenRouter Anthropic-compatible endpoints, Anthropic-API-compatible proxies), not just gateways that ship their own server-side strip
-- Composes with `CLAUDE_CODE_ATTRIBUTION_HEADER=0`: if the client already disabled attribution, ccwrap leaves it alone
-- Does not require the user to edit `~/.claude/settings.json` per machine
+- 适用于任何非 Anthropic 上游（vLLM、sglang、llama.cpp server、OpenRouter Anthropic 兼容端点、Anthropic-API 兼容代理），不限于自带服务端剥离逻辑的网关
+- 跟 `CLAUDE_CODE_ATTRIBUTION_HEADER=0` 可以叠加：如果客户端已经关了 attribution，ccwrap 就不会处理
+- 不需要用户在每台机器手改 `~/.claude/settings.json`
 
 </details>
 
 ## Egress proxy
 
 <details>
-<summary>pinned egress · SOCKS5 · DNS resolution location</summary>
+<summary>固定出口 · SOCKS5 · DNS 解析位置</summary>
 
 ```text
-Claude Code -> ccwrap session proxy -> [egress proxy] -> real upstream
+Claude Code -> ccwrap 会话代理 -> [egress proxy] -> 真实上游
 ```
 
-Resolution order:
+解析顺序：
 
-- `--egress-proxy=direct` → direct
-- `--egress-proxy=<URL>` → explicit proxy (`http://`, `https://`, `socks5://`, `socks5h://`)
-- `--egress-proxy=auto` or omitted → resolved from local settings
+- `--egress-proxy=direct` → 直连
+- `--egress-proxy=<URL>` → 显式 proxy（`http://`、`https://`、`socks5://`、`socks5h://`）
+- `--egress-proxy=auto` 或省略 → 遵从本地设置
 
-SOCKS5 supports RFC 1929 username/password auth. `socks5://` resolves DNS locally; `socks5h://` sends the domain for proxy-side resolution.
+SOCKS5 支持 RFC 1929 用户名密码鉴权。`socks5://` 本地解析 DNS；`socks5h://` 把域名发给 proxy 解析。
 
 ```bash
 ccwrap --egress-proxy socks5://user:pass@proxy.example:1080
@@ -402,155 +402,155 @@ ccwrap --egress-proxy socks5://user:pass@proxy.example:1080
 
 </details>
 
-## Enterprise proxy / CA notes
+## 企业 proxy / CA 注意事项
 
 <details>
-<summary>enterprise proxy & CA trust notes</summary>
+<summary>企业 proxy 与 CA 信任注意事项</summary>
 
-Claude Code does **not** protect proxy/CA env under `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1`, so policy-managed proxy/CA can override ccwrap's session-proxy routing and trust bundle. With Claude Code, do **not** place these keys in `managed-settings.json`, remote managed settings, or MDM / HKCU policy:
+Claude Code 在 `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1` 下不会保护 proxy/CA env，所以 policy 管理的 proxy/CA 可能盖过 ccwrap 注入的会话代理路由和信任 bundle。用 Claude Code 时，**不要**把这些 key 放进 `managed-settings.json`、远端管理设置、MDM / HKCU policy：
 
-- `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` (and lowercase variants)
-- `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`, `NODE_TLS_REJECT_UNAUTHORIZED`
+- `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY`（及对应小写）
+- `NODE_EXTRA_CA_CERTS`、`SSL_CERT_FILE`、`SSL_CERT_DIR`、`REQUESTS_CA_BUNDLE`、`CURL_CA_BUNDLE`、`GIT_SSL_CAINFO`、`NODE_TLS_REJECT_UNAUTHORIZED`
 
-Recommended deployment patterns, in order of preference:
+推荐部署模式，按偏好顺序：
 
-1. Set the outbound enterprise proxy explicitly with `--egress-proxy`
-2. Set it in the launcher shell environment before invoking `ccwrap`
-3. Set it in non-policy Claude settings (`~/.claude.json`, `~/.claude/settings.json`, project / local settings, or user `--settings`)
-4. Install the enterprise root CA into the host OS trust store
+1. 用 `--egress-proxy` 显式指定出站代理
+2. 在启动 ccwrap 之前的 shell 环境里设
+3. 设在非 policy 的 Claude 设置里（`~/.claude.json`、`~/.claude/settings.json`、project / local 设置或用户 `--settings`）
+4. 把企业根 CA 装到宿主 OS 的信任库里
 
-ccwrap only performs best-effort local / cache policy inspection before launch: file-based managed settings plus the local `remote-settings.json` cache. Remote managed settings fetched after startup, MDM policy, and Windows HKCU policy are not fully verifiable pre-launch. A clean `ccwrap doctor` result only means "no detectable local / cache policy network / trust env."
+ccwrap 只做尽力而为的本地 / 缓存 policy 检查：基于文件的 managed-settings + 本地 `remote-settings.json` 缓存。运行后才拉取的远端管理设置、MDM policy、Windows HKCU policy 都没法 launch 前完全核验。`ccwrap doctor` 干净只代表"没检测到本地 / 缓存的 policy 网络 / trust env"。
 
 </details>
 
-## Headless capture (`ccwrap capture`)
+## 无头抓取（`ccwrap capture`）
 
 <details>
-<summary>ccwrap capture one-shot export usage</summary>
+<summary>ccwrap capture 一次性导出用法</summary>
 
-`ccwrap capture` is the headless counterpart of the request inspector: it launches a one-shot Claude session through the proxy, waits for the first matching `/v1/messages` exchange, and prints a single JSON object (request body; optionally response, headers, TLS fingerprint) to stdout. Built for diffing what different Claude Code versions put on the wire — system prompt, tool schemas, beta flags.
+`ccwrap capture` 是请求检查器的无头版：它通过代理拉起一个一次性 Claude 会话，等到第一个匹配的 `/v1/messages` 交换后，把单个 JSON 对象（请求 body；可选响应、header、TLS 指纹）打到 stdout。用途是 diff 不同 Claude Code 版本实际发出的内容：system prompt、tool schema、beta flag。
 
 ```bash
-ccwrap capture --full -- -p "hi" > v2.1.30.json   # body + response + headers + TLS
-ccwrap capture --tls-only                         # JA3 / JA4 / peetprint only
-ccwrap capture --main-inference -- -p "hi"        # skip quota/title/Warmup calls; grab the real agent inference
-ccwrap capture --print-diff-filter                # canonical jq filter that strips per-run noise for diffing
+ccwrap capture --full -- -p "hi" > v2.1.30.json   # body + 响应 + header + TLS
+ccwrap capture --tls-only                         # 只要 JA3 / JA4 / peetprint
+ccwrap capture --main-inference -- -p "hi"        # 跳过 quota/title/Warmup 调用，抓真正的 agent 推理
+ccwrap capture --print-diff-filter                # 输出剥离逐次噪声的标准 jq diff 过滤器
 ```
 
-Everything after `--` is passed to Claude verbatim (always pass `-p "..."` so exactly one exchange fires and capture exits). Credential headers are masked structure-preservingly by default; `--unmask` emits credential VALUES in cleartext for BOTH request headers and OAuth body fields (`refresh_token`/`access_token`) — nothing is redacted, so don't share the output. stdout carries only the JSON; progress and errors go to stderr. Under `--main-inference`, if the real inference never lands, the relaxed fallback still emits the closest exchange and flags the degradation in `meta.notes`.
+`--` 之后的参数原样传给 Claude（务必带 `-p "..."`，恰好触发一次交换后 capture 即退出）。凭据 header 默认做保结构掩码；`--unmask` 会让 header 与 OAuth body 字段（`refresh_token`/`access_token`）**全部明文**——什么都不打码，别分享输出。stdout 只有 JSON；进度与错误走 stderr。`--main-inference` 下若真正的推理始终没出现，宽松的兜底路径仍会输出最接近的交换，并在 `meta.notes` 里标记降级。
 
-`ccwrap capture` also aligns the timezone like a normal session (`--timezone` / `CCWRAP_TZ` / the remembered choice), but being non-interactive it never shows the first-run prompt.
-
-</details>
-
-## Activity feed
-
-<details>
-<summary>request classes & filtering</summary>
-
-The Activity section is a single live feed with class filters:
-
-| Class | What it contains |
-|-------|------------------|
-| `forwarded-api` | Requests forwarded to the upstream gateway (model API calls). Expandable. |
-| `synthetic` | Requests ccwrap answered locally (e.g. `/v1/models`, MCP registry shims, OAuth bootstrap). |
-| `tunnel` | Blind CONNECT tunnels — host CONNECT'd through ccwrap without MITM. |
-| `telemetry` | Claude Code's own datadog / statsig telemetry traffic. Visible but flagged. |
-| `errors` | Upstream / route resolution / preflight errors. |
-| `trace` | Profile switches, posture changes, refused transitions. |
-
-Filter-aware capping: switching to "Forwarded API" rebuilds the visible window from the newest forwarded-api rows (rather than slicing the current display), so high-volume synthetic/tunnel traffic never buries the gateway requests.
-
-Live updates flow via SSE (`/events`).
+`ccwrap capture` 也会像正常会话一样对齐时区（`--timezone` / `CCWRAP_TZ` / 记住的选择），但因为是非交互的，永远不会弹首次提示。
 
 </details>
 
-## Child process environment
+## Activity 列表
 
 <details>
-<summary>how the env passed to Claude is scrubbed / injected</summary>
+<summary>请求分类与筛选</summary>
 
-Claude and inherited child processes are launched with:
+Activity 区是单一的实时列表 + 类别筛选器：
 
-- `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1` — **only when ccwrap owns the upstream credential** (profile-declared auth → placeholder bootstrap). Current Claude Code treats this flag as "credentials come from the host" and stops reading local credentials entirely (stored subscription OAuth, the `/login` key, `apiKeyHelper`), so in first-party passthrough ccwrap omits it and your subscription login keeps working
-- `HTTPS_PROXY` / `https_proxy` / `HTTP_PROXY` / `http_proxy` → session proxy
-- `NODE_EXTRA_CA_CERTS` → ccwrap root certificate
-- a composite CA bundle env (`system roots + ccwrap root`) for Python / curl / Git
-- loopback-only `NO_PROXY`
-- a ccwrap-generated `--settings` file mirroring the same proxy/CA values into Claude flag settings
+| 类别 | 内容 |
+|------|------|
+| `forwarded-api` | 转发到上游网关的请求（model API 调用）。可展开 |
+| `synthetic` | ccwrap 在本地直接回的请求（比如 `/v1/models`、MCP registry shim、OAuth bootstrap）|
+| `tunnel` | 盲 CONNECT 隧道：host 通过 ccwrap CONNECT 但没做 MITM |
+| `telemetry` | Claude Code 自己的 datadog / statsig 遥测流量。会显示但被标记 |
+| `errors` | 上游 / 路由解析 / 启动错误 |
+| `trace` | profile 切换、posture 变化、refused 转换 |
 
-ccwrap **strips** these env keys from the child process and generated settings (they would create a second provider control path bypassing ccwrap):
+筛选感知截断：切到 "Forwarded API" 后，可见窗口是从全量 forwarded-api 中的最新一批重建的（不是从当前显示里切片），所以高频的 synthetic/tunnel 流量不会把网关请求淹没。
 
-- `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`
-- Bedrock / Vertex / Foundry routing keys, `VERTEX_REGION_CLAUDE_*`
-- `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`, `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`, `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (OTEL header-class env is kept unless a blocked endpoint is present)
-
-ccwrap **preserves but does not pre-execute**:
-
-- `apiKeyHelper` — arbitrary shell code; not run during preflight
-- `awsAuthRefresh`, `awsCredentialExport`, `gcpAuthRefresh`, `otelHeadersHelper` — request-time helpers. On first-party routes `ccwrap doctor` warns about them; when routing to a third-party upstream they are blocked at launch (use a ccwrap-owned upstream auth helper instead)
-
-ccwrap **resolves and re-injects** model preference env (`ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_*_MODEL*`, `ANTHROPIC_SMALL_FAST_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL`): resolved from parent env + trusted Claude settings, then injected into the child as host-mediated user intent rather than discarded.
-
-`ANTHROPIC_CUSTOM_HEADERS` is Claude-visible. When routing to a third-party upstream, auth-style header names (`Authorization`, `X-API-Key`, `Api-Key`, `X-Gateway-Key`, `X-LitellM-Key`, `X-Provider-Key`, anything token/secret/credential-style) are blocked before launch; values never appear in diagnostics. Gateway-only headers should use `CCWRAP_UPSTREAM_HEADERS_JSON` / `CCWRAP_UPSTREAM_HEADERS_FILE` / repeatable `--upstream-header` so they stay ccwrap-owned.
+实时更新走 SSE（`/events`）。
 
 </details>
 
-## Environment variables
+## 子进程环境
 
 <details>
-<summary>full CCWRAP_* and compatibility variable list</summary>
+<summary>传给 Claude 的 env 如何被擦净 / 注入</summary>
 
-User-facing:
+Claude 和它继承的子进程启动时会带上：
 
-| Variable | Description |
-|----------|-------------|
-| `CCWRAP_UPSTREAM` | Upstream base URL (compat alias: `ANTHROPIC_BASE_URL`). |
-| `CCWRAP_UPSTREAM_API_KEY` | API key for `X-API-Key` injection (compat alias: `ANTHROPIC_API_KEY`). |
-| `CCWRAP_UPSTREAM_AUTH_TOKEN` | Token for `Authorization: Bearer ...` injection (compat alias: `ANTHROPIC_AUTH_TOKEN`). |
-| `CCWRAP_UPSTREAM_HEADERS` / `_JSON` / `_FILE` | ccwrap-owned upstream header map, three input formats. |
-| `CCWRAP_MODEL_ALIASES_FILE` / `_JSON` | Model alias map, file path or inline JSON. |
-| `CCWRAP_PROFILE` | Profile name (= `--profile`). |
-| `CCWRAP_CAPTURE_BODIES=1` | Enable request + response body capture (= `--capture-bodies`). Default OFF. |
-| `CCWRAP_CAPTURE_TELEMETRY=1` | Opt-in telemetry MITM + body capture (= `--capture-telemetry`). Default OFF. |
-| `CCWRAP_NATIVE_TLS=0` | ⚠ Kill switch for native TLS fingerprint mirroring. Prints a stderr danger notice. |
-| `CCWRAP_NATIVE_TLS_HELLO` | Path to a `clienthello.bin` that pins the mirrored fingerprint instead of live capture. Fail-fast validation at launch. |
-| `CCWRAP_WEB_ALLOWED_HOSTS` | Comma-separated extra `Host` values admitted to the dashboard/info endpoints. Default loopback-only (DNS-rebinding guard); set this when serving the dashboard through a tunnel / reverse proxy. |
-| `CCWRAP_QUIET=1` | Collapse the launch banner to one line (= `--quiet`). Default off. |
-| `CCWRAP_KEEP_CLAUDE_METADATA=1` | Disable Claude Code system-prompt stripping on non-claude-* upstreams. |
-| `CCWRAP_UNMASK_CREDENTIALS=1` | ⚠ Disable header + body credential redaction in the inspector. ccwrap prints a stderr warning. |
-| `CCWRAP_TZ` | Timezone injected into Claude Code (= `--timezone`). `--timezone` wins. |
-| `CCWRAP_NO_TZ_PROMPT=1` | Suppress only the first-run timezone prompt (keeps the profiles-migration prompt). |
-| `CCWRAP_NO_INIT=1` | Skip the first-run auto-migration prompt (env → profiles.json) and the timezone prompt. |
+- `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1` —— **仅在 ccwrap 拥有上游凭据时注入**（profile 声明了 auth → 占位符 bootstrap）。当前版本的 Claude Code 会把这个 flag 理解成"凭据由宿主供给"，从而完全不再读取本地凭据（钥匙串里的订阅 OAuth、`/login` 存的 key、`apiKeyHelper`），所以一方透传时 ccwrap 不注入它，你的订阅登录照常工作
+- `HTTPS_PROXY` / `https_proxy` / `HTTP_PROXY` / `http_proxy` → 会话代理
+- `NODE_EXTRA_CA_CERTS` → ccwrap 的根证书
+- 复合 CA bundle env（`系统根 + ccwrap 根`）给 Python / curl / Git
+- 仅 loopback 的 `NO_PROXY`
+- 一份 ccwrap 生成的 `--settings`，把同样的 proxy/CA 值镜像到 Claude flag 设置里
 
-Internal / advanced:
+ccwrap 从子进程和生成的 settings 里**剥离**这些 env key（它们会创建绕过 ccwrap 的第二条 provider 控制路径）：
 
-| Variable | Description |
-|----------|-------------|
-| `CCWRAP_RUNTIME_DIR` / `CCWRAP_STATE_DIR` | Override default runtime / state directories. |
-| `CCWRAP_MANAGED_SETTINGS_DIR` | Override managed-settings inspection path. |
-| `CCWRAP_SYSTEM_CA_BUNDLE` | Override the system CA bundle path used by the composite trust store. |
+- `ANTHROPIC_BASE_URL`、`ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、`CLAUDE_CODE_OAUTH_TOKEN`
+- Bedrock / Vertex / Foundry 路由 key、`VERTEX_REGION_CLAUDE_*`
+- `OTEL_EXPORTER_OTLP_ENDPOINT`、`OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`、`OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`、`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`（OTEL header 类 env 留着，除非有被阻止的 endpoint）
+
+ccwrap **保留但不预执行**：
+
+- `apiKeyHelper` — 任意 shell 代码，preflight 不跑
+- `awsAuthRefresh`、`awsCredentialExport`、`gcpAuthRefresh`、`otelHeadersHelper` — 请求时跑的 helper。在 first-party 路径上 `ccwrap doctor` 会对它们告警；路由到第三方上游时启动直接阻塞（请改用 ccwrap-owned 上游 auth helper）
+
+ccwrap **解析并重新注入**模型偏好 env（`ANTHROPIC_MODEL`、`ANTHROPIC_DEFAULT_*_MODEL*`、`ANTHROPIC_SMALL_FAST_MODEL`、`CLAUDE_CODE_SUBAGENT_MODEL`）：从父进程 env + 可信 Claude 设置中解析后注入子进程，作为经宿主中介的用户意图保留，而不是直接丢弃。
+
+`ANTHROPIC_CUSTOM_HEADERS` 是 Claude 可见的。路由到第三方上游时，auth 风格的 header 名（`Authorization`、`X-API-Key`、`Api-Key`、`X-Gateway-Key`、`X-LitellM-Key`、`X-Provider-Key`、任何 token/secret/credential 风格的）启动前就阻塞；值不会出现在诊断里。网关专属 header 应该用 `CCWRAP_UPSTREAM_HEADERS_JSON` / `CCWRAP_UPSTREAM_HEADERS_FILE` / 可重复的 `--upstream-header` 让它们保持 ccwrap-owned。
 
 </details>
 
-## Filesystem layout
+## 环境变量
 
 <details>
-<summary>runtime dirs · socket · cache · CA files</summary>
+<summary>全部 CCWRAP_* 与兼容变量清单</summary>
 
-Runtime:
+用户可见：
+
+| 变量 | 说明 |
+|------|------|
+| `CCWRAP_UPSTREAM` | 上游 base URL（兼容别名：`ANTHROPIC_BASE_URL`）|
+| `CCWRAP_UPSTREAM_API_KEY` | `X-API-Key` 注入用的 API key（兼容别名：`ANTHROPIC_API_KEY`）|
+| `CCWRAP_UPSTREAM_AUTH_TOKEN` | `Authorization: Bearer ...` 注入用 token（兼容别名：`ANTHROPIC_AUTH_TOKEN`）|
+| `CCWRAP_UPSTREAM_HEADERS` / `_JSON` / `_FILE` | ccwrap 接管的上游 header 表，三种格式 |
+| `CCWRAP_MODEL_ALIASES_FILE` / `_JSON` | Model alias 表，文件路径或内联 JSON |
+| `CCWRAP_PROFILE` | Profile 名（同 `--profile`）|
+| `CCWRAP_CAPTURE_BODIES=1` | 开启请求与响应 body 抓取（同 `--capture-bodies`）。默认关 |
+| `CCWRAP_CAPTURE_TELEMETRY=1` | opt-in 遥测 MITM + body 抓取（同 `--capture-telemetry`）。默认关 |
+| `CCWRAP_NATIVE_TLS=0` | ⚠ 原生 TLS 指纹镜像的 kill switch。stderr 会打危险提示 |
+| `CCWRAP_NATIVE_TLS_HELLO` | 指向一份 `clienthello.bin`，用它钉死镜像指纹（取代实时捕获）。启动时 fail-fast 校验 |
+| `CCWRAP_WEB_ALLOWED_HOSTS` | 逗号分隔的额外 `Host` 值，放行到仪表盘/info endpoint。默认只允许 loopback（DNS-rebinding 防护）；经隧道/反代访问仪表盘时需要设置 |
+| `CCWRAP_QUIET=1` | 把启动横幅收成一行（同 `--quiet`）。默认关 |
+| `CCWRAP_KEEP_CLAUDE_METADATA=1` | 关闭非 claude-* 上游的 Claude Code 系统提示词裁剪 |
+| `CCWRAP_UNMASK_CREDENTIALS=1` | ⚠ 关闭检查器里 header + body 凭据打码。ccwrap 会往 stderr 打警告 |
+| `CCWRAP_TZ` | 注入到 Claude Code 的时区（同 `--timezone`）。`--timezone` 优先 |
+| `CCWRAP_NO_TZ_PROMPT=1` | 只关掉首次时区提示（保留 profiles 迁移提示）|
+| `CCWRAP_NO_INIT=1` | 跳过首次启动的自动迁移提示（env → profiles.json）与时区提示 |
+
+内部 / 高级：
+
+| 变量 | 说明 |
+|------|------|
+| `CCWRAP_RUNTIME_DIR` / `CCWRAP_STATE_DIR` | 覆盖默认 runtime / state 目录 |
+| `CCWRAP_MANAGED_SETTINGS_DIR` | 覆盖 managed-settings 检查路径 |
+| `CCWRAP_SYSTEM_CA_BUNDLE` | 覆盖复合信任 store 用的系统 CA bundle 路径 |
+
+</details>
+
+## 文件系统布局
+
+<details>
+<summary>运行时目录 · socket · 缓存 · CA 文件</summary>
+
+Runtime：
 
 ```text
 <runtime>/sessions/<session-id>/
   manifest.json
   control.sock
-  bodies/<spill-id>.json   # only when --capture-bodies is on (request + response)
+  bodies/<spill-id>.json   # 仅在 --capture-bodies 开启时存在（请求 + 响应）
 ```
 
-State:
+State：
 
 ```text
-<state>/profiles.json        # named profiles (auto-seeded with `official` on first run)
+<state>/profiles.json        # 命名 profile（首次启动自动 seed `official`）
 <state>/certs/
   ca-cert.pem
   ca-key.pem
@@ -559,30 +559,30 @@ State:
   ca.lock
 ```
 
-Default `<runtime>` and `<state>`:
+`<runtime>` 和 `<state>` 默认位置：
 
-- macOS: state in `~/Library/Application Support/ccwrap/`, runtime in `$TMPDIR/ccwrap-<UID>/` (typically under `/var/folders/...`)
-- Linux: state in `~/.config/ccwrap/` (or `$XDG_STATE_HOME/ccwrap/`), runtime the same
-- Override with `CCWRAP_STATE_DIR` / `CCWRAP_RUNTIME_DIR`
+- macOS：state 在 `~/Library/Application Support/ccwrap/`，runtime 在 `$TMPDIR/ccwrap-<UID>/`（通常在 `/var/folders/...` 下）
+- Linux：state 在 `~/.config/ccwrap/`（或 `$XDG_STATE_HOME/ccwrap/`），runtime 同上
+- 可用 `CCWRAP_STATE_DIR` / `CCWRAP_RUNTIME_DIR` 覆盖
 
 </details>
 
-## Security
+## 安全
 
-- Gateway credentials (API keys, bearer tokens, upstream-only headers) never enter the Claude child process env, the generated `--settings` file, the manifest, the status output, or the browser UI.
-- When routing to a third-party upstream, Claude only ever sees Claude model IDs; provider-specific IDs are confined to ccwrap-internal data.
-- OAuth host bodies have their credential JSON fields redacted before being saved to disk for the inspector, but the original bytes still reach the upstream untouched.
-- Auth-style request headers (`Authorization`, `X-API-Key`, etc.) are masked **store-side**: the raw value is erased before any record reaches the inspector wire, so it never appears in `/recent`, the page bootstrap, the SSE stream, a HAR export, or a saved body — only a structure-preserving `Bearer sk-…‹redacted N chars›` form. `CCWRAP_UNMASK_CREDENTIALS=1` is the launch-time opt-in to keep raw values (the ribbon shows a persistent UNMASKED marker).
-- Anthropic-host upstream dials carry Claude Code's own TLS fingerprint (native-TLS mirror, **fail-closed**: a failed mirror blocks the dial instead of exposing a Go fingerprint).
-- The dashboard/info listener refuses requests whose `Host` header is not loopback-shaped (DNS-rebinding guard, HTTP 421). Tunnel / reverse-proxy hostnames must be allowlisted explicitly via `CCWRAP_WEB_ALLOWED_HOSTS`.
-- **Tunneled access = an unauthenticated dashboard.** Once you allowlist tunnel / reverse-proxy access via `CCWRAP_WEB_ALLOWED_HOSTS`, **anyone with the URL** can read `/recent` (request metadata + redacted bodies), scrape the CSRF token from the page, and drive mutations (switch profiles, edit aliases, toggle capture). Credentials are redacted, but prompt / response bodies, profile names, and upstream hosts are plaintext — only expose it on a trusted network / trusted tunnel, and don't post the URL anywhere public.
-- On Linux, when `XDG_RUNTIME_DIR` is unset the runtime dir falls back to `/tmp/ccwrap-<uid>`, where request/response bodies are written **in plaintext** (files `0600`, dirs `0700` — not readable by others on the machine, cleared when the session ends); set `XDG_RUNTIME_DIR` on bare SSH / `su` setups.
-- When ccwrap owns the upstream credential it injects `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1`, and Claude-protected env keys (proxy, CA) cannot be overridden by Claude's own settings sources — except for the unprotected categories listed under "Enterprise proxy / CA notes." In first-party passthrough the flag is omitted (current Claude Code would otherwise refuse local login credentials entirely); ccwrap's spawn scrub and generated-settings sanitisation still close the routing/auth env paths on ccwrap's side.
-- The session listener only serves `/`, `/healthz`, `/recent`, `/recent/body`, `/events`, `/native-tls`, `/native-tls/clienthello.bin`, plus the profile API endpoints under `/profile/*` and the capture toggles `/capture/bodies` and `/capture/telemetry`. Other paths return 404.
+- 网关凭据（API key、bearer token、上游专属 header）不会进入 Claude 子进程 env、生成的 `--settings`、manifest、status 输出或浏览器 UI
+- 路由到第三方上游时，Claude 始终只看到 Claude model id；provider 特定的 id 被限制在 ccwrap 内部数据里
+- OAuth host body 在保存到磁盘给检查器看之前会把凭据 JSON 字段打码，但原始字节会原样发到上游
+- Auth 风格的请求 header（`Authorization`、`X-API-Key` 等）在 store 侧就被掩码：记录进入 inspector wire 之前原文已被抹除，`/recent`、页面 bootstrap、SSE 流、HAR 导出、保存的 body 里都不会出现原文，只有保结构的 `Bearer sk-…‹redacted N chars›` 形式。`CCWRAP_UNMASK_CREDENTIALS=1` 是保留原文的 launch-time opt-in（ribbon 显示持久的 UNMASKED 标记）
+- 向 Anthropic host 的上游拨号带的是 Claude Code 自己的 TLS 指纹（原生 TLS 镜像，**fail-closed**：镜像失败会阻断该次拨号，而不是暴露 Go 指纹）
+- 仪表盘/info 监听拒绝 `Host` header 非 loopback 形态的请求（DNS-rebinding 防护，HTTP 421）。隧道/反代主机名需用 `CCWRAP_WEB_ALLOWED_HOSTS` 显式放行
+- **经隧道访问 = 无鉴权仪表盘。** 一旦用 `CCWRAP_WEB_ALLOWED_HOSTS` 放行隧道/反代访问，**任何拿到该 URL 的人**都能读 `/recent`（请求元数据 + 脱敏 body）、抓取页面里的 CSRF token 并驱动 mutation（切 profile、改 alias、开关抓取）。凭据已脱敏，但 prompt / response body、profile 名、上游 host 都是明文——只在受信网络 / 受信隧道上开放，别把该 URL 贴到公开处
+- Linux 上 `XDG_RUNTIME_DIR` 未设时，runtime 目录 fallback 到 `/tmp/ccwrap-<uid>`，其中的请求/响应 body 是**明文落盘**（文件 `0600`、目录 `0700`，同机他人读不到，会话结束即清）；裸 SSH / `su` 等场景建议设 `XDG_RUNTIME_DIR`
+- ccwrap 拥有上游凭据时会注入 `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1`，此时 Claude-protected env key（proxy、CA）不会被 Claude 自己的设置源覆盖；例外是"企业 proxy / CA 注意事项"里列的那几类不受保护。一方透传时不注入该 flag（当前版本的 Claude Code 会因它彻底拒读本地登录凭据）；路由/auth 的 env 通路仍由 ccwrap 自己的 spawn 清洗和生成 settings 剥离兜住
+- 会话监听只服务 `/`、`/healthz`、`/recent`、`/recent/body`、`/events`、`/native-tls`、`/native-tls/clienthello.bin`，加上 `/profile/*` 下的 profile API endpoint 和抓取开关 `/capture/bodies`、`/capture/telemetry`。其他路径返回 404
 
 ## TODO
 
-- Pinned device fingerprint to allow shared use.
-- `cc-switch` config quick-import and sync.
+- 固定设备指纹允许分享使用
+- cc-switch 配置的快捷导入和同步
 
-Hope this helps. If the project has gaps or you have better ideas, issues and PRs are welcome.
+希望这一切对你有所帮助。如果项目有什么疏漏或者更好的想法，欢迎提出 issue 或 PR。

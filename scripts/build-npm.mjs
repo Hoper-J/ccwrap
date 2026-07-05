@@ -76,14 +76,18 @@ console.log(`staged @hoper-j/ccwrap@${version}`);
 const SLUG = "Hoper-J/ccwrap";
 const RAW = `https://raw.githubusercontent.com/${SLUG}/main`;
 const BLOB = `https://github.com/${SLUG}/blob/main`;
-const fullReadme = readFileSync(resolve(root, "README.md"), "utf8");
+// The repo's default README.md is Simplified Chinese; the npm package page
+// stays English, so it is generated from README.en.md. The language-switch
+// link there points at README.md (Chinese) — rewrite it to an absolute blob
+// URL so it resolves from the npm page.
+const fullReadme = readFileSync(resolve(root, "README.en.md"), "utf8");
 const npmReadme =
   fullReadme.trimEnd()
     .replaceAll("](assets/", `](${RAW}/assets/`)
     .replaceAll("](docs/", `](${RAW}/docs/`)
-    .replaceAll("](README.zh-CN.md)", `](${BLOB}/README.zh-CN.md)`)
+    .replaceAll("](README.md)", `](${BLOB}/README.md)`)
     .replaceAll("](LICENSE)", `](${BLOB}/LICENSE)`)
-    .replaceAll(`href="README.zh-CN.md"`, `href="${BLOB}/README.zh-CN.md"`)
+    .replaceAll(`href="README.md"`, `href="${BLOB}/README.md"`)
     .replaceAll(`href="LICENSE"`, `href="${BLOB}/LICENSE"`) +
   `
 
@@ -100,7 +104,7 @@ Full documentation — commands, flags, profiles, the security model, and more �
 Independent community project — **not affiliated with, endorsed by, or sponsored by Anthropic**; "Claude" and "Anthropic" are trademarks of their respective owners. For interoperability / instrumentation of software you are authorized to run; you are responsible for complying with the terms of any service you connect to. See [SECURITY.md](https://github.com/${SLUG}/blob/main/SECURITY.md).
 `;
 writeFileSync(resolve(root, "npm", "ccwrap", "README.md"), npmReadme);
-console.log("generated npm/ccwrap/README.md from README.md front matter");
+console.log("generated npm/ccwrap/README.md from README.en.md front matter");
 
 console.log(
   [
