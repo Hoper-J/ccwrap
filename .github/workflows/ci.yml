@@ -84,7 +84,7 @@ jobs:
         run: shellcheck install.sh
       - name: node --check (npm launcher + build script)
         run: |
-          node --check npm/ccwrap/bin/ccwrap.js
+          node --check npm/ccwrap-cli/bin/ccwrap.js
           node --check scripts/build-npm.mjs
 
   release-config:

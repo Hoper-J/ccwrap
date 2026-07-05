@@ -5,13 +5,13 @@ preserves the client's native TLS fingerprint. It installs a local CA and
 man-in-the-middles the launched process for inspection/instrumentation.
 
 ```sh
-npm install -g @hoper-j/ccwrap   # provides the `ccwrap` command
+npm install -g ccwrap-cli   # provides the `ccwrap` command
 # or
-npx @hoper-j/ccwrap version
+npx ccwrap-cli version
 ```
 
 This package is a thin launcher: the platform binary ships in a per-OS/arch
-optional dependency (`@hoper-j/ccwrap-<os>-<arch>`) and npm installs only the one
+optional dependency (`@hoper-j/ccwrap-cli-<os>-<arch>`) and npm installs only the one
 matching your machine (macOS/Linux, x64/arm64). Other install methods (`install.sh`, `go install`, prebuilt GitHub Release binaries) are documented in
 the [project README](https://github.com/Hoper-J/ccwrap).
 

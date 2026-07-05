@@ -17,7 +17,7 @@ fingerprint. Because it installs a CA and intercepts TLS, its supply-chain
 integrity matters:
 
 - Install only from the official channels: GitHub Releases,
-  npm `@hoper-j/ccwrap`, or `go install github.com/Hoper-J/ccwrap/cmd/ccwrap`.
+  npm `ccwrap-cli`, or `go install github.com/Hoper-J/ccwrap/cmd/ccwrap`.
 - Verify the published `checksums.txt` against its cosign signature before
   trusting a binary download. The signature is keyless (Sigstore/OIDC — there
   is no public key to distribute), so verification pins the signing identity:

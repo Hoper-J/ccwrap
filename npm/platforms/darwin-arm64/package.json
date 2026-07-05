@@ -1,5 +1,5 @@
 {
-  "name": "@hoper-j/ccwrap-darwin-arm64",
+  "name": "@hoper-j/ccwrap-cli-darwin-arm64",
   "version": "0.0.0",
   "description": "ccwrap binary for macOS arm64",
   "os": [

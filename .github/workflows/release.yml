@@ -124,4 +124,4 @@ jobs:
           for d in darwin-arm64 darwin-amd64 linux-arm64 linux-amd64; do
             publish "./npm/platforms/$d"
           done
-          publish ./npm/ccwrap
+          publish ./npm/ccwrap-cli

@@ -1,5 +1,5 @@
 {
-  "name": "@hoper-j/ccwrap",
+  "name": "ccwrap-cli",
   "version": "0.0.0",
   "description": "Per-session launcher and local instrumentation proxy for Claude Code with native TLS-fingerprint fidelity",
   "bin": {
@@ -21,9 +21,9 @@
     "node": ">=16"
   },
   "optionalDependencies": {
-    "@hoper-j/ccwrap-darwin-arm64": "0.0.0",
-    "@hoper-j/ccwrap-darwin-amd64": "0.0.0",
-    "@hoper-j/ccwrap-linux-arm64": "0.0.0",
-    "@hoper-j/ccwrap-linux-amd64": "0.0.0"
+    "@hoper-j/ccwrap-cli-darwin-arm64": "0.0.0",
+    "@hoper-j/ccwrap-cli-darwin-amd64": "0.0.0",
+    "@hoper-j/ccwrap-cli-linux-arm64": "0.0.0",
+    "@hoper-j/ccwrap-cli-linux-amd64": "0.0.0"
   }
 }

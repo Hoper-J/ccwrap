@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
-  <a href="https://www.npmjs.com/package/@hoper-j/ccwrap"><img alt="npm" src="https://img.shields.io/npm/v/@hoper-j/ccwrap"></a>
+  <a href="https://www.npmjs.com/package/ccwrap-cli"><img alt="npm" src="https://img.shields.io/npm/v/ccwrap-cli"></a>
   <a href="https://github.com/Hoper-J/ccwrap/releases"><img alt="Release" src="https://img.shields.io/github/v/release/Hoper-J/ccwrap"></a>
   <a href="https://github.com/Hoper-J/ccwrap/pulls"><img alt="PRs Welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg"></a>
 </p>
@@ -18,7 +18,7 @@ Thanks to the officially "open-sourced" 2.1.88 source, a number of restrictions 
 ## Install
 
 ```bash
-npm install -g @hoper-j/ccwrap
+npm install -g ccwrap-cli
 
 # or: install script (downloads the prebuilt binary)
 curl -fsSL https://raw.githubusercontent.com/Hoper-J/ccwrap/main/install.sh | sh

@@ -1,5 +1,5 @@
 {
-  "name": "@hoper-j/ccwrap-linux-arm64",
+  "name": "@hoper-j/ccwrap-cli-linux-arm64",
   "version": "0.0.0",
   "description": "ccwrap binary for Linux arm64",
   "os": [

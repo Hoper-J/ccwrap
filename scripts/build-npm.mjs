@@ -56,16 +56,16 @@ for (const { os, goarch } of PLATFORMS) {
   execFileSync("tar", ["-xzf", archive, "-C", binDir, "ccwrap"]);
   chmodSync(resolve(binDir, "ccwrap"), 0o755);
   setVersion(resolve(pkgDir, "package.json"));
-  console.log(`staged @hoper-j/ccwrap-${os}-${goarch}@${version}`);
+  console.log(`staged @hoper-j/ccwrap-cli-${os}-${goarch}@${version}`);
 }
 
 // 2. Main package: stamp version + pin optionalDependencies to the same version.
-setVersion(resolve(root, "npm", "ccwrap", "package.json"), (pkg) => {
+setVersion(resolve(root, "npm", "ccwrap-cli", "package.json"), (pkg) => {
   for (const k of Object.keys(pkg.optionalDependencies || {})) {
     pkg.optionalDependencies[k] = version;
   }
 });
-console.log(`staged @hoper-j/ccwrap@${version}`);
+console.log(`staged ccwrap-cli@${version}`);
 
 // 3. Main package README: generate it from the whole project README so the npm
 //    page mirrors GitHub (overview + screenshots + the folded reference
@@ -95,7 +95,7 @@ const npmReadme =
 
 ## npm distribution
 
-This package is a thin launcher: the actual binary ships in a per-OS/arch optional dependency (\`@hoper-j/ccwrap-<os>-<arch>\`) and npm installs only the one matching your machine (macOS / Linux, x64 / arm64). \`npm install -g @hoper-j/ccwrap\` is all you need.
+This package is a thin launcher: the actual binary ships in a per-OS/arch optional dependency (\`@hoper-j/ccwrap-cli-<os>-<arch>\`) and npm installs only the one matching your machine (macOS / Linux, x64 / arm64). \`npm install -g ccwrap-cli\` is all you need (the command it installs is \`ccwrap\`).
 
 Full documentation — commands, flags, profiles, the security model, and more — lives in the [project README](https://github.com/${SLUG}).
 
@@ -103,8 +103,8 @@ Full documentation — commands, flags, profiles, the security model, and more �
 
 Independent community project — **not affiliated with, endorsed by, or sponsored by Anthropic**; "Claude" and "Anthropic" are trademarks of their respective owners. For interoperability / instrumentation of software you are authorized to run; you are responsible for complying with the terms of any service you connect to. See [SECURITY.md](https://github.com/${SLUG}/blob/main/SECURITY.md).
 `;
-writeFileSync(resolve(root, "npm", "ccwrap", "README.md"), npmReadme);
-console.log("generated npm/ccwrap/README.md from README.en.md front matter");
+writeFileSync(resolve(root, "npm", "ccwrap-cli", "README.md"), npmReadme);
+console.log("generated npm/ccwrap-cli/README.md from README.en.md front matter");
 
 console.log(
   [
@@ -114,7 +114,7 @@ console.log(
       ({ os, goarch }) =>
         `  npm publish --access public ./npm/platforms/${os}-${goarch}`
     ),
-    "  npm publish --access public ./npm/ccwrap",
+    "  npm publish --access public ./npm/ccwrap-cli",
     "",
   ].join("\n")
 );

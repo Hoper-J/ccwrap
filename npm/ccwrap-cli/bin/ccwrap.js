@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Thin launcher for the ccwrap CLI distributed over npm. The actual binary ships
-// in a per-platform optional dependency (@hoper-j/ccwrap-<os>-<arch>); npm installs
+// in a per-platform optional dependency (@hoper-j/ccwrap-cli-<os>-<arch>); npm installs
 // only the one matching the host's os/cpu. This shim resolves that package's binary
 // and execs it, forwarding argv, stdio, and the exit code.
 "use strict";
@@ -21,7 +21,7 @@ function resolveBinary() {
     );
   }
 
-  const pkg = `@hoper-j/ccwrap-${platform}-${goarch}`;
+  const pkg = `@hoper-j/ccwrap-cli-${platform}-${goarch}`;
   let pkgJson;
   try {
     pkgJson = require.resolve(`${pkg}/package.json`);
