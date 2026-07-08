@@ -6,7 +6,7 @@
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
   <a href="https://www.npmjs.com/package/ccwrap-cli"><img alt="npm" src="https://img.shields.io/npm/v/ccwrap-cli"></a>
   <a href="https://github.com/Hoper-J/ccwrap/releases"><img alt="Release" src="https://img.shields.io/github/v/release/Hoper-J/ccwrap"></a>
-  <a href="https://github.com/Hoper-J/ccwrap/pulls"><img alt="PRs Welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg"></a>
+  <a href="CONTRIBUTING.zh-CN.md"><img alt="PRs Welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg"></a>
 </p>
 
 ccwrap 接管 Claude Code 与上游 API 之间的网络边界，路由到任何 Anthropic 兼容的网关并让 Claude Code 认为是第一方路径、允许按 provider 替换模型并检查每一次请求与响应。
