@@ -1,9 +1,25 @@
 # The workflows pin actions to commit SHAs (tags are mutable, and the release
-# workflow holds NPM_TOKEN + id-token:write). Dependabot keeps those pins from
-# rotting: it PRs SHA bumps and rewrites the trailing `# vX.Y.Z` comments.
+# workflow holds NPM_TOKEN + id-token:write). A SHA pin is safe no matter how
+# stale it gets — it names one audited commit and can't be moved under us — so
+# "keeping pins fresh" is not itself a security need; the only bumps that
+# genuinely matter are security fixes (which arrive via Dependabot SECURITY
+# updates, independent of this file) and the occasional forced compatibility
+# bump. So this config stays low-noise:
+#   - monthly, not weekly;
+#   - all actions grouped into ONE PR instead of one-per-action;
+#   - major bumps are NOT auto-PR'd — they can break a secrets-holding release
+#     job and need manual review, so we take them by hand.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
+    groups:
+      actions:
+        patterns:
+          - "*"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
