@@ -39,7 +39,7 @@ jobs:
             echo "::error::secrets.NPM_TOKEN is missing or empty; refusing to release. Configure the secret, or edit release.yml if npm is deliberately no longer a release channel."
             exit 1
           fi
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           # Build released binaries with the latest patched Go so they don't ship
           # known standard-library CVEs (see the CI govulncheck note).
