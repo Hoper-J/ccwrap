@@ -88,7 +88,8 @@ const npmReadme =
     .replaceAll("](README.md)", `](${BLOB}/README.md)`)
     .replaceAll("](LICENSE)", `](${BLOB}/LICENSE)`)
     .replaceAll(`href="README.md"`, `href="${BLOB}/README.md"`)
-    .replaceAll(`href="LICENSE"`, `href="${BLOB}/LICENSE"`) +
+    .replaceAll(`href="LICENSE"`, `href="${BLOB}/LICENSE"`)
+    .replaceAll(`href="CONTRIBUTING.md"`, `href="${BLOB}/CONTRIBUTING.md"`) +
   `
 
 ---
