@@ -24,12 +24,12 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: "stable"
-      - uses: github/codeql-action/init@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3.36.3
+      - uses: github/codeql-action/init@02c5e83432fe5497fd85b873b6c9f16a8578e1d9 # v3.37.0
         with:
           # languages: go already scopes analysis to Go, so the vendored
           # claude-code (JS/TS) source is excluded automatically.
           languages: go
-      - uses: github/codeql-action/autobuild@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3.36.3
-      - uses: github/codeql-action/analyze@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3.36.3
+      - uses: github/codeql-action/autobuild@02c5e83432fe5497fd85b873b6c9f16a8578e1d9 # v3.37.0
+      - uses: github/codeql-action/analyze@02c5e83432fe5497fd85b873b6c9f16a8578e1d9 # v3.37.0
         with:
           category: "/language:go"
