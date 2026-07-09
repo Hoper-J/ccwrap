@@ -1691,6 +1691,9 @@ func TestMaybeMigrateFromEnv_MalformedBaseURLSkip(t *testing.T) {
 // so WriteFile's OpenFile(O_CREATE) returns EACCES. We restore 0o755
 // after capture so t.TempDir cleanup can rm the dir.
 func TestMaybeMigrateFromEnv_WriteFailFallback(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("chmod-based write-fail simulation is ineffective as root (CAP_DAC_OVERRIDE lets the write succeed)")
+	}
 	restore := stubIsTerminal(false)
 	defer restore()
 	dir := t.TempDir()

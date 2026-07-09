@@ -99,13 +99,10 @@ func TestSessionProxyRoutesAndOverridesAuth(t *testing.T) {
 	if gotAuth != "sekret" {
 		t.Fatalf("unexpected auth override: %q", gotAuth)
 	}
-	requests, err := client.Requests(context.Background(), sess.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(requests) == 0 {
-		t.Fatal("expected recorded request")
-	}
+	requests := waitForRequestRecord(t, client, sess.ID, "forwarded /v1/messages request",
+		func(rec model.RequestRecord) bool {
+			return rec.Method == http.MethodPost && strings.Contains(rec.Path, "/v1/messages")
+		})
 	if requests[len(requests)-1].ActualUpstreamHost != mustParse(t, upstream.URL).Hostname() {
 		t.Fatalf("unexpected actual upstream host: %s", requests[len(requests)-1].ActualUpstreamHost)
 	}
@@ -614,13 +611,8 @@ func TestSessionProxyHTTPForwardProxyPassThrough(t *testing.T) {
 	if gotPath != "/plain/path?x=1" {
 		t.Fatalf("unexpected upstream request path: %s", gotPath)
 	}
-	requests, err := client.Requests(context.Background(), sess.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(requests) == 0 {
-		t.Fatal("expected recorded forward-proxy request")
-	}
+	requests := waitForRequestRecord(t, client, sess.ID, "forward-proxy request",
+		func(rec model.RequestRecord) bool { return rec.Method == http.MethodGet })
 	last := requests[len(requests)-1]
 	if last.Path != "/plain/path?<redacted>" {
 		t.Fatalf("unexpected logical path (expected query redacted for non-Anthropic forward target): %#v", last)
@@ -704,8 +696,11 @@ func TestSessionProxyCloseUnblocksHangingMITM(t *testing.T) {
 		t.Fatalf("sessionProxy.Close: %v", err)
 	}
 	elapsed := time.Since(start)
-	if elapsed > time.Second {
-		t.Fatalf("Close took too long: %v (expected < 1s)", elapsed)
+	// A Close that waits on the hung request blocks until the test's own
+	// teardown (hangCh never closes before then), so 3s still discriminates
+	// sharply while giving a starved CI runner scheduling slack.
+	if elapsed > 3*time.Second {
+		t.Fatalf("Close took too long: %v (expected < 3s)", elapsed)
 	}
 
 	select {
@@ -997,6 +992,36 @@ func waitForForwardedMessage(t *testing.T, client *control.Client, sessionID str
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("forwarded /v1/messages request not recorded within 3s: %#v", last)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// waitForRequestRecord generalizes waitForForwardedMessage to any record
+// shape: it polls the control Requests endpoint until pred matches a record,
+// returning the ring snapshot that contained the match (so invariant sweeps
+// can run over the same data). Forwarded records land only after the
+// ReverseProxy handler returns and synthetic records only after the response
+// is written, so a single read immediately after the client-observed round
+// trip races — the record can lag the response, especially on slower CI
+// runners. Only blind-tunnel CONNECT (recorded before the relay starts) and
+// rewrite-rejected 502s (recorded before http.Error) are exempt.
+func waitForRequestRecord(t *testing.T, client *control.Client, sessionID, what string, pred func(model.RequestRecord) bool) []model.RequestRecord {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	var last []model.RequestRecord
+	for {
+		requests, err := client.Requests(context.Background(), sessionID)
+		if err == nil {
+			last = requests
+			for _, rec := range requests {
+				if pred(rec) {
+					return requests
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s not recorded within 3s: %#v", what, last)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -2254,19 +2279,8 @@ func TestBlindTunnelAndSyntheticHaveNoHeaders(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	requests, err := client.Requests(context.Background(), sess.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sawSynthetic := false
-	for _, rec := range requests {
-		if rec.Synthetic {
-			sawSynthetic = true
-		}
-	}
-	if !sawSynthetic {
-		t.Fatalf("expected a synthetic record for /v1/models, got %#v", requests)
-	}
+	requests := waitForRequestRecord(t, client, sess.ID, "synthetic /v1/models record",
+		func(rec model.RequestRecord) bool { return rec.Synthetic })
 	assertHeaderlessInvariant(t, requests)
 
 	// Scenario 2 — blind tunnel: no RouteClass ⇒ CCWRAP does not MITM;
@@ -2386,19 +2400,8 @@ func TestBlindTunnelAndSyntheticHaveNoBodyRef(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	requests, err := client.Requests(context.Background(), sess.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sawSynthetic := false
-	for _, rec := range requests {
-		if rec.Synthetic {
-			sawSynthetic = true
-		}
-	}
-	if !sawSynthetic {
-		t.Fatalf("expected a synthetic record for /v1/models, got %#v", requests)
-	}
+	requests := waitForRequestRecord(t, client, sess.ID, "synthetic /v1/models record",
+		func(rec model.RequestRecord) bool { return rec.Synthetic })
 	assertBodylessInvariant(t, requests)
 
 	// No spilled body file may exist for the synthetic session.
@@ -2515,7 +2518,6 @@ func TestRecentJSONMasksCredentialsByDefault(t *testing.T) {
 	// "fixing" the test.
 	client, sess, hc, upstream := headerInspectorSession(t, "r.sock")
 	defer upstream.Close()
-	_ = client
 
 	req, _ := http.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", strings.NewReader(`{"model":"x"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -2525,6 +2527,15 @@ func TestRecentJSONMasksCredentialsByDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
+
+	// The record lands only after the proxy handler returns, so /recent
+	// polled immediately can win the race and show an empty ring. Wait via
+	// the control surface first — same ring, same lock, so control-visible
+	// implies /recent-visible.
+	waitForRequestRecord(t, client, sess.ID, "forwarded /v1/messages request",
+		func(rec model.RequestRecord) bool {
+			return rec.Method == http.MethodPost && strings.Contains(rec.Path, "/v1/messages")
+		})
 
 	rresp, err := http.Get("http://" + sess.ProxyListenAddr + "/recent")
 	if err != nil {
@@ -3248,13 +3259,8 @@ func TestPerRequestApCaptureSurvivesMidHandlerStore(t *testing.T) {
 	}
 	// (4) Defense in depth: the recorded request also carries the
 	// captured-A truth (synthetic flag + 204), not the live-B one.
-	requests, err := client.Requests(context.Background(), sess.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(requests) == 0 {
-		t.Fatal("expected at least one recorded request after the synthetic response")
-	}
+	requests := waitForRequestRecord(t, client, sess.ID, "synthetic response record",
+		func(rec model.RequestRecord) bool { return rec.Synthetic })
 	last := requests[len(requests)-1]
 	if !last.Synthetic {
 		t.Fatalf("recorded request.Synthetic = false, want true (synthetic path under A); last = %+v", last)

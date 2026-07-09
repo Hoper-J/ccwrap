@@ -75,10 +75,10 @@ func TestTelemetryMITMCapturesRequestAndResponseBodies(t *testing.T) {
 		t.Errorf("stub received request body %q, want %q (unchanged)", gotReqBody, reqBody)
 	}
 
-	recs, err := client.Requests(context.Background(), sess.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	recs := waitForRequestRecord(t, client, sess.ID, "telemetry POST record",
+		func(r model.RequestRecord) bool {
+			return r.LogicalTargetHost == "http-intake.logs.us5.datadoghq.com" && r.Method == http.MethodPost
+		})
 	var rec *model.RequestRecord
 	for i := range recs {
 		if recs[i].LogicalTargetHost == "http-intake.logs.us5.datadoghq.com" && recs[i].Method == http.MethodPost {
@@ -156,10 +156,10 @@ func TestTelemetryMITMRedactsCredentialFieldsInSpill(t *testing.T) {
 		t.Errorf("stub received %q, want raw unchanged body %q", gotReqBody, reqBody)
 	}
 
-	recs, err := client.Requests(context.Background(), sess.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	recs := waitForRequestRecord(t, client, sess.ID, "telemetry POST record",
+		func(r model.RequestRecord) bool {
+			return r.LogicalTargetHost == "http-intake.logs.us5.datadoghq.com" && r.Method == http.MethodPost
+		})
 	var rec *model.RequestRecord
 	for i := range recs {
 		if recs[i].LogicalTargetHost == "http-intake.logs.us5.datadoghq.com" && recs[i].Method == http.MethodPost {

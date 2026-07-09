@@ -169,15 +169,18 @@ func TestRunCaptureLoop_SyntheticReturnsPromptlyWithFlag(t *testing.T) {
 
 	opts := captureOpts{Response: true, Host: "api.anthropic.com", Path: "/v1/messages"}
 	start := time.Now()
-	// Generous deadline; a synthetic match must return immediately, not wait it out.
-	res, synthetic, err := runCaptureLoop(ts.URL, opts, time.Now().Add(5*time.Second), nil)
+	// Generous deadline; a synthetic match must return immediately, not wait
+	// it out. The 4s promptness bound stays well under the 10s deadline (the
+	// discriminator: a broken strict matcher only returns via giveUp AT the
+	// deadline) while giving a starved CI runner scheduling slack.
+	res, synthetic, err := runCaptureLoop(ts.URL, opts, time.Now().Add(10*time.Second), nil)
 	if err != nil {
 		t.Fatalf("runCaptureLoop: %v", err)
 	}
 	if !synthetic {
 		t.Fatalf("synthetic record must set the synthetic flag")
 	}
-	if time.Since(start) > 2*time.Second {
+	if time.Since(start) > 4*time.Second {
 		t.Fatalf("synthetic match should return promptly, took %v", time.Since(start))
 	}
 	joined := strings.Join(res.Meta.Notes, " ")
@@ -241,7 +244,9 @@ func TestRunCaptureLoop_BodyLessResponseDoesNotHang(t *testing.T) {
 	if synthetic {
 		t.Fatalf("non-synthetic record must not set the synthetic flag")
 	}
-	if time.Since(start) > 2*time.Second {
+	// Anti-runaway only (the bug this guards — spin to the deadline then
+	// error — is caught by the err check above); generous for slow runners.
+	if time.Since(start) > 5*time.Second {
 		t.Fatalf("body-less response capture should not hang, took %v", time.Since(start))
 	}
 
@@ -290,7 +295,9 @@ func TestRunCaptureLoop_TimeoutMentionsPath(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected a timeout error")
 	}
-	if time.Since(start) > 2*time.Second {
+	// Anti-runaway only (the contract under test is the error + its
+	// message); generous for slow runners.
+	if time.Since(start) > 5*time.Second {
 		t.Fatalf("timeout took too long: %v", time.Since(start))
 	}
 	if !strings.Contains(err.Error(), "/v1/messages") {
@@ -336,8 +343,11 @@ func TestRunCaptureLoop_ChildExitAborts(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected an error after child exit with no match")
 	}
-	// Should give up quickly after the child exits, well before the deadline.
-	if time.Since(start) > 3*time.Second {
+	// Should give up quickly after the child exits, well before the 10s
+	// deadline — the bound IS the discriminator here (a loop that ignores
+	// childExited only errors via the deadline), so it must stay clearly
+	// under 10s; 5s leaves slack for a starved runner.
+	if time.Since(start) > 5*time.Second {
 		t.Fatalf("child-exit abort took too long: %v", time.Since(start))
 	}
 }

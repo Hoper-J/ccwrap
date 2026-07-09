@@ -319,10 +319,12 @@ func TestRunProbes_ParallelOrderDeterministic(t *testing.T) {
 }
 
 func TestRunProbes_ConcurrencyHappensInParallel(t *testing.T) {
-	// Three probes each sleeping 200ms. Wall-clock parallel must be
-	// well under 600ms.
+	// Three probes each sleeping 400ms. Serial would take >= 1.2s;
+	// parallel lands around one sleep. The 800ms bound sits well below
+	// the serial floor while leaving a starved CI runner ~400ms of
+	// scheduling slack over the parallel ideal.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(400 * time.Millisecond)
 		w.WriteHeader(200)
 		_, _ = io.WriteString(w, `{"model":"x"}`)
 	}))
@@ -336,8 +338,8 @@ func TestRunProbes_ConcurrencyHappensInParallel(t *testing.T) {
 	start := time.Now()
 	_ = runProfileTestProbes(targets, profiletest.ProbeOptions{Timeout: 2 * time.Second})
 	elapsed := time.Since(start)
-	if elapsed > 450*time.Millisecond {
-		t.Errorf("parallel wall-clock too slow: %v (want < 450ms)", elapsed)
+	if elapsed > 800*time.Millisecond {
+		t.Errorf("parallel wall-clock too slow: %v (want < 800ms; serial would be >= 1.2s)", elapsed)
 	}
 }
 

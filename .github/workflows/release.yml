@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0 # full history so the changelog can diff against the prior tag
           # The test step below executes repo + dependency code; don't leave the
@@ -39,12 +39,12 @@ jobs:
             echo "::error::secrets.NPM_TOKEN is missing or empty; refusing to release. Configure the secret, or edit release.yml if npm is deliberately no longer a release channel."
             exit 1
           fi
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           # Build released binaries with the latest patched Go so they don't ship
           # known standard-library CVEs (see the CI govulncheck note).
           go-version: "stable"
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: "lts/*" # web.go behavioral tests need node, else they t.Skip
       - name: test
@@ -54,12 +54,11 @@ jobs:
         # Honest scope: this only protects tags whose tree contains this gate
         # (a tag onto an older tree runs THAT tree's workflow); it is
         # linux-only by design (CI covers macOS, and released darwin binaries
-        # are cross-compiled, never executed here). The suite runs in full, so
-        # it inherits internal/supervisor's known flaky test — a release can
-        # fail on a flake and need a re-run. That is acceptable here: the
-        # failure lands before signing/publish so nothing has shipped, the
-        # re-run pins the same SHA, and release.replace_existing_draft cleans
-        # up any draft a prior attempt left behind.
+        # are cross-compiled, never executed here). Should the suite ever
+        # flake here anyway, the failure lands before signing/publish so
+        # nothing has shipped, a re-run pins the same SHA, and
+        # release.replace_existing_draft cleans up any draft a prior attempt
+        # left behind.
         timeout-minutes: 15
         run: |
           go vet ./...
@@ -80,7 +79,7 @@ jobs:
       # conditionally skipping these steps. Reuses the binaries GoReleaser
       # already built into dist/ this run, so the npm payload is the SAME
       # artifact as the release archives.
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: "lts/*"
           registry-url: "https://registry.npmjs.org"
