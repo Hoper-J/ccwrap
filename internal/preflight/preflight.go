@@ -160,11 +160,18 @@ func hiddenAuthContract(thirdPartyRoute, allowAuthPassthrough bool, mode model.A
 	return model.AuthPolicyCCWRAPOverrideFailClosed, model.AuthBootstrapPlaceholderActive, kind, envKey
 }
 
+// placeholderKindForAuthMode picks the child-side placeholder env for an
+// override mode. Both modes get the bearer placeholder (ANTHROPIC_AUTH_TOKEN),
+// including x-api-key upstreams: interactive Claude Code gates a custom env
+// ANTHROPIC_API_KEY behind the customApiKeyResponses approval dialog, and with
+// CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST declared a declined placeholder strands
+// the child with no credentials and no /login recovery. ANTHROPIC_AUTH_TOKEN
+// has no approval gate. The placeholder kind is decoupled from the upstream
+// wire format: the session proxy strips whichever auth header the child sends
+// and re-sets the profile credential under the mode's own header.
 func placeholderKindForAuthMode(mode model.AuthMode) (model.AuthBootstrapKind, string) {
 	switch mode {
-	case model.AuthModeOverrideXAPIKey:
-		return model.AuthBootstrapKindXAPIKey, "ANTHROPIC_API_KEY"
-	case model.AuthModeOverrideBearer:
+	case model.AuthModeOverrideXAPIKey, model.AuthModeOverrideBearer:
 		return model.AuthBootstrapKindBearer, "ANTHROPIC_AUTH_TOKEN"
 	default:
 		return model.AuthBootstrapKindNone, ""

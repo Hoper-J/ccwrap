@@ -2097,13 +2097,15 @@ func fallbackText(v, d string) string {
 // newAuthPlaceholder returns the non-secret bootstrap credential injected
 // into the child env (hidden-auth contract: the session proxy replaces
 // upstream auth fail-closed, so this value carries no authority and gains
-// nothing from being unpredictable). It is stable per profile rather than
-// per session: interactive Claude Code gates env ANTHROPIC_API_KEY behind a
-// one-time approval keyed by the value's fingerprint (customApiKeyResponses
-// in ~/.claude.json), so a per-session random value re-triggered the
-// "Detected a custom API key" dialog on every launch.
+// nothing from being unpredictable). The placeholder is always injected as
+// ANTHROPIC_AUTH_TOKEN (see placeholderKindForAuthMode), which interactive
+// Claude Code accepts without the customApiKeyResponses approval dialog it
+// applies to env ANTHROPIC_API_KEY. It stays stable per profile rather than
+// per session: deterministic child envs, and a downgrade to a ccwrap that
+// still injects ANTHROPIC_API_KEY keeps any previously approved fingerprint
+// valid instead of re-prompting every launch.
 //
-// The child echoes the value back in x-api-key/Authorization headers to the
+// The child echoes the value back in the Authorization header to the
 // loopback proxy, so it must stay within header-safe token characters no
 // matter what the profile is named; the short digest keeps sanitized names
 // ("a b" vs "ab") and the no-profile sentinel from colliding.

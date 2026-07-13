@@ -655,8 +655,50 @@ func TestRunThirdPartyHiddenAuthOverrideEnablesPlaceholder(t *testing.T) {
 	if res.AuthPolicy != model.AuthPolicyCCWRAPOverrideFailClosed {
 		t.Fatalf("AuthPolicy = %q", res.AuthPolicy)
 	}
-	if res.AuthBootstrap != model.AuthBootstrapPlaceholderActive || res.AuthBootstrapKind != model.AuthBootstrapKindXAPIKey || res.AuthBootstrapEnvKey != "ANTHROPIC_API_KEY" {
+	// The placeholder is always the bearer kind, even though the upstream
+	// credential is x-api-key: interactive Claude Code gates a custom env
+	// ANTHROPIC_API_KEY behind the customApiKeyResponses approval dialog,
+	// and under CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST a declined placeholder
+	// strands the child with no credentials at all. ANTHROPIC_AUTH_TOKEN has
+	// no approval gate. The proxy strips whichever header the child sends,
+	// so the placeholder kind never reaches the upstream.
+	if res.AuthBootstrap != model.AuthBootstrapPlaceholderActive || res.AuthBootstrapKind != model.AuthBootstrapKindBearer || res.AuthBootstrapEnvKey != "ANTHROPIC_AUTH_TOKEN" {
 		t.Fatalf("unexpected bootstrap: %s/%s/%s", res.AuthBootstrap, res.AuthBootstrapKind, res.AuthBootstrapEnvKey)
+	}
+	if res.OverrideAuth == nil || res.OverrideAuth.HeaderName != "X-API-Key" {
+		t.Fatalf("upstream override must stay X-API-Key regardless of placeholder kind; got %+v", res.OverrideAuth)
+	}
+}
+
+// TestRunXAPIKeyProfileInjectsBearerPlaceholder pins the full invariant for
+// an x-api-key provider profile: the upstream leg keeps the X-API-Key header
+// (profile mode decides the wire format), while the child bootstrap injects
+// the bearer placeholder env (ANTHROPIC_AUTH_TOKEN) so interactive Claude
+// Code launches without the "Detected a custom API key" approval dialog.
+func TestRunXAPIKeyProfileInjectsBearerPlaceholder(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(tmp, "config"))
+	t.Setenv("CCWRAP_MANAGED_SETTINGS_DIR", filepath.Join(tmp, "managed"))
+	res, err := Run(Options{
+		ParentEnv:        []string{"PATH=/usr/bin"},
+		WorkingDirectory: tmp,
+		Profile: &ProfileInput{
+			Name:    "gw",
+			BaseURL: "https://gateway.example/v1",
+			Auth:    &AuthSpec{Mode: "ccwrap_x_api_key", Key: "sk-real"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.AuthMode != model.AuthModeOverrideXAPIKey {
+		t.Fatalf("AuthMode = %q, want %q", res.AuthMode, model.AuthModeOverrideXAPIKey)
+	}
+	if res.OverrideAuth == nil || res.OverrideAuth.HeaderName != "X-API-Key" || res.OverrideAuth.HeaderValue != "sk-real" {
+		t.Fatalf("upstream override must carry the profile key as X-API-Key; got %+v", res.OverrideAuth)
+	}
+	if res.AuthBootstrapKind != model.AuthBootstrapKindBearer || res.AuthBootstrapEnvKey != "ANTHROPIC_AUTH_TOKEN" {
+		t.Fatalf("child bootstrap must be the bearer placeholder; got %s/%s", res.AuthBootstrapKind, res.AuthBootstrapEnvKey)
 	}
 }
 
