@@ -7,10 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Hoper-J/ccwrap/internal/app"
 	"github.com/Hoper-J/ccwrap/internal/model"
 	"github.com/Hoper-J/ccwrap/internal/testutil"
+	"github.com/Hoper-J/ccwrap/internal/update"
 )
 
 func TestDoctorReportsOverriddenNetworkEnvWithoutWarn(t *testing.T) {
@@ -321,11 +323,47 @@ func TestDoctorGroupForCheck(t *testing.T) {
 		"settings_policy_network_env", "api_key_helper", "dangerous_shell_settings",
 		"ccwrap_internal_keys_in_settings", "custom_headers_auth", "flag_settings",
 		"settings_inspection", "launch_contract", "discovery", "session",
+		"update",
 	}
 	for _, n := range all {
 		if _, ok := doctorGroupExplicit[n]; !ok {
 			t.Fatalf("check %q has no explicit group mapping", n)
 		}
+	}
+}
+
+func TestDoctorGroupForUpdate(t *testing.T) {
+	if _, ok := doctorGroupExplicit["update"]; !ok {
+		t.Fatal("\"update\" must be explicitly registered in doctorGroupExplicit (fallback-Runtime is for FUTURE unknown checks, not shipped ones)")
+	}
+	if got := doctorGroupForCheck("update"); got != "Runtime" {
+		t.Fatalf("update group = %q, want Runtime", got)
+	}
+}
+
+// TestDoctorUpdateRowDevBuild: the test binary's versionString() has
+// the dev shape (0.0.0 sentinel, Eligible=false), yet the cache holds
+// a higher latest. doctor must honestly say notices are off for dev
+// builds rather than falsely claim it is up to date.
+func TestDoctorUpdateRowDevBuild(t *testing.T) {
+	paths := testutil.ShortAppPaths(t, "c.sock")
+	if err := os.MkdirAll(paths.StateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CCWRAP_NO_UPDATE_CHECK", "")
+	if err := update.SaveCache(paths.StateDir, update.Cache{CheckedAt: time.Now().UTC(), Latest: "99.0.0"}); err != nil {
+		t.Fatal(err)
+	}
+	report := runDoctorJSON(t, paths, []string{"--json", "--verbose"})
+	check := doctorChecksByName(report)["update"]
+	if check.Status != "pass" {
+		t.Fatalf("dev build must not warn, got %#v", check)
+	}
+	if !strings.Contains(check.Summary, "update notices off for dev build") {
+		t.Fatalf("dev-build row must be honest about notices being off, got %#v", check)
+	}
+	if !strings.Contains(check.Detail, "latest=99.0.0") {
+		t.Fatalf("verbose detail must still carry the cached fact, got %#v", check)
 	}
 }
 

@@ -2124,3 +2124,37 @@ func TestParseLaunchArgs_TimezoneFlag(t *testing.T) {
 		t.Errorf("Timezone = %q; want Europe/Berlin", got.Timezone)
 	}
 }
+
+func TestParseLaunchArgsNoUpdateCheck(t *testing.T) {
+	got, err := parseLaunchArgs([]string{"--no-update-check"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.NoUpdateCheck {
+		t.Fatal("--no-update-check should set NoUpdateCheck")
+	}
+	got, err = parseLaunchArgs([]string{"--no-update-check=false"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.NoUpdateCheck {
+		t.Fatal("--no-update-check=false should clear NoUpdateCheck")
+	}
+	t.Setenv("CCWRAP_NO_UPDATE_CHECK", "1")
+	got, err = parseLaunchArgs(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.NoUpdateCheck {
+		t.Fatal("CCWRAP_NO_UPDATE_CHECK=1 should set NoUpdateCheck")
+	}
+	// The flag must beat the env: env says off, an explicit =false says
+	// on — the flag wins.
+	got, err = parseLaunchArgs([]string{"--no-update-check=false"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.NoUpdateCheck {
+		t.Fatal("--no-update-check=false must beat CCWRAP_NO_UPDATE_CHECK=1")
+	}
+}

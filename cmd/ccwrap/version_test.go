@@ -57,7 +57,9 @@ func TestVersionDispatchEarly(t *testing.T) {
 		{"version subcommand", []string{"ccwrap", "version"}, true, "ccwrap "},
 		{"long flag", []string{"ccwrap", "--version"}, true, "ccwrap "},
 		{"unrelated subcommand", []string{"ccwrap", "status"}, false, ""},
-		{"version with trailing args ignored", []string{"ccwrap", "version", "extra"}, true, "ccwrap "},
+		// Trailing args used to be ignored; since `version --check` they
+		// fall through to the main switch's versionCommand instead.
+		{"version with trailing args falls through", []string{"ccwrap", "version", "extra"}, false, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

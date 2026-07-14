@@ -39,6 +39,7 @@ import (
 	"github.com/Hoper-J/ccwrap/internal/supervisor"
 	"github.com/Hoper-J/ccwrap/internal/tlsfp"
 	"github.com/Hoper-J/ccwrap/internal/ui"
+	"github.com/Hoper-J/ccwrap/internal/update"
 	"github.com/Hoper-J/ccwrap/internal/upstreamheaders"
 )
 
@@ -87,6 +88,15 @@ func realMain() error {
 	case "profile":
 		os.Exit(runProfileSubcommand(paths, os.Args[2:]))
 		return nil
+	// "update" aliases "upgrade" (the rustup/uv convention). This
+	// shadows the passthrough to `claude update` — deliberately: the
+	// first instinct behind typing `ccwrap update` is to upgrade ccwrap
+	// itself; to upgrade Claude proper, run `claude update` directly,
+	// or `ccwrap -- update` to go through the session environment.
+	case "upgrade", "update":
+		return upgradeCommand(paths, os.Args[2:])
+	case "version", "--version":
+		return versionCommand(paths, os.Args[2:])
 	case "run":
 		return runClaude(paths, os.Args[2:])
 	default:
@@ -103,6 +113,9 @@ func versionDispatchEarly(args []string, out io.Writer) bool {
 	}
 	switch args[1] {
 	case "version", "--version":
+		if len(args) != 2 {
+			return false // argument forms like `version --check` go to the main switch's versionCommand
+		}
 		fmt.Fprintln(out, "ccwrap "+versionString())
 		return true
 	}
@@ -149,6 +162,7 @@ Launch flags:
   --quiet                                   (or env CCWRAP_QUIET=1; collapse the launch banner to one line)
   --timezone IANA                           (or env CCWRAP_TZ; inject TZ into the Claude Code child so its request "Today's date" matches the chosen zone. First run in a China timezone prompts to align to America/Los_Angeles unless opted out via CCWRAP_NO_TZ_PROMPT=1 or --no-init)
   --no-init                                 (or env CCWRAP_NO_INIT=1; skip the first-run env->profiles migration prompt and the timezone prompt)
+  --no-update-check                         (or env CCWRAP_NO_UPDATE_CHECK=1; skip the daily update check and its notices)
   --allow-provider-model-passthrough        (compat; degrades hidden-mode guarantee)
   --allow-auth-passthrough-to-third-party   (debug; unsafe — Claude-side auth may leak)
 
@@ -162,7 +176,8 @@ Management commands:
                     [--headers] [--full] [--unmask] [--host H] [--path P]
                     [--timeout DUR] [--print-diff-filter] [--claude-bin PATH]
                     [--timezone IANA] [-- CLAUDE_ARGS]
-  ccwrap version    (print version + git short-sha)
+  ccwrap upgrade    [--egress-proxy auto|direct|URL]  (channel-aware self-upgrade; alias: update)
+  ccwrap version    [--check] [--egress-proxy auto|direct|URL] (print version; --check queries the registry)
   ccwrap profile    {ls | status | switch <name> | test [name] | test-egress [name] |
                      add <name> | edit <name> | rm <name> | set-default <name>}
                     [--session ID]
@@ -380,7 +395,13 @@ func runClaude(paths app.Paths, args []string) error {
 		}
 	}
 	l.PrintSummary()
+	updHandle := startBackgroundUpdateCheck(l.ctx, l.pre.Egress, paths.StateDir, versionString(), launch.NoUpdateCheck, os.Getenv, time.Now)
 	code, err := l.Wait()
+	// The exit notice prints after Wait and before any return/os.Exit:
+	// the banner covers "the next launch"; this line covers "this run,
+	// whose check just finished". Non-blocking read — it never delays
+	// exit.
+	printUpdateExitNotice(os.Stderr, updHandle, versionString(), ui.IsTerminal(os.Stderr))
 	if err != nil {
 		return err
 	}
@@ -409,6 +430,7 @@ type launchArgs struct {
 	ClaudeArgs                       []string
 	NoInit                           bool   // skip first-run profile auto-migration
 	Quiet                            bool   // collapse the launch banner to one line
+	NoUpdateCheck                    bool   // --no-update-check / CCWRAP_NO_UPDATE_CHECK; passive update check + notices off
 	Timezone                         string // --timezone / CCWRAP_TZ; runClaude overwrites with the resolved+validated effective TZ
 }
 
@@ -420,6 +442,7 @@ func parseLaunchArgs(args []string) (launchArgs, error) {
 		CaptureTelemetry: truthyEnv(os.Getenv("CCWRAP_CAPTURE_TELEMETRY")),
 		NativeTLS:        nativeTLSEnabled(os.Getenv("CCWRAP_NATIVE_TLS")),
 		Quiet:            truthyEnv(os.Getenv("CCWRAP_QUIET")),
+		NoUpdateCheck:    truthyEnv(os.Getenv("CCWRAP_NO_UPDATE_CHECK")),
 		Timezone:         strings.TrimSpace(os.Getenv("CCWRAP_TZ")),
 		ClaudeArgs:       nil,
 	}
@@ -463,6 +486,18 @@ func parseLaunchArgs(args []string) (launchArgs, error) {
 				return out, err
 			}
 			out.Quiet = value
+			continue
+		}
+		if arg == "--no-update-check" {
+			out.NoUpdateCheck = true
+			continue
+		}
+		if strings.HasPrefix(arg, "--no-update-check=") {
+			value, err := parseBoolLaunchFlag(arg, "--no-update-check")
+			if err != nil {
+				return out, err
+			}
+			out.NoUpdateCheck = value
 			continue
 		}
 		if arg == "--allow-auth-passthrough-to-third-party" {
@@ -711,6 +746,24 @@ func doctorCommand(paths app.Paths, args []string) error {
 	} else {
 		_ = ln.Close()
 		add("session_listener", "pass", "session proxy port can bind", "")
+	}
+	// Update awareness: cache-only read — doctor never hits the network
+	// for this row; `ccwrap version --check` / `ccwrap upgrade` are the
+	// explicit network probes.
+	if update.Disabled(os.Getenv, false) {
+		add("update", "pass", "update check disabled (CCWRAP_NO_UPDATE_CHECK)", "")
+	} else if c, ok := update.LoadCache(paths.StateDir); !ok {
+		add("update", "pass", "no update-check cache yet (first check runs on next launch)", "")
+	} else {
+		age := time.Since(c.CheckedAt).Round(time.Minute)
+		cur := versionString()
+		if update.Eligible(cur) && update.Newer(cur, c.Latest) {
+			add("update", "warn", fmt.Sprintf("update available: %s → %s (run `ccwrap upgrade`)", cur, c.Latest), maybeDetail(*verbose, fmt.Sprintf("checked %s ago", age)))
+		} else if !update.Eligible(cur) {
+			add("update", "pass", fmt.Sprintf("update notices off for dev build (%s)", cur), maybeDetail(*verbose, fmt.Sprintf("latest=%s checked %s ago", c.Latest, age)))
+		} else {
+			add("update", "pass", fmt.Sprintf("ccwrap %s is current", cur), maybeDetail(*verbose, fmt.Sprintf("latest=%s checked %s ago", c.Latest, age)))
+		}
 	}
 	parentEnv := os.Environ()
 	envMap := preflight.ParentEnvMap(parentEnv)

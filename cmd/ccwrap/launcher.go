@@ -355,7 +355,15 @@ func (l *sessionLauncher) PrintSummary() {
 			host = l.pre.APIBaseURL.String()
 		}
 		degraded := l.pre.RouteClass == model.RouteClassThirdPartyCompatible || l.pre.AuthPolicy == model.AuthPolicyUnsafePassthrough
-		fmt.Fprintln(os.Stderr, quietSummaryLine(pal, host, l.pre.ActiveProfileName, degraded, l.proxyURL))
+		line := quietSummaryLine(pal, host, l.pre.ActiveProfileName, degraded, l.proxyURL)
+		_, quietMark, disclosure := updateBannerLines(l.paths.StateDir, versionString(), l.launch.NoUpdateCheck, os.Getenv, ui.IsTerminal(os.Stderr), pal)
+		if quietMark != "" {
+			line += " · " + quietMark
+		}
+		fmt.Fprintln(os.Stderr, line)
+		if disclosure != "" {
+			fmt.Fprintln(os.Stderr, disclosure)
+		}
 		// A "requests will fail" condition is too important to hide in quiet mode.
 		if l.pre.AuthBootstrap == model.AuthBootstrapMissing {
 			fmt.Fprintln(os.Stderr, "  ⚠ Requests will fail until you "+authMissingRecoverHint(l.pre.MissingAuthEnv)+".")
@@ -383,6 +391,14 @@ func (l *sessionLauncher) PrintSummary() {
 		l.pre.ActiveProfileProvider,
 		l.pre.MissingAuthEnv,
 	)
+	pal := ui.New(ui.IsTerminal(os.Stderr))
+	full, _, disclosure := updateBannerLines(l.paths.StateDir, versionString(), l.launch.NoUpdateCheck, os.Getenv, ui.IsTerminal(os.Stderr), pal)
+	if full != "" {
+		fmt.Fprintln(os.Stderr, full)
+	}
+	if disclosure != "" {
+		fmt.Fprintln(os.Stderr, disclosure)
+	}
 }
 
 // Wait blocks until Claude exits OR the supervisor goroutine returns,
