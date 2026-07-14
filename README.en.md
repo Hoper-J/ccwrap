@@ -33,6 +33,17 @@ Or build from source:
 git clone https://github.com/Hoper-J/ccwrap && cd ccwrap && go build -o ccwrap ./cmd/ccwrap
 ```
 
+### Updating
+
+```bash
+ccwrap upgrade          # channel-aware: npm installs upgrade via npm; release binaries self-replace in place (sha256-verified); go-install builds re-run go install
+ccwrap version --check  # check only, install nothing
+```
+
+New releases are also surfaced in the launch banner and on session exit (checked at most once daily; disable with `CCWRAP_NO_UPDATE_CHECK=1`). Manual equivalents: `npm i -g ccwrap-cli@latest`, re-run install.sh, or `go install github.com/Hoper-J/ccwrap/cmd/ccwrap@latest`.
+
+`ccwrap update` is an alias for `ccwrap upgrade` and upgrades ccwrap itself; to update Claude Code, run `claude update` directly (or `ccwrap -- update` to route it through the ccwrap session environment).
+
 ## Quick start
 
 ccwrap can launch Claude Code directly, or load a saved configuration (profile):
@@ -190,6 +201,8 @@ ccwrap dashboard  [--session ID] [--view overview|requests|errors|diagnostics]
 ccwrap doctor     [--json] [--verbose] [--session ID] [--profile NAME]
 ccwrap stop       [--session ID | --all]
 ccwrap gc         [--json]
+ccwrap upgrade    [--egress-proxy auto|direct|URL]
+ccwrap version    [--check] [--egress-proxy auto|direct|URL]
 ccwrap capture    [--with-tls|--tls-only] [--main-inference] [--full] [--headers]
                   [--no-response] [--unmask] [--host H] [--path P] [--timeout DUR]
                   [--print-diff-filter] [--claude-bin PATH] [--timezone IANA] [-- CLAUDE_ARGS]
@@ -216,6 +229,7 @@ Without a management subcommand, `ccwrap` launches Claude Code directly. In laun
 | `--quiet` (or `CCWRAP_QUIET=1`) | Collapse the launch banner to one line (`ccwrap → host · profile · inspect URL`). Default off. |
 | `--timezone IANA` (or `CCWRAP_TZ`) | Set Claude Code's timezone so the request's `Today's date` is computed in that zone. The first run in a China timezone prompts whether to align to `America/Los_Angeles`; suppress the prompt with `CCWRAP_NO_TZ_PROMPT=1` or `--no-init`. No injection by default. |
 | `--no-init` (or `CCWRAP_NO_INIT=1`) | Skip the first-run env → profiles.json auto-migration prompt, and the first-run timezone prompt. Default off. |
+| `--no-update-check` (or `CCWRAP_NO_UPDATE_CHECK=1`) | Disable the daily update check and all update notices (explicit `upgrade` / `version --check` are unaffected). Default: enabled |
 | `--allow-provider-model-passthrough` | Let Claude Code see provider-side model IDs. |
 | `--allow-auth-passthrough-to-third-party` | Debug-only: let Claude-side auth pass through to a third-party upstream. |
 
@@ -522,6 +536,8 @@ User-facing:
 | `CCWRAP_TZ` | Timezone injected into Claude Code (= `--timezone`). `--timezone` wins. |
 | `CCWRAP_NO_TZ_PROMPT=1` | Suppress only the first-run timezone prompt (keeps the profiles-migration prompt). |
 | `CCWRAP_NO_INIT=1` | Skip the first-run auto-migration prompt (env → profiles.json) and the timezone prompt. |
+| `CCWRAP_NO_UPDATE_CHECK=1` | Disable the daily update check and notices (same as `--no-update-check`) |
+| `CCWRAP_UPDATE_CHECK_URL` | Override the version-discovery endpoint (default `registry.npmjs.org/ccwrap-cli/latest`; any HTTPS endpoint returning `{"version":"x.y.z"}` works — for self-hosting/mirrors) |
 
 Internal / advanced:
 
@@ -579,6 +595,7 @@ Default `<runtime>` and `<state>`:
 - On Linux, when `XDG_RUNTIME_DIR` is unset the runtime dir falls back to `/tmp/ccwrap-<uid>`, where request/response bodies are written **in plaintext** (files `0600`, dirs `0700` — not readable by others on the machine, cleared when the session ends); set `XDG_RUNTIME_DIR` on bare SSH / `su` setups.
 - When ccwrap owns the upstream credential it injects `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1`, and Claude-protected env keys (proxy, CA) cannot be overridden by Claude's own settings sources — except for the unprotected categories listed under "Enterprise proxy / CA notes." In first-party passthrough the flag is omitted (current Claude Code would otherwise refuse local login credentials entirely); ccwrap's spawn scrub and generated-settings sanitisation still close the routing/auth env paths on ccwrap's side.
 - The session listener only serves `/`, `/healthz`, `/recent`, `/recent/body`, `/events`, `/native-tls`, `/native-tls/clienthello.bin`, plus the profile API endpoints under `/profile/*` and the capture toggles `/capture/bodies` and `/capture/telemetry`. Other paths return 404.
+- The update check is a single unidentified plain GET (to `registry.npmjs.org` by default, at most once daily, through your egress path, with the versionless UA `ccwrap-update-check`, response capped at 1 MiB). A one-time banner notice precedes the first check; disable with `CCWRAP_NO_UPDATE_CHECK=1`, or point `CCWRAP_UPDATE_CHECK_URL` at a self-hosted endpoint. `ccwrap upgrade`'s binary self-replace matches install.sh's rigor: the sha256 must match checksums.txt (cosign verification: see SECURITY.md)
 
 ## TODO
 

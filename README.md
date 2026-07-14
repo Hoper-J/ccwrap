@@ -33,6 +33,17 @@ go install github.com/Hoper-J/ccwrap/cmd/ccwrap@latest
 git clone https://github.com/Hoper-J/ccwrap && cd ccwrap && go build -o ccwrap ./cmd/ccwrap
 ```
 
+### 更新
+
+```bash
+ccwrap upgrade          # 渠道感知：npm 装的走 npm，二进制装的原地自替换（sha256 校验），go install 装的重跑 go install
+ccwrap version --check  # 只查不装
+```
+
+新版本也会在启动横幅、会话退出时提示（每日最多检查一次，`CCWRAP_NO_UPDATE_CHECK=1` 关闭）。手动升级等价命令：`npm i -g ccwrap-cli@latest`、重跑 install.sh、`go install github.com/Hoper-J/ccwrap/cmd/ccwrap@latest`。
+
+`ccwrap update` 是 `ccwrap upgrade` 的别名，升级的是 ccwrap 自己；要升级 Claude Code 本体请直接运行 `claude update`（想让它走 ccwrap 的会话环境则用 `ccwrap -- update`）。
+
 ## 快速开始
 
 ccwrap 可以直接启动 Claude Code，也可以加载一个已保存的配置（profile）：
@@ -190,6 +201,8 @@ ccwrap dashboard  [--session ID] [--view overview|requests|errors|diagnostics]
 ccwrap doctor     [--json] [--verbose] [--session ID] [--profile NAME]
 ccwrap stop       [--session ID | --all]
 ccwrap gc         [--json]
+ccwrap upgrade    [--egress-proxy auto|direct|URL]
+ccwrap version    [--check] [--egress-proxy auto|direct|URL]
 ccwrap capture    [--with-tls|--tls-only] [--main-inference] [--full] [--headers]
                   [--no-response] [--unmask] [--host H] [--path P] [--timeout DUR]
                   [--print-diff-filter] [--claude-bin PATH] [--timezone IANA] [-- CLAUDE_ARGS]
@@ -216,6 +229,7 @@ ccwrap profile    {ls | status | switch <name> | test [name] | test-egress [name
 | `--quiet`（或 `CCWRAP_QUIET=1`）| 把启动横幅收成一行（`ccwrap → host · profile · inspect URL`）。默认关 |
 | `--timezone IANA`（或 `CCWRAP_TZ`）| 给 Claude Code 指定时区，让请求里的 `Today's date` 按该时区计算。首次在中国时区启动会提示是否对齐到 `America/Los_Angeles`，可用 `CCWRAP_NO_TZ_PROMPT=1` 或 `--no-init` 关掉提示。默认不注入 |
 | `--no-init`（或 `CCWRAP_NO_INIT=1`）| 跳过首次启动 env → profiles.json 的自动迁移提示，以及首次时区提示。默认关 |
+| `--no-update-check`（或 `CCWRAP_NO_UPDATE_CHECK=1`）| 关闭每日一次的新版本检查与全部更新提示（`upgrade` / `version --check` 等显式动作不受影响）。默认开 |
 | `--allow-provider-model-passthrough` | 允许 Claude Code 看到 provider 端的 model id |
 | `--allow-auth-passthrough-to-third-party` | 调试用：让 Claude-side auth 透传到第三方上游 |
 
@@ -522,6 +536,8 @@ ccwrap **解析并重新注入**模型偏好 env（`ANTHROPIC_MODEL`、`ANTHROPI
 | `CCWRAP_TZ` | 注入到 Claude Code 的时区（同 `--timezone`）。`--timezone` 优先 |
 | `CCWRAP_NO_TZ_PROMPT=1` | 只关掉首次时区提示（保留 profiles 迁移提示）|
 | `CCWRAP_NO_INIT=1` | 跳过首次启动的自动迁移提示（env → profiles.json）与时区提示 |
+| `CCWRAP_NO_UPDATE_CHECK=1` | 关闭每日更新检查与提示（同 `--no-update-check`）。默认关（即检查开启）|
+| `CCWRAP_UPDATE_CHECK_URL` | 覆盖版本发现端点（默认 `registry.npmjs.org/ccwrap-cli/latest`；任何返回 `{"version":"x.y.z"}` 的 HTTPS 端点均可，供自托管/镜像）|
 
 内部 / 高级：
 
@@ -579,6 +595,7 @@ State：
 - Linux 上 `XDG_RUNTIME_DIR` 未设时，runtime 目录 fallback 到 `/tmp/ccwrap-<uid>`，其中的请求/响应 body 是**明文落盘**（文件 `0600`、目录 `0700`，同机他人读不到，会话结束即清）；裸 SSH / `su` 等场景建议设 `XDG_RUNTIME_DIR`
 - ccwrap 拥有上游凭据时会注入 `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1`，此时 Claude-protected env key（proxy、CA）不会被 Claude 自己的设置源覆盖；例外是"企业 proxy / CA 注意事项"里列的那几类不受保护。一方透传时不注入该 flag（当前版本的 Claude Code 会因它彻底拒读本地登录凭据）；路由/auth 的 env 通路仍由 ccwrap 自己的 spawn 清洗和生成 settings 剥离兜住
 - 会话监听只服务 `/`、`/healthz`、`/recent`、`/recent/body`、`/events`、`/native-tls`、`/native-tls/clienthello.bin`，加上 `/profile/*` 下的 profile API endpoint 和抓取开关 `/capture/bodies`、`/capture/telemetry`。其他路径返回 404
+- 更新检查是一个不带任何标识的 plain GET（默认打到 `registry.npmjs.org`，每日最多一次，走 egress 出口，UA 为 versionless 的 `ccwrap-update-check`，响应限 1 MiB）。首次检查前横幅会有一次性声明；`CCWRAP_NO_UPDATE_CHECK=1` 关闭，`CCWRAP_UPDATE_CHECK_URL` 可指向自托管端点。`ccwrap upgrade` 的二进制自替换与 install.sh 同规格：sha256 必须匹配 checksums.txt（cosign 验签见 SECURITY.md）
 
 ## TODO
 
