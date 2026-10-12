@@ -308,6 +308,9 @@ func EffectiveModelEnvFromInspection(parentEnv []string, inspect *InspectionResu
 			if len(modelEnv) == 0 {
 				continue
 			}
+			if env == nil { // filterEnv returns nil when the parent has no model env
+				env = map[string]string{}
+			}
 			for k, v := range modelEnv {
 				env[k] = v
 				keySources[k] = doc.Source

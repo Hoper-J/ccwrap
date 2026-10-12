@@ -607,6 +607,29 @@ func TestEffectiveModelEnvUsesTrustedClaudeOrderAndIgnoresProjectLocal(t *testin
 	}
 }
 
+// A trusted settings source carrying model env while the parent env has none
+// is the everyday case (model defaults live in ~/.claude/settings.json, not
+// the shell); it must not panic on the nil inherited map.
+func TestEffectiveModelEnvSettingsOnlyWithoutParentModelEnv(t *testing.T) {
+	configDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(configDir, "settings.json"), []byte(`{"env":{"ANTHROPIC_DEFAULT_SONNET_MODEL":"user-sonnet"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
+	t.Setenv("CCWRAP_MANAGED_SETTINGS_DIR", t.TempDir())
+
+	result, err := EffectiveModelEnv(t.TempDir(), nil, []string{"PATH=/usr/bin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := result.Env["ANTHROPIC_DEFAULT_SONNET_MODEL"]; got != "user-sonnet" {
+		t.Fatalf("expected user settings model default, got %q", got)
+	}
+	if got := result.KeySources["ANTHROPIC_DEFAULT_SONNET_MODEL"]; got != "userSettings" {
+		t.Fatalf("expected key source userSettings, got %q", got)
+	}
+}
+
 func TestInspectLaunchDetectsCustomHeadersAuthLikeValues(t *testing.T) {
 	inspect, err := InspectLaunch("/work", []string{"--settings", `{"env":{"ANTHROPIC_CUSTOM_HEADERS":"Authorization: Bearer secret\nX-Gateway: demo"}}`})
 	if err != nil {
