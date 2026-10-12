@@ -603,3 +603,28 @@ func TestLooksProviderSpecific(t *testing.T) {
 		}
 	}
 }
+
+// A route strips Claude Code's Claude-only extras when some alias sends a
+// Claude model to a non-Claude upstream — the same gate as the system-block
+// strip, and the same CCWRAP_KEEP_CLAUDE_METADATA opt-out.
+func TestStripsClaudeCodeExtras(t *testing.T) {
+	cases := []struct {
+		name    string
+		forward map[string]string
+		want    bool
+	}{
+		{"non-claude upstream", map[string]string{"claude-fable-5-1": "gpt-5.5"}, true},
+		{"one of several", map[string]string{"claude-opus-4-8": "claude-opus-4-8", "claude-fable-5-1": "deepseek-v4-flash"}, true},
+		{"claude upstream only", map[string]string{"claude-opus-4-8": "Claude-Opus-4-8"}, false},
+		{"no aliases", nil, false},
+	}
+	for _, c := range cases {
+		if got := (Config{Forward: c.forward}).StripsClaudeCodeExtras(); got != c.want {
+			t.Errorf("%s: StripsClaudeCodeExtras() = %v, want %v", c.name, got, c.want)
+		}
+	}
+	t.Setenv("CCWRAP_KEEP_CLAUDE_METADATA", "1")
+	if (Config{Forward: map[string]string{"claude-fable-5-1": "gpt-5.5"}}).StripsClaudeCodeExtras() {
+		t.Fatal("CCWRAP_KEEP_CLAUDE_METADATA=1 must keep Claude Code's extras")
+	}
+}

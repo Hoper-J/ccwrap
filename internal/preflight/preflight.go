@@ -261,6 +261,31 @@ func InjectedEnv(proxyURL, caCertPath, caBundlePath string) map[string]string {
 // from the LOCAL zone). An empty tz leaves the parent's TZ (if any) untouched —
 // byte-identical to the pre-feature environment. Callers are expected to have
 // already validated tz via time.LoadLocation; BuildChildEnv trusts it.
+// claudeReminderEnvKeys are Claude Code's switches for its model-specific
+// mid-conversation reminders: once set, the var outranks the server-delivered
+// and built-in reminder text, and a boolean value turns the reminder off.
+var claudeReminderEnvKeys = []string{"CLAUDE_CODE_TOASTY_THIMBLE", "CLAUDE_CODE_GENTLE_PARASOL"}
+
+// ClaudeReminderOffEnv returns the child env that switches those reminders off
+// when the route sends a Claude model to a non-Claude upstream. They are tuned
+// for the Claude model Claude Code believes it is talking to; a non-Claude
+// model can take one as its latest instruction (the batching reminder makes it
+// ask the user for "items" instead of answering). Keys already set in parentEnv
+// are left to the user.
+func ClaudeReminderOffEnv(alias modelalias.Config, parentEnv []string) map[string]string {
+	if !alias.StripsClaudeCodeExtras() {
+		return nil
+	}
+	parent := toMap(parentEnv)
+	out := map[string]string{}
+	for _, key := range claudeReminderEnvKeys {
+		if _, set := parent[key]; !set {
+			out[key] = "0"
+		}
+	}
+	return out
+}
+
 func BuildChildEnv(parentEnv []string, proxyURL, caCertPath, caBundlePath string, modelEnv map[string]string, authBootstrap ChildAuthBootstrap, tz string) []string {
 	env := toMap(parentEnv)
 	for key := range env {

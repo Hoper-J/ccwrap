@@ -362,7 +362,9 @@ ccwrap 不会把每个 `api.anthropic.com` 请求都改写到网关。只有实�
 
 识别按内容（identity 用精确匹配、billing-header 用前缀匹配），所以用户自定义的 "You are Claude Code, but speak Spanish." 不会被误杀，后续 Claude Code 版本升级改了 system prompt 顺序也不会过度裁剪。
 
-设 `CCWRAP_KEEP_CLAUDE_METADATA=1` 可关闭这个行为。
+同样的情况下，ccwrap 还会给 Claude Code 设上 `CLAUDE_CODE_TOASTY_THIMBLE=0` 和 `CLAUDE_CODE_GENTLE_PARASOL=0`，关掉它按 Claude 模型插在对话中途的提醒。这些提醒是给 Claude 调的，非 Claude 模型会把它当成最新指令：比如别名到 `claude-fable-5-1` 时，工具调用之后的那一轮会插一句"把互不依赖的项一次请求完"，GPT 会照字面去向用户要"材料"，而不是回答。你自己设了这两个变量的话，以你的为准。
+
+设 `CCWRAP_KEEP_CLAUDE_METADATA=1` 可关闭以上行为。
 
 Web UI 中 body 被捕获时会并排切换的视图：**received**（Claude Code 发出）和 **forwarded**（上游实际收到的）。
 
@@ -531,7 +533,7 @@ ccwrap **解析并重新注入**模型偏好 env（`ANTHROPIC_MODEL`、`ANTHROPI
 | `CCWRAP_NATIVE_TLS_HELLO` | 指向一份 `clienthello.bin`，用它钉死镜像指纹（取代实时捕获）。启动时 fail-fast 校验 |
 | `CCWRAP_WEB_ALLOWED_HOSTS` | 逗号分隔的额外 `Host` 值，放行到仪表盘/info endpoint。默认只允许 loopback（DNS-rebinding 防护）；经隧道/反代访问仪表盘时需要设置 |
 | `CCWRAP_QUIET=1` | 把启动横幅收成一行（同 `--quiet`）。默认关 |
-| `CCWRAP_KEEP_CLAUDE_METADATA=1` | 关闭非 claude-* 上游的 Claude Code 系统提示词裁剪 |
+| `CCWRAP_KEEP_CLAUDE_METADATA=1` | 关闭非 claude-* 上游的 Claude Code 系统提示词裁剪，以及对话中途提醒的关闭 |
 | `CCWRAP_UNMASK_CREDENTIALS=1` | ⚠ 关闭检查器里 header + body 凭据打码。ccwrap 会往 stderr 打警告 |
 | `CCWRAP_TZ` | 注入到 Claude Code 的时区（同 `--timezone`）。`--timezone` 优先 |
 | `CCWRAP_NO_TZ_PROMPT=1` | 只关掉首次时区提示（保留 profiles 迁移提示）|

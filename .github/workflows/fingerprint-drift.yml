@@ -16,6 +16,9 @@ name: Fingerprint Drift Watch
 #   - TestLiveClaudeHeaderWireOrder: the request head ccwrap forwards must keep
 #     the latest Claude Code's header order and casing (hard fail), so the
 #     HTTP layer under the mirrored TLS stays Claude Code's too.
+#   - TestLiveClaudeReminderSwitches: the latest Claude Code must still read the
+#     reminder env switches ccwrap sets for non-Claude aliases; a missing one
+#     is surfaced as a warning.
 #
 # NOTE: GitHub auto-disables `schedule` workflows after ~60 days without repo
 # activity — exactly the maintenance-lull window when drift is most likely to
@@ -53,7 +56,7 @@ jobs:
         # first, with a message that names the remediation. Removing a test has
         # to be a visible decision: restore it or retire this workflow with it.
         run: |
-          for f in internal/supervisor/livefp_test.go internal/supervisor/livefp_claude_test.go cmd/ccwrap/livefp_header_order_test.go; do
+          for f in internal/supervisor/livefp_test.go internal/supervisor/livefp_claude_test.go cmd/ccwrap/livefp_header_order_test.go internal/preflight/livefp_reminder_test.go; do
             if [ ! -f "$f" ]; then
               echo "::error::$f is missing from the checkout. The fingerprint drift watch CANNOT run — restore the livefp test or remove this workflow."
               exit 1
@@ -69,13 +72,13 @@ jobs:
         env:
           CCWRAP_LIVEFP_REQUIRE_CLAUDE: "1"
         run: |
-          out=$(go test ./internal/supervisor/ ./cmd/ccwrap/ -tags livefp -run 'TestLiveFingerprintCompare|TestLiveClaudeFingerprintMirror|TestLiveClaudeHeaderWireOrder' -v 2>&1) || { echo "$out"; exit 1; }
+          out=$(go test ./internal/supervisor/ ./cmd/ccwrap/ ./internal/preflight/ -tags livefp -run 'TestLiveFingerprintCompare|TestLiveClaudeFingerprintMirror|TestLiveClaudeHeaderWireOrder|TestLiveClaudeReminderSwitches' -v 2>&1) || { echo "$out"; exit 1; }
           echo "$out"
           if echo "$out" | grep -q "no tests to run"; then
             echo "::error::the -run pattern matched no tests; the drift watch ran vacuously."
             exit 1
           fi
-          for t in TestLiveFingerprintCompare TestLiveClaudeFingerprintMirror TestLiveClaudeHeaderWireOrder; do
+          for t in TestLiveFingerprintCompare TestLiveClaudeFingerprintMirror TestLiveClaudeHeaderWireOrder TestLiveClaudeReminderSwitches; do
             if ! echo "$out" | grep -q -- "--- PASS: $t "; then
               echo "::error::$t did not run to a PASS; the drift watch ran vacuously."
               exit 1
@@ -84,3 +87,6 @@ jobs:
           if drift=$(echo "$out" | grep -m1 -o 'CLAUDE_FINGERPRINT_DRIFT.*'); then
             echo "::warning title=Claude Code TLS fingerprint drift::$drift"
           fi
+          echo "$out" | grep -o 'CLAUDE_REMINDER_SWITCH_MISSING.*' | while read -r missing; do
+            echo "::warning title=Claude Code reminder switch missing::$missing"
+          done

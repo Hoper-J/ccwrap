@@ -267,7 +267,17 @@ func (l *sessionLauncher) WriteSessionSettings() error {
 	}
 	// l.launch.Timezone is the resolved + validated effective TZ (runClaude
 	// overwrote it via resolveEffectiveTimezone); "" means no override.
-	l.childEnv = preflight.BuildChildEnv(os.Environ(), l.proxyURL, l.ca.CertPath(), l.ca.BundlePath(), l.pre.ModelEnv, authBootstrap, l.launch.Timezone)
+	childModelEnv := l.pre.ModelEnv
+	if off := preflight.ClaudeReminderOffEnv(l.pre.ModelAlias, os.Environ()); len(off) > 0 {
+		childModelEnv = make(map[string]string, len(l.pre.ModelEnv)+len(off))
+		for k, v := range l.pre.ModelEnv {
+			childModelEnv[k] = v
+		}
+		for k, v := range off {
+			childModelEnv[k] = v
+		}
+	}
+	l.childEnv = preflight.BuildChildEnv(os.Environ(), l.proxyURL, l.ca.CertPath(), l.ca.BundlePath(), childModelEnv, authBootstrap, l.launch.Timezone)
 	return nil
 }
 

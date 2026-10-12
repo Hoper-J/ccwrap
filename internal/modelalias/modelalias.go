@@ -444,6 +444,27 @@ var claudeCodeIdentityPrefixes = map[string]struct{}{
 	"You are a Claude agent, built on Anthropic's Claude Agent SDK.":                                 {},
 }
 
+// isClaudeModel reports whether an upstream model is a Claude model — the only
+// kind Claude Code's Claude-specific extras are meant for.
+func isClaudeModel(model string) bool {
+	return strings.HasPrefix(strings.ToLower(model), "claude-")
+}
+
+// StripsClaudeCodeExtras reports whether the route strips Claude Code's
+// Claude-only extras: some alias sends a Claude model to a non-Claude upstream
+// and CCWRAP_KEEP_CLAUDE_METADATA is not set.
+func (c Config) StripsClaudeCodeExtras() bool {
+	if keepClaudeMetadata() {
+		return false
+	}
+	for _, provider := range c.Forward {
+		if !isClaudeModel(provider) {
+			return true
+		}
+	}
+	return false
+}
+
 func keepClaudeMetadata() bool {
 	v := strings.ToLower(strings.TrimSpace(os.Getenv(envKeepClaudeMetadata)))
 	return v == "1" || v == "true" || v == "yes"
@@ -535,7 +556,7 @@ func RewriteJSONRequestBody(path string, body []byte, cfg Config) ([]byte, *Cont
 	// Default-on; CCWRAP_KEEP_CLAUDE_METADATA=1 disables. Skips batch path on purpose:
 	// Claude Code's source never invokes /v1/messages/batches, so the envelope
 	// only ever appears on the single-message path.
-	if !strings.HasPrefix(strings.ToLower(provider), "claude-") && !keepClaudeMetadata() {
+	if !isClaudeModel(provider) && !keepClaudeMetadata() {
 		stripClaudeCodeSystemBlocks(obj)
 	}
 	out, err := json.Marshal(obj)

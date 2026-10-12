@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Hoper-J/ccwrap/internal/model"
+	"github.com/Hoper-J/ccwrap/internal/modelalias"
 	"github.com/Hoper-J/ccwrap/internal/settings"
 )
 
@@ -840,5 +841,24 @@ func TestRunRejectsDangerousShellSettingsInThirdPartyHiddenMode(t *testing.T) {
 	_, err := Run(Options{Upstream: "https://gateway.example/v1", ParentEnv: []string{"PATH=/usr/bin", "ANTHROPIC_API_KEY=gateway-key"}, WorkingDirectory: tmp})
 	if err == nil || !strings.Contains(err.Error(), "shell-exec settings") {
 		t.Fatalf("expected dangerous shell hidden-mode rejection, got %v", err)
+	}
+}
+
+// Claude Code's model-specific mid-conversation reminders are switched off in
+// the child when the route sends a Claude model to a non-Claude upstream (a
+// non-Claude model can take one as its latest instruction); a value the user
+// set is kept, and Claude-only routes are untouched.
+func TestClaudeReminderOffEnv(t *testing.T) {
+	gpt := modelalias.Config{Forward: map[string]string{"claude-fable-5-1": "gpt-5.5"}}
+	got := ClaudeReminderOffEnv(gpt, []string{"PATH=/usr/bin"})
+	if got["CLAUDE_CODE_TOASTY_THIMBLE"] != "0" || got["CLAUDE_CODE_GENTLE_PARASOL"] != "0" || len(got) != 2 {
+		t.Fatalf("non-Claude route: got %v, want both reminders off", got)
+	}
+	got = ClaudeReminderOffEnv(gpt, []string{"CLAUDE_CODE_TOASTY_THIMBLE=my own text"})
+	if _, overridden := got["CLAUDE_CODE_TOASTY_THIMBLE"]; overridden || got["CLAUDE_CODE_GENTLE_PARASOL"] != "0" {
+		t.Fatalf("a user-set reminder var must be kept: got %v", got)
+	}
+	if got := ClaudeReminderOffEnv(modelalias.Config{Forward: map[string]string{"claude-opus-4-8": "claude-opus-4-8"}}, nil); len(got) != 0 {
+		t.Fatalf("Claude-only route must leave the reminders alone: got %v", got)
 	}
 }

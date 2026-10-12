@@ -362,7 +362,9 @@ When the alias-rewritten model is **not** `claude-*` (typical with gateway routi
 
 Detection is content-based (exact-match for the identity, prefix-match for the billing-header), so a user-crafted `You are Claude Code, but speak Spanish.` override is not killed by mistake, and a later Claude Code release that reorders the system prompt does not over-strip.
 
-Set `CCWRAP_KEEP_CLAUDE_METADATA=1` to turn this behavior off.
+In the same case ccwrap also sets `CLAUDE_CODE_TOASTY_THIMBLE=0` and `CLAUDE_CODE_GENTLE_PARASOL=0` for Claude Code, switching off the reminders it inserts mid-conversation for the Claude model it believes it is talking to. They are tuned for Claude, and a non-Claude model takes them as its latest instruction: aliased to `claude-fable-5-1`, the turn after a tool call carries "request every item that doesn't depend on another's result", and GPT literally asks the user for "items" instead of answering. Values you set yourself win.
+
+Set `CCWRAP_KEEP_CLAUDE_METADATA=1` to turn all of this off.
 
 In the web UI, when a body is captured the drawer offers a side-by-side toggle: **received** (what Claude Code sent) and **forwarded** (what the upstream actually receives).
 
@@ -531,7 +533,7 @@ User-facing:
 | `CCWRAP_NATIVE_TLS_HELLO` | Path to a `clienthello.bin` that pins the mirrored fingerprint instead of live capture. Fail-fast validation at launch. |
 | `CCWRAP_WEB_ALLOWED_HOSTS` | Comma-separated extra `Host` values admitted to the dashboard/info endpoints. Default loopback-only (DNS-rebinding guard); set this when serving the dashboard through a tunnel / reverse proxy. |
 | `CCWRAP_QUIET=1` | Collapse the launch banner to one line (= `--quiet`). Default off. |
-| `CCWRAP_KEEP_CLAUDE_METADATA=1` | Disable Claude Code system-prompt stripping on non-claude-* upstreams. |
+| `CCWRAP_KEEP_CLAUDE_METADATA=1` | Disable Claude Code system-prompt stripping and the mid-conversation reminder switch-off on non-claude-* upstreams. |
 | `CCWRAP_UNMASK_CREDENTIALS=1` | ⚠ Disable header + body credential redaction in the inspector. ccwrap prints a stderr warning. |
 | `CCWRAP_TZ` | Timezone injected into Claude Code (= `--timezone`). `--timezone` wins. |
 | `CCWRAP_NO_TZ_PROMPT=1` | Suppress only the first-run timezone prompt (keeps the profiles-migration prompt). |
