@@ -45,6 +45,16 @@ func ProxyFunc(cfg model.EgressConfig) func(*http.Request) (*url.URL, error) {
 	}
 }
 
+// ProxyURL returns the egress proxy selected for scheme ("http" or "https"),
+// or nil for a direct egress. Bypass rules are not applied here; ProxyFunc and
+// DialContext apply them per target.
+func ProxyURL(cfg model.EgressConfig, scheme string) *url.URL {
+	if cfg.Mode == "direct" {
+		return nil
+	}
+	return selectProxy(cfg, scheme)
+}
+
 // IsSOCKSEgress reports whether the egress config uses a SOCKS5 proxy.
 func IsSOCKSEgress(cfg model.EgressConfig) bool {
 	u := selectProxy(cfg, "https")

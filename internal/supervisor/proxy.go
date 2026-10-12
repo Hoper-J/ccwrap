@@ -1519,12 +1519,18 @@ func (sp *sessionProxy) handleAnthropicMITM(w http.ResponseWriter, r *http.Reque
 		Detail:    net.JoinHostPort(logicalHost, port),
 	})
 
+	// Record each request's header order and casing as Claude Code wrote it,
+	// for the upstream re-lay (wireorder.go).
+	wire := &wireOrderRecorder{Conn: tlsConn}
 	server := &http.Server{
 		Handler:           sp.mitmHandler(logicalHost),
 		ReadHeaderTimeout: 30 * time.Second,
 		IdleTimeout:       120 * time.Second,
+		ConnContext: func(ctx context.Context, _ net.Conn) context.Context {
+			return withWireOrderRecorder(ctx, wire)
+		},
 	}
-	listener := newSingleConnListener(tlsConn)
+	listener := newSingleConnListener(wire)
 	if !sp.registerInnerServer(server) {
 		_ = listener.Close()
 		_ = tlsConn.Close()
@@ -1540,6 +1546,7 @@ func (sp *sessionProxy) mitmHandler(logicalHost string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sp.supervisor.markSessionActive(sp.session.public.ID)
 		start := time.Now()
+		clientOrder := popWireOrder(r)
 		// Per-request capture: snapshot the immutable posture at handler
 		// entry, BEFORE any routing read. Every routing decision (third-party
 		// blocker, resolveUpstream, capture-bodies gate, model alias rewrite,
@@ -1783,7 +1790,7 @@ func (sp *sessionProxy) mitmHandler(logicalHost string) http.Handler {
 			},
 		}
 		rw := newCaptureResponseWriter(w)
-		proxy.ServeHTTP(rw, r)
+		proxy.ServeHTTP(rw, withWireOrder(r, clientOrder))
 		latency := time.Since(start)
 		sp.supervisor.recordRequest(sp.session.public.ID, model.RequestRecord{
 			Timestamp:          start,

@@ -158,7 +158,7 @@ Ctrl+click the local URL after `inspect` in the launch banner to open the dashbo
 
 6. **Keep Claude Code's native TLS fingerprint**
 
-   A vanilla Go forward would swap the TLS fingerprint for Go's `crypto/tls` one — undici-shaped headers under a Go fingerprint, and that mismatch is itself a tell. ccwrap uses [utls](https://github.com/refraction-networking/utls) to replay Claude Code's own ClientHello upstream byte-for-byte.
+   A vanilla Go forward would swap the TLS fingerprint for Go's `crypto/tls` one — Claude Code-shaped headers under a Go fingerprint, and that mismatch is itself a tell. ccwrap uses [utls](https://github.com/refraction-networking/utls) to replay Claude Code's own ClientHello upstream byte-for-byte. The same goes for the HTTP layer: a Go forward re-sorts the request headers and canonicalizes their casing; ccwrap sends them in Claude Code's own order and casing.
 
 7. **Align the timezone so the request date doesn't reveal your region**
 
@@ -590,7 +590,7 @@ Default `<runtime>` and `<state>`:
 - When routing to a third-party upstream, Claude only ever sees Claude model IDs; provider-specific IDs are confined to ccwrap-internal data.
 - OAuth host bodies have their credential JSON fields redacted before being saved to disk for the inspector, but the original bytes still reach the upstream untouched.
 - Auth-style request headers (`Authorization`, `X-API-Key`, etc.) are masked **store-side**: the raw value is erased before any record reaches the inspector wire, so it never appears in `/recent`, the page bootstrap, the SSE stream, a HAR export, or a saved body — only a structure-preserving `Bearer sk-…‹redacted N chars›` form. `CCWRAP_UNMASK_CREDENTIALS=1` is the launch-time opt-in to keep raw values (the ribbon shows a persistent UNMASKED marker).
-- Anthropic-host upstream dials carry Claude Code's own TLS fingerprint (native-TLS mirror, **fail-closed**: a failed mirror blocks the dial instead of exposing a Go fingerprint).
+- Anthropic-host upstream dials carry Claude Code's own TLS fingerprint (native-TLS mirror, **fail-closed**: a failed mirror blocks the dial instead of exposing a Go fingerprint), and request headers keep Claude Code's own order and casing.
 - The dashboard/info listener refuses requests whose `Host` header is not loopback-shaped (DNS-rebinding guard, HTTP 421). Tunnel / reverse-proxy hostnames must be allowlisted explicitly via `CCWRAP_WEB_ALLOWED_HOSTS`.
 - **Tunneled access = an unauthenticated dashboard.** Once you allowlist tunnel / reverse-proxy access via `CCWRAP_WEB_ALLOWED_HOSTS`, **anyone with the URL** can read `/recent` (request metadata + redacted bodies), scrape the CSRF token from the page, and drive mutations (switch profiles, edit aliases, toggle capture). Credentials are redacted, but prompt / response bodies, profile names, and upstream hosts are plaintext — only expose it on a trusted network / trusted tunnel, and don't post the URL anywhere public.
 - On Linux, when `XDG_RUNTIME_DIR` is unset the runtime dir falls back to `/tmp/ccwrap-<uid>`, where request/response bodies are written **in plaintext** (files `0600`, dirs `0700` — not readable by others on the machine, cleared when the session ends); set `XDG_RUNTIME_DIR` on bare SSH / `su` setups.

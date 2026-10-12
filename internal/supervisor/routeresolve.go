@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -76,9 +77,32 @@ func (sp *sessionProxy) nativeUpstreamTransport(cfg model.EgressConfig) *http.Tr
 	}
 	tr := sp.supervisor.transport.Clone()
 	tr.ForceAttemptHTTP2 = false
-	tr.Proxy = nil
-	tr.DialContext = nil
-	tr.DialTLSContext = sp.nativeTLSDial(cfg)
+	// https keeps its egress inside the TLS dial below. http:// upstreams take
+	// the same egress as the plain transport: a plain HTTP proxy as an
+	// absolute-form forward (Proxy); SOCKS, or a TLS proxy, as a tunnel
+	// (DialContext) — reaching a TLS proxy through Proxy would hand the proxy
+	// dial to DialTLSContext, the fingerprint mirror.
+	forward := egress.ProxyFunc(cfg)
+	tunnel := false
+	if p := egress.ProxyURL(cfg, "http"); p != nil && p.Scheme != "http" {
+		tunnel = true
+	}
+	tr.Proxy = func(req *http.Request) (*url.URL, error) {
+		if req.URL.Scheme != "http" || tunnel {
+			return nil, nil
+		}
+		return forward(req)
+	}
+	dial := (&net.Dialer{}).DialContext
+	if tunnel {
+		dial = egress.DialContextFunc(cfg)
+	}
+	// Both dials re-lay request heads into Claude Code's wire order
+	// (wireorder.go). DisableCompression stops net/http adding an
+	// Accept-Encoding the client never sent.
+	tr.DisableCompression = true
+	tr.DialContext = wireOrderDial(dial)
+	tr.DialTLSContext = wireOrderDial(sp.nativeTLSDial(cfg))
 	sp.nativeTransports[key] = tr
 	return tr
 }

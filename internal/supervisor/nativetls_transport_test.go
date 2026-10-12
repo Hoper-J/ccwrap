@@ -1,8 +1,12 @@
 package supervisor
 
 import (
+	"context"
+	"net"
 	"net/http"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/Hoper-J/ccwrap/internal/model"
 )
@@ -77,11 +81,28 @@ func TestNativeUpstreamTransportSeparate(t *testing.T) {
 	if nt.DialTLSContext == nil {
 		t.Fatal("native transport must set DialTLSContext")
 	}
-	if nt.Proxy != nil {
-		t.Fatal("native transport must set Proxy=nil (egress moves into the dial)")
+	// https keeps its egress inside the TLS dial: Proxy must not claim it
+	// (Transport would bypass DialTLSContext). http:// upstreams take the same
+	// egress as the plain transport — see TestNativeUpstreamTransportHTTPEgress.
+	if u, err := nt.Proxy(mustRequest(t, "https://api.anthropic.com/v1/messages")); u != nil || err != nil {
+		t.Fatalf("native Proxy(https) = %v, %v; want nil (egress stays in the TLS dial)", u, err)
 	}
-	if nt.DialContext != nil {
-		t.Fatal("native transport must set DialContext=nil")
+	// With an HTTP-proxy egress, DialContext only ever reaches the proxy (or a
+	// bypassed target): a direct dial, wrapped so request heads keep Claude
+	// Code's wire order. Behavioral check: it reaches a local listener
+	// directly and hands back a wireOrderConn.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	c, err := nt.DialContext(context.Background(), "tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatalf("native DialContext must dial directly: %v", err)
+	}
+	_ = c.Close()
+	if _, ok := c.(*wireOrderConn); !ok {
+		t.Fatalf("native DialContext returned %T, want *wireOrderConn", c)
 	}
 	if nt.ForceAttemptHTTP2 {
 		t.Fatal("native transport must set ForceAttemptHTTP2=false (h1)")
@@ -98,5 +119,80 @@ func TestNativeUpstreamTransportSeparate(t *testing.T) {
 	}
 	if nt2 := sp.nativeUpstreamTransport(eg); nt2 != nt {
 		t.Fatal("native transport must be cached per egress")
+	}
+}
+
+func mustRequest(t *testing.T, raw string) *http.Request {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, raw, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return req
+}
+
+// recordingListener counts the connections something dials to it.
+func recordingListener(t *testing.T) (string, func() int) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	var mu sync.Mutex
+	n := 0
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			n++
+			mu.Unlock()
+			_ = c.Close()
+		}
+	}()
+	return ln.Addr().String(), func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return n
+	}
+}
+
+// http:// upstreams on the native transport must honor the egress exactly like
+// the plain transport does — never dial out directly past it. An HTTP proxy
+// gets an absolute-form forward (Proxy); SOCKS and TLS proxies get a tunnel
+// (DialContext through egress.DialContext); loopback/private targets stay
+// direct (the egress bypass floor).
+func TestNativeUpstreamTransportHTTPEgress(t *testing.T) {
+	sp := newTestSessionProxy(t)
+
+	nt := sp.nativeUpstreamTransport(httpProxyEgressForTest())
+	u, err := nt.Proxy(mustRequest(t, "http://gw.example.com:3000/v1/messages"))
+	if err != nil || u == nil || u.String() != "http://proxy.example.com:3128" {
+		t.Fatalf("native Proxy(http public) = %v, %v; want the egress proxy", u, err)
+	}
+	if u, _ := nt.Proxy(mustRequest(t, "http://127.0.0.1:8000/v1/messages")); u != nil {
+		t.Fatalf("native Proxy(http loopback) = %v; want nil (bypass floor)", u)
+	}
+
+	for _, scheme := range []string{"socks5h", "https"} {
+		t.Run(scheme+" egress tunnels", func(t *testing.T) {
+			addr, dials := recordingListener(t)
+			eg := model.EgressConfig{Mode: "explicit", HTTPProxy: scheme + "://" + addr, HTTPSProxy: scheme + "://" + addr, Source: "test"}
+			tr := sp.nativeUpstreamTransport(eg)
+			if u, _ := tr.Proxy(mustRequest(t, "http://gw.example.com:3000/v1/messages")); u != nil {
+				t.Fatalf("Proxy(http) = %v; a %s egress must tunnel via DialContext instead", u, scheme)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if c, err := tr.DialContext(ctx, "tcp", "gw.example.com:3000"); err == nil {
+				_ = c.Close()
+			}
+			if dials() == 0 {
+				t.Fatalf("an http:// upstream dial did not go through the %s egress", scheme)
+			}
+		})
 	}
 }

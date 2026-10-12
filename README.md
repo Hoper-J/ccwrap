@@ -158,7 +158,7 @@ Ctrl + 点击启动横幅里 `inspect` 后面那个本地 URL 打开 dashboard�
 
 6. **保持 Claude Code 的原生 TLS 指纹**
 
-   普通 Go 转发时会把 TLS 指纹换成 Go `crypto/tls` 的——header 是 undici 的形状、指纹却是 Go 的，这个错位本身是识别特征。ccwrap 用 [utls](https://github.com/refraction-networking/utls) 把 Claude Code 自己的 ClientHello 原样复刻到上游。
+   普通 Go 转发时会把 TLS 指纹换成 Go `crypto/tls` 的——header 是 Claude Code 的形状、指纹却是 Go 的，这个错位本身是识别特征。ccwrap 用 [utls](https://github.com/refraction-networking/utls) 把 Claude Code 自己的 ClientHello 原样复刻到上游。HTTP 层也一样：Go 转发会把请求头按字母重排、统一大小写，ccwrap 照 Claude Code 原本的顺序和大小写发出去。
 
 7. **对齐时区，避免请求日期暴露地区**
 
@@ -590,7 +590,7 @@ State：
 - 路由到第三方上游时，Claude 始终只看到 Claude model id；provider 特定的 id 被限制在 ccwrap 内部数据里
 - OAuth host body 在保存到磁盘给检查器看之前会把凭据 JSON 字段打码，但原始字节会原样发到上游
 - Auth 风格的请求 header（`Authorization`、`X-API-Key` 等）在 store 侧就被掩码：记录进入 inspector wire 之前原文已被抹除，`/recent`、页面 bootstrap、SSE 流、HAR 导出、保存的 body 里都不会出现原文，只有保结构的 `Bearer sk-…‹redacted N chars›` 形式。`CCWRAP_UNMASK_CREDENTIALS=1` 是保留原文的 launch-time opt-in（ribbon 显示持久的 UNMASKED 标记）
-- 向 Anthropic host 的上游拨号带的是 Claude Code 自己的 TLS 指纹（原生 TLS 镜像，**fail-closed**：镜像失败会阻断该次拨号，而不是暴露 Go 指纹）
+- 向 Anthropic host 的上游拨号带的是 Claude Code 自己的 TLS 指纹（原生 TLS 镜像，**fail-closed**：镜像失败会阻断该次拨号，而不是暴露 Go 指纹）；请求头也保持 Claude Code 原本的顺序和大小写
 - 仪表盘/info 监听拒绝 `Host` header 非 loopback 形态的请求（DNS-rebinding 防护，HTTP 421）。隧道/反代主机名需用 `CCWRAP_WEB_ALLOWED_HOSTS` 显式放行
 - **经隧道访问 = 无鉴权仪表盘。** 一旦用 `CCWRAP_WEB_ALLOWED_HOSTS` 放行隧道/反代访问，**任何拿到该 URL 的人**都能读 `/recent`（请求元数据 + 脱敏 body）、抓取页面里的 CSRF token 并驱动 mutation（切 profile、改 alias、开关抓取）。凭据已脱敏，但 prompt / response body、profile 名、上游 host 都是明文——只在受信网络 / 受信隧道上开放，别把该 URL 贴到公开处
 - Linux 上 `XDG_RUNTIME_DIR` 未设时，runtime 目录 fallback 到 `/tmp/ccwrap-<uid>`，其中的请求/响应 body 是**明文落盘**（文件 `0600`、目录 `0700`，同机他人读不到，会话结束即清）；裸 SSH / `su` 等场景建议设 `XDG_RUNTIME_DIR`

@@ -13,6 +13,9 @@ name: Fingerprint Drift Watch
 #     baseline is surfaced as a warning.
 #   - TestLiveFingerprintCompare: the same mirror check against live
 #     node/undici, kept as a regression net for the mirror machinery.
+#   - TestLiveClaudeHeaderWireOrder: the request head ccwrap forwards must keep
+#     the latest Claude Code's header order and casing (hard fail), so the
+#     HTTP layer under the mirrored TLS stays Claude Code's too.
 #
 # NOTE: GitHub auto-disables `schedule` workflows after ~60 days without repo
 # activity — exactly the maintenance-lull window when drift is most likely to
@@ -50,7 +53,7 @@ jobs:
         # first, with a message that names the remediation. Removing a test has
         # to be a visible decision: restore it or retire this workflow with it.
         run: |
-          for f in internal/supervisor/livefp_test.go internal/supervisor/livefp_claude_test.go; do
+          for f in internal/supervisor/livefp_test.go internal/supervisor/livefp_claude_test.go cmd/ccwrap/livefp_header_order_test.go; do
             if [ ! -f "$f" ]; then
               echo "::error::$f is missing from the checkout. The fingerprint drift watch CANNOT run — restore the livefp test or remove this workflow."
               exit 1
@@ -58,20 +61,21 @@ jobs:
           done
       - name: live mirror-fidelity + baseline check
         # Hard-fails if ccwrap's mirrored ClientHello != the live one (mirror
-        # broke). CCWRAP_LIVEFP_REQUIRE_CLAUDE turns a missing claude into a
+        # broke) or its forwarded head loses Claude Code's layout.
+        # CCWRAP_LIVEFP_REQUIRE_CLAUDE turns a missing claude into a
         # failure instead of a skip. Belt-and-braces: also fail if the -run
         # pattern matched nothing or the Claude Code test did not pass (e.g. a
         # rename) — see the vacuous-run guard above.
         env:
           CCWRAP_LIVEFP_REQUIRE_CLAUDE: "1"
         run: |
-          out=$(go test ./internal/supervisor/ -tags livefp -run 'TestLiveFingerprintCompare|TestLiveClaudeFingerprintMirror' -v 2>&1) || { echo "$out"; exit 1; }
+          out=$(go test ./internal/supervisor/ ./cmd/ccwrap/ -tags livefp -run 'TestLiveFingerprintCompare|TestLiveClaudeFingerprintMirror|TestLiveClaudeHeaderWireOrder' -v 2>&1) || { echo "$out"; exit 1; }
           echo "$out"
           if echo "$out" | grep -q "no tests to run"; then
             echo "::error::the -run pattern matched no tests; the drift watch ran vacuously."
             exit 1
           fi
-          for t in TestLiveFingerprintCompare TestLiveClaudeFingerprintMirror; do
+          for t in TestLiveFingerprintCompare TestLiveClaudeFingerprintMirror TestLiveClaudeHeaderWireOrder; do
             if ! echo "$out" | grep -q -- "--- PASS: $t "; then
               echo "::error::$t did not run to a PASS; the drift watch ran vacuously."
               exit 1
