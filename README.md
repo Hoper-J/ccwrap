@@ -493,7 +493,8 @@ Claude 和它继承的子进程启动时会带上：
 - `NODE_EXTRA_CA_CERTS` → ccwrap 的根证书
 - 复合 CA bundle env（`系统根 + ccwrap 根`）给 Python / curl / Git
 - 仅 loopback 的 `NO_PROXY`
-- 一份 ccwrap 生成的 `--settings`，把同样的 proxy/CA 值镜像到 Claude flag 设置里。默认以 inline JSON 传入：Claude Code 会把 `--settings` 文件所在目录随请求上报，inline 时报的是它自己的临时目录，不会带出 ccwrap 的路径。你自己传了 `--settings` 文件时，合并结果改写进 `/tmp/claude-<uid>/` 下的 0600 文件，免得文件内容出现在进程列表里
+- `CLAUDE_CODE_GZIP_REQUEST_BODIES=0` → 请求 body 不压缩。ccwrap 的别名改写、system 块裁剪和请求查看器都要读 body；Claude Code 走代理时本来就不压缩，这一项只是盖过显式设置的 `=1`
+- 一份 ccwrap 生成的 `--settings`，把上面这些值镜像到 Claude flag 设置里。默认以 inline JSON 传入：Claude Code 会把 `--settings` 文件所在目录随请求上报，inline 时报的是它自己的临时目录，不会带出 ccwrap 的路径。你自己传了 `--settings` 文件时，合并结果改写进 `/tmp/claude-<uid>/` 下的 0600 文件，免得文件内容出现在进程列表里
 
 ccwrap 从子进程和生成的 settings 里**剥离**这些 env key（它们会创建绕过 ccwrap 的第二条 provider 控制路径）：
 

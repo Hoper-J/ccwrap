@@ -862,3 +862,26 @@ func TestClaudeReminderOffEnv(t *testing.T) {
 		t.Fatalf("Claude-only route must leave the reminders alone: got %v", got)
 	}
 }
+
+// ccwrap reads, and may rewrite, request bodies (model aliases, system-block
+// trimming, the request inspector), so the child must send them uncompressed.
+// Claude Code already skips gzip behind a proxy unless
+// CLAUDE_CODE_GZIP_REQUEST_BODIES forces it on; ccwrap pins it off in the
+// process env and in its generated settings, which outrank user settings.
+func TestInjectedEnvPinsUncompressedRequestBodies(t *testing.T) {
+	injected := InjectedEnv("http://127.0.0.1:4444", "/tmp/ca-cert.pem", "/tmp/ca-bundle.pem")
+	if got := injected["CLAUDE_CODE_GZIP_REQUEST_BODIES"]; got != "0" {
+		t.Fatalf("InjectedEnv CLAUDE_CODE_GZIP_REQUEST_BODIES = %q, want \"0\"", got)
+	}
+	env := strings.Join(BuildChildEnv([]string{"CLAUDE_CODE_GZIP_REQUEST_BODIES=1"}, "http://127.0.0.1:4444", "/tmp/ca-cert.pem", "/tmp/ca-bundle.pem", nil, ChildAuthBootstrap{}, ""), "\n")
+	if !strings.Contains(env, "CLAUDE_CODE_GZIP_REQUEST_BODIES=0") || strings.Contains(env, "CLAUDE_CODE_GZIP_REQUEST_BODIES=1") {
+		t.Fatalf("child env must pin CLAUDE_CODE_GZIP_REQUEST_BODIES=0 over the parent's 1; got:\n%s", env)
+	}
+	doc, err := settings.MergeUserSettingsIntoCCWRAPSessionSettings(map[string]any{"env": map[string]any{"CLAUDE_CODE_GZIP_REQUEST_BODIES": "1"}}, injected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := doc["env"].(map[string]string)["CLAUDE_CODE_GZIP_REQUEST_BODIES"]; got != "0" {
+		t.Fatalf("generated settings CLAUDE_CODE_GZIP_REQUEST_BODIES = %q, want \"0\"", got)
+	}
+}

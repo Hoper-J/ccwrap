@@ -252,6 +252,11 @@ func InjectedEnv(proxyURL, caCertPath, caBundlePath string) map[string]string {
 		"REQUESTS_CA_BUNDLE":  caBundlePath,
 		"CURL_CA_BUNDLE":      caBundlePath,
 		"GIT_SSL_CAINFO":      caBundlePath,
+		// ccwrap reads, and may rewrite, request bodies (model aliases,
+		// system-block trimming, the inspector). Claude Code already skips
+		// gzip behind a proxy; "0" also overrides a user's
+		// CLAUDE_CODE_GZIP_REQUEST_BODIES=1, which would force it on.
+		"CLAUDE_CODE_GZIP_REQUEST_BODIES": "0",
 	}
 }
 
