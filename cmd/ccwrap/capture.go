@@ -263,8 +263,16 @@ func responseBodyValue(b []byte) (interface{}, string) {
 	return bodyValue(b)
 }
 
-// captureDiffFilter is the canonical jq filter that strips per-run noise.
-const captureDiffFilter = `del(.meta, .response.headers["request-id","date","anthropic-ratelimit-requests-remaining","anthropic-ratelimit-tokens-remaining","cf-ray"], .request.headers["x-client-request-id","x-claude-code-session-id"], .response.body)`
+// captureDiffFilter is the canonical jq filter that strips per-run noise, so
+// two captures (say, two Claude Code versions) diff to what actually changed:
+// run metadata, the model's reply, the ClientHello's random bytes, per-request
+// ids and Content-Length (header names matched case-insensitively — capture
+// emits them canonicalized), the session-bearing metadata.user_id, and the
+// per-request parts of the billing system block (cch, cc_prompt_id, the
+// cc_version suffix).
+const captureDiffFilter = `del(.meta, .response.body, .tls.clienthello_hex, .request.body.metadata.user_id)
+| if (.request.headers | type) == "object" then .request.headers |= with_entries(select(.key | ascii_downcase | IN("content-length", "x-client-request-id", "x-claude-code-session-id", "x-claude-code-prompt-id") | not)) else . end
+| if (.request.body.system | type) == "array" then .request.body.system |= map(if (.text | type) == "string" and (.text | startswith("x-anthropic-billing-header")) then .text |= (gsub("cch=[^;]*"; "cch=<per-run>") | gsub("cc_prompt_id=[^;]*"; "cc_prompt_id=<per-run>") | sub("(?<v>cc_version=[0-9]+\\.[0-9]+\\.[0-9]+)\\.[0-9a-f]+"; "\(.v).<per-run>")) else . end) else . end`
 
 // pathWithoutQuery returns p up to (but not including) the first '?'. Capture
 // matches the endpoint by path while IGNORING the query string, so a real
