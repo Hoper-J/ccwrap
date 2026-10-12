@@ -29,6 +29,7 @@ import (
 	"github.com/Hoper-J/ccwrap/internal/dashboard"
 	"github.com/Hoper-J/ccwrap/internal/discovery"
 	"github.com/Hoper-J/ccwrap/internal/egress"
+	"github.com/Hoper-J/ccwrap/internal/envpolicy"
 	"github.com/Hoper-J/ccwrap/internal/manifest"
 	"github.com/Hoper-J/ccwrap/internal/model"
 	"github.com/Hoper-J/ccwrap/internal/modelalias"
@@ -778,22 +779,21 @@ func doctorCommand(paths app.Paths, args []string) error {
 	} else {
 		add("inherited_upstream", "pass", "no inherited ANTHROPIC_BASE_URL; fallback default will be used", "")
 	}
-	// Provider-selection transparency: ccwrap scrubs CLAUDE_CODE_USE_BEDROCK/
-	// VERTEX/FOUNDRY from the child env to keep getAPIProvider()==='firstParty'
+	// Provider-selection transparency: ccwrap scrubs every CLAUDE_CODE_USE_*
+	// provider switch from the child env to keep getAPIProvider()==='firstParty'
 	// (the first-party posture the gateway path depends on). When a user has set
-	// one truthy intending Bedrock/Vertex/Foundry, surface that the selection is
+	// one truthy intending another provider, surface that the selection is
 	// being overridden — ccwrap does not route to those providers.
 	var providerSelect []string
-	for _, k := range []string{"CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"} {
+	for _, k := range envpolicy.ProviderSelectionKeys() {
 		if v := strings.ToLower(strings.TrimSpace(envMap[k])); v == "1" || v == "true" || v == "yes" || v == "on" {
 			providerSelect = append(providerSelect, k)
 		}
 	}
 	if len(providerSelect) > 0 {
-		sort.Strings(providerSelect)
-		add("provider_selection", "pass", "Bedrock/Vertex/Foundry selection env is set but will be overridden to keep the first-party posture; ccwrap does not route to those providers", strings.Join(providerSelect, ", "))
+		add("provider_selection", "pass", "provider-selection env (Bedrock/Vertex/Foundry/…) is set but will be overridden to keep the first-party posture; ccwrap does not route to those providers", strings.Join(providerSelect, ", "))
 	} else {
-		add("provider_selection", "pass", "no Bedrock/Vertex/Foundry provider-selection env to override", "")
+		add("provider_selection", "pass", "no provider-selection env (Bedrock/Vertex/Foundry/…) to override", "")
 	}
 	unsupported := preflight.DetectUnsupportedEnv(envMap)
 	if len(unsupported) > 0 {

@@ -160,6 +160,101 @@ func TestProviderFamiliesAndHostAuthChannelAreProviderControls(t *testing.T) {
 	}
 }
 
+// The anthropicGoogleCloud provider family reroutes the whole session to its
+// own endpoint (claude.googleapis.com by default) exactly like the other
+// provider switches; the artifact/memory base-URL and token keys redirect and
+// authenticate side traffic independently of ANTHROPIC_BASE_URL (same class as
+// ARTIFACTS_API_BASE_URL); FOUNDRY_AUTH_TOKEN and BEDROCK_REGION_PREFIX belong
+// with their families. All sit in Claude Code's host-managed provider set, so
+// ambient copies must never reach the child.
+func TestGoogleCloudFamilyAndSideAPIOverridesAreProviderControls(t *testing.T) {
+	for _, key := range []string{
+		"CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
+		"ANTHROPIC_GOOGLE_CLOUD_BASE_URL",
+		"ANTHROPIC_GOOGLE_CLOUD_PROJECT",
+		"ANTHROPIC_GOOGLE_CLOUD_LOCATION",
+		"ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID",
+		"CLAUDE_CODE_SKIP_ANTHROPIC_GOOGLE_CLOUD_AUTH",
+		"ANTHROPIC_FOUNDRY_AUTH_TOKEN",
+		"ANTHROPIC_BEDROCK_REGION_PREFIX",
+		"CLAUDE_CODE_ARTIFACTS_API_TOKEN",
+		"CLAUDE_CODE_ARTIFACT_ASSET_BASE_URL",
+		"CLAUDE_CODE_ARTIFACT_LIVE_BASE_URL",
+		"CLAUDE_CODE_ARTIFACT_SYNC_BASE_URL",
+		"CLAUDE_CODE_ARTIFACT_VIEWER_BASE_URL",
+		"CLAUDE_CODE_MEMORY_API_BASE_URL",
+		"CLAUDE_CODE_MEMORY_API_TOKEN",
+	} {
+		if !IsProviderControlKey(key) {
+			t.Fatalf("expected %s to be a provider control key", key)
+		}
+		if !IsSpawnScrubKey(key) {
+			t.Fatalf("expected %s to be spawn-scrubbed", key)
+		}
+		if !IsGeneratedSessionSettingsStripKey(key) {
+			t.Fatalf("expected %s to be stripped from generated settings", key)
+		}
+	}
+}
+
+// Claude Code's model-selection key set also covers the default-model,
+// workflow/forced subagent, auto-mode/background classifier models and the
+// third-party default-seeding markers. Like the existing tiers they are user
+// model intent: preserved into the child env (Claude Code ignores
+// settings-sourced copies under CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST) but
+// stripped from generated settings.
+func TestExtendedModelSelectionKeysAreModelPreferences(t *testing.T) {
+	for _, key := range []string{
+		"ANTHROPIC_DEFAULT_MODEL",
+		"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL",
+		"CLAUDE_CODE_SUBAGENT_MODEL_FORCE",
+		"CLAUDE_CODE_AUTO_MODE_MODEL",
+		"CLAUDE_CODE_BG_CLASSIFIER_MODEL",
+		"CLAUDE_CODE_3P_PROBE_WROTE_SONNET_DEFAULT",
+		"CLAUDE_CODE_3P_PROBE_WROTE_OPUS_DEFAULT",
+		"CLAUDE_CODE_3P_PROBE_WROTE_HAIKU_DEFAULT",
+		"CLAUDE_CODE_3P_SEEDED_SONNET_DEFAULT",
+		"CLAUDE_CODE_3P_SEEDED_OPUS_DEFAULT",
+	} {
+		if !IsModelPreferenceKey(key) {
+			t.Fatalf("expected %s to be a model preference key", key)
+		}
+		if IsSpawnScrubKey(key) {
+			t.Fatalf("%s is user model intent and must survive into the child env", key)
+		}
+		if !IsGeneratedSessionSettingsStripKey(key) {
+			t.Fatalf("expected %s to be stripped from generated settings", key)
+		}
+	}
+}
+
+// Doctor's provider-selection transparency check derives its key list from
+// the scrub set, so a newly scrubbed provider switch is surfaced too.
+func TestProviderSelectionKeysCoverEveryScrubbedProviderSwitch(t *testing.T) {
+	got := map[string]bool{}
+	for _, k := range ProviderSelectionKeys() {
+		got[k] = true
+	}
+	for _, key := range []string{
+		"CLAUDE_CODE_USE_BEDROCK",
+		"CLAUDE_CODE_USE_VERTEX",
+		"CLAUDE_CODE_USE_FOUNDRY",
+		"CLAUDE_CODE_USE_ANTHROPIC_AWS",
+		"CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
+		"CLAUDE_CODE_USE_MANTLE",
+		"CLAUDE_CODE_USE_GATEWAY",
+	} {
+		if !got[key] {
+			t.Fatalf("expected %s in ProviderSelectionKeys(), got %v", key, ProviderSelectionKeys())
+		}
+	}
+	for k := range got {
+		if !IsSpawnScrubKey(k) {
+			t.Fatalf("ProviderSelectionKeys() returned %s, which is not spawn-scrubbed", k)
+		}
+	}
+}
+
 func TestOTELEndpointsAreManagedNetworkTrustKeys(t *testing.T) {
 	for _, key := range []string{
 		"OTEL_EXPORTER_OTLP_ENDPOINT",

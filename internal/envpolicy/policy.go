@@ -73,6 +73,7 @@ var providerControlKeys = map[string]struct{}{
 	"CLAUDE_CODE_OAUTH_TOKEN":             {},
 	"AWS_BEARER_TOKEN_BEDROCK":            {},
 	"ANTHROPIC_FOUNDRY_API_KEY":           {},
+	"ANTHROPIC_FOUNDRY_AUTH_TOKEN":        {},
 	"ANTHROPIC_AWS_API_KEY":               {},
 	"ANTHROPIC_BEDROCK_MANTLE_API_KEY":    {},
 	"CLAUDE_CODE_SKIP_BEDROCK_AUTH":       {},
@@ -81,6 +82,7 @@ var providerControlKeys = map[string]struct{}{
 	"CLAUDE_CODE_SKIP_ANTHROPIC_AWS_AUTH": {},
 	"CLAUDE_CODE_SKIP_MANTLE_AUTH":        {},
 	"ANTHROPIC_BEDROCK_SERVICE_TIER":      {},
+	"ANTHROPIC_BEDROCK_REGION_PREFIX":     {},
 	// Host-auth channel: HOST_CREDS_FILE is only honoured when
 	// CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST is set — which CCWRAP itself sets
 	// in placeholder sessions — and then injects base URLs and credentials
@@ -90,6 +92,24 @@ var providerControlKeys = map[string]struct{}{
 	"CLAUDE_CODE_HOST_CREDS_FILE":              {},
 	"CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH":    {},
 	"CLAUDE_CODE_HOST_AUTH_REFRESH_TIMEOUT_MS": {},
+	// The anthropicGoogleCloud provider family: routes the whole session to
+	// its own endpoint (claude.googleapis.com unless the base URL overrides it).
+	"CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD":       {},
+	"ANTHROPIC_GOOGLE_CLOUD_BASE_URL":              {},
+	"ANTHROPIC_GOOGLE_CLOUD_PROJECT":               {},
+	"ANTHROPIC_GOOGLE_CLOUD_LOCATION":              {},
+	"ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID":          {},
+	"CLAUDE_CODE_SKIP_ANTHROPIC_GOOGLE_CLOUD_AUTH": {},
+	// Same class as ARTIFACTS_API_BASE_URL: the per-surface artifact endpoints
+	// and the memory API are redirected (and authenticated) on their own,
+	// past ANTHROPIC_BASE_URL.
+	"CLAUDE_CODE_ARTIFACTS_API_TOKEN":      {},
+	"CLAUDE_CODE_ARTIFACT_ASSET_BASE_URL":  {},
+	"CLAUDE_CODE_ARTIFACT_LIVE_BASE_URL":   {},
+	"CLAUDE_CODE_ARTIFACT_SYNC_BASE_URL":   {},
+	"CLAUDE_CODE_ARTIFACT_VIEWER_BASE_URL": {},
+	"CLAUDE_CODE_MEMORY_API_BASE_URL":      {},
+	"CLAUDE_CODE_MEMORY_API_TOKEN":         {},
 }
 
 var providerControlPrefixes = []string{
@@ -124,6 +144,17 @@ var modelPreferenceKeys = map[string]struct{}{
 	"ANTHROPIC_SMALL_FAST_MODEL":                            {},
 	"ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION":                 {},
 	"CLAUDE_CODE_SUBAGENT_MODEL":                            {},
+	"ANTHROPIC_DEFAULT_MODEL":                               {},
+	"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL":                   {},
+	"CLAUDE_CODE_SUBAGENT_MODEL_FORCE":                      {},
+	"CLAUDE_CODE_AUTO_MODE_MODEL":                           {},
+	"CLAUDE_CODE_BG_CLASSIFIER_MODEL":                       {},
+	// Markers Claude Code writes when it seeds third-party default models.
+	"CLAUDE_CODE_3P_PROBE_WROTE_SONNET_DEFAULT": {},
+	"CLAUDE_CODE_3P_PROBE_WROTE_OPUS_DEFAULT":   {},
+	"CLAUDE_CODE_3P_PROBE_WROTE_HAIKU_DEFAULT":  {},
+	"CLAUDE_CODE_3P_SEEDED_SONNET_DEFAULT":      {},
+	"CLAUDE_CODE_3P_SEEDED_OPUS_DEFAULT":        {},
 }
 
 var unsupportedTransportAuthKeys = map[string]struct{}{
@@ -221,6 +252,17 @@ func ManagedNetworkTrustKeys() []string {
 	}
 	for k := range trustKeys {
 		m[k] = struct{}{}
+	}
+	return sortedKeys(m)
+}
+
+// ProviderSelectionKeys are the scrubbed CLAUDE_CODE_USE_* provider switches.
+func ProviderSelectionKeys() []string {
+	m := map[string]struct{}{}
+	for k := range providerControlKeys {
+		if strings.HasPrefix(k, "CLAUDE_CODE_USE_") {
+			m[k] = struct{}{}
+		}
 	}
 	return sortedKeys(m)
 }
