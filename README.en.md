@@ -491,7 +491,7 @@ Claude and inherited child processes are launched with:
 - `NODE_EXTRA_CA_CERTS` → ccwrap root certificate
 - a composite CA bundle env (`system roots + ccwrap root`) for Python / curl / Git
 - loopback-only `NO_PROXY`
-- a ccwrap-generated `--settings` file mirroring the same proxy/CA values into Claude flag settings
+- a ccwrap-generated `--settings` mirroring the same proxy/CA values into Claude flag settings. It is passed as inline JSON: Claude Code reports the directory of a `--settings` file upstream, and for inline JSON it reports its own temp dir, so no ccwrap path leaves the machine. If you pass your own `--settings` file, the merged result goes into a 0600 file under `/tmp/claude-<uid>/` instead, keeping its contents out of the process list
 
 ccwrap **strips** these env keys from the child process and generated settings (they would create a second provider control path bypassing ccwrap):
 
@@ -560,6 +560,7 @@ Runtime:
 <runtime>/sessions/<session-id>/
   manifest.json
   control.sock
+  ccwrap-session-settings.json   # copy of the generated settings, for inspection only (not passed to Claude)
   bodies/<spill-id>.json   # only when --capture-bodies is on (request + response)
 ```
 

@@ -99,7 +99,8 @@ type sessionLauncher struct {
 	cmd              *exec.Cmd
 	stopSignals      func()
 	proxyURL         string
-	settingsFilePath string
+	settingsFilePath string // inspection copy of the generated settings
+	settingsArg      string // what Claude Code receives as --settings
 	childEnv         []string
 	bin              string
 	childStdout      io.Writer // nil -> os.Stdout; capture sets this to redirect the child's stdout off our stdout
@@ -244,10 +245,19 @@ func (l *sessionLauncher) WriteSessionSettings() error {
 	if err != nil {
 		return fmt.Errorf("build session settings: %w", err)
 	}
+	// Inspection copy only: Claude Code gets the doc via sessionSettingsArg,
+	// never this path (it would report the directory upstream).
 	l.settingsFilePath = filepath.Join(l.sessionPaths.RuntimeDir, "ccwrap-session-settings.json")
 	if err := writeSessionSettingsFile(l.settingsFilePath, doc); err != nil {
 		return fmt.Errorf("write session settings: %w", err)
 	}
+	userSettingsFile := l.pre.ParsedFlagSettings != nil && l.pre.ParsedFlagSettings.Settings != nil && !l.pre.ParsedFlagSettings.Inline
+	arg, cleanup, err := sessionSettingsArg(doc, userSettingsFile)
+	if err != nil {
+		return fmt.Errorf("session settings: %w", err)
+	}
+	l.rollback.push(cleanup)
+	l.settingsArg = arg
 	authBootstrap := preflight.ChildAuthBootstrap{}
 	if l.pre.AuthBootstrap == model.AuthBootstrapPlaceholderActive {
 		authBootstrap = preflight.ChildAuthBootstrap{
@@ -291,7 +301,7 @@ func (l *sessionLauncher) SpawnChild() error {
 	}
 	bin := l.bin
 	args := make([]string, 0, len(l.pre.RewrittenChildArgs)+2)
-	args = append(args, "--settings", l.settingsFilePath)
+	args = append(args, "--settings", l.settingsArg)
 	args = append(args, l.pre.RewrittenChildArgs...)
 	cmd := exec.Command(bin, args...)
 	cmd.Env = l.childEnv
