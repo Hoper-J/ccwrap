@@ -1,16 +1,23 @@
 name: Fingerprint Drift Watch
 
-# ccwrap's whole value is that the upstream sees Claude Code's REAL undici TLS
-# fingerprint, not ccwrap's. That depends on matching undici's *current*
-# fingerprint — and when Node/undici updates, the fingerprint can shift and the
-# committed baseline goes stale. Normal CI skips the live check (it needs a real
-# node-undici process). This scheduled job runs it so drift surfaces proactively
-# instead of silently degrading anonymity in the field.
+# ccwrap's whole value is that the upstream sees Claude Code's REAL TLS
+# fingerprint, not ccwrap's: native TLS mirrors the ClientHello Claude Code
+# sends, and fails closed when it cannot. Claude Code ships as a native (Bun)
+# binary, so a Claude Code release can change that hello at any time — and a
+# hello utls cannot reproduce would make ccwrap block every Anthropic request.
+# Normal CI only replays committed hellos offline; this scheduled job checks
+# the live ones so drift surfaces proactively instead of in the field:
+#
+#   - TestLiveClaudeFingerprintMirror: the LATEST Claude Code's real hello must
+#     mirror byte-faithfully (hard fail); a mismatch with the committed
+#     baseline is surfaced as a warning.
+#   - TestLiveFingerprintCompare: the same mirror check against live
+#     node/undici, kept as a regression net for the mirror machinery.
 #
 # NOTE: GitHub auto-disables `schedule` workflows after ~60 days without repo
-# activity — exactly the maintenance-lull window when undici drift is most
-# likely to go unnoticed. If the repo goes quiet, this watch silently stops;
-# re-enable it under the Actions tab (or push any commit).
+# activity — exactly the maintenance-lull window when drift is most likely to
+# go unnoticed. If the repo goes quiet, this watch silently stops; re-enable it
+# under the Actions tab (or push any commit).
 on:
   schedule:
     - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC
@@ -31,29 +38,45 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: "lts/*"
+      - name: install the latest Claude Code
+        run: |
+          npm install -g @anthropic-ai/claude-code@latest --no-audit --no-fund
+          claude --version
       - name: guard against a vacuous run
-        # internal/supervisor/livefp_test.go is committed, but keep this guard
-        # as defense in depth against it being deleted or re-gitignored:
-        # `go test -run X` exits 0 when zero tests match. The "no tests to run"
-        # check on the live step below would also catch that — but only after
-        # spending a live-network run; this one fails first, with a message
-        # that names the remediation. Removing the test has to be a visible
-        # decision: restore it or retire this workflow with it.
+        # The livefp tests are committed, but keep this guard as defense in
+        # depth against them being deleted or re-gitignored: `go test -run X`
+        # exits 0 when zero tests match. The checks on the live step below would
+        # also catch that — but only after spending a live run; this one fails
+        # first, with a message that names the remediation. Removing a test has
+        # to be a visible decision: restore it or retire this workflow with it.
         run: |
-          if [ ! -f internal/supervisor/livefp_test.go ]; then
-            echo "::error::internal/supervisor/livefp_test.go is missing from the checkout. The fingerprint drift watch CANNOT run — restore the livefp test or remove this workflow."
-            exit 1
-          fi
+          for f in internal/supervisor/livefp_test.go internal/supervisor/livefp_claude_test.go; do
+            if [ ! -f "$f" ]; then
+              echo "::error::$f is missing from the checkout. The fingerprint drift watch CANNOT run — restore the livefp test or remove this workflow."
+              exit 1
+            fi
+          done
       - name: live mirror-fidelity + baseline check
-        # Hard-fails if ccwrap's mirrored ClientHello != live undici's (mirror
-        # broke); logs whether live undici still matches the committed baseline
-        # (Node/undici drift). The job's pass/fail + log is the alert.
-        # Belt-and-braces: also fail if the -run pattern matched nothing (e.g.
-        # the test was renamed) — see the vacuous-run guard above.
+        # Hard-fails if ccwrap's mirrored ClientHello != the live one (mirror
+        # broke). CCWRAP_LIVEFP_REQUIRE_CLAUDE turns a missing claude into a
+        # failure instead of a skip. Belt-and-braces: also fail if the -run
+        # pattern matched nothing or the Claude Code test did not pass (e.g. a
+        # rename) — see the vacuous-run guard above.
+        env:
+          CCWRAP_LIVEFP_REQUIRE_CLAUDE: "1"
         run: |
-          out=$(go test ./internal/supervisor/ -tags livefp -run 'TestLiveFingerprintCompare' -v 2>&1) || { echo "$out"; exit 1; }
+          out=$(go test ./internal/supervisor/ -tags livefp -run 'TestLiveFingerprintCompare|TestLiveClaudeFingerprintMirror' -v 2>&1) || { echo "$out"; exit 1; }
           echo "$out"
           if echo "$out" | grep -q "no tests to run"; then
-            echo "::error::-run TestLiveFingerprintCompare matched no tests; the drift watch ran vacuously."
+            echo "::error::the -run pattern matched no tests; the drift watch ran vacuously."
             exit 1
+          fi
+          for t in TestLiveFingerprintCompare TestLiveClaudeFingerprintMirror; do
+            if ! echo "$out" | grep -q -- "--- PASS: $t "; then
+              echo "::error::$t did not run to a PASS; the drift watch ran vacuously."
+              exit 1
+            fi
+          done
+          if drift=$(echo "$out" | grep -m1 -o 'CLAUDE_FINGERPRINT_DRIFT.*'); then
+            echo "::warning title=Claude Code TLS fingerprint drift::$drift"
           fi

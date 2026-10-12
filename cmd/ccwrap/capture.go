@@ -193,7 +193,7 @@ func buildCaptureResult(opts captureOpts, in captureInputs) captureResult {
 		Unmasked:      opts.Unmask,
 		ClaudeBin:     opts.ClaudeBin,
 		Notes: []string{
-			"TLS fingerprint is node/undici's, not Claude app logic — it changes only when the bundled runtime changes.",
+			"TLS fingerprint comes from Claude Code's bundled runtime, not its app logic — it changes only when that runtime changes.",
 			"Bodies contain the system prompt, tool definitions, your prompt, and model output — review before sharing.",
 		},
 	}}

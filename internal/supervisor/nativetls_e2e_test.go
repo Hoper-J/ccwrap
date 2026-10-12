@@ -40,6 +40,23 @@ func (o *fingerprintOrigin) received() [][]byte {
 	return out
 }
 
+// waitHelloCount polls the origin until it has recorded at least n ClientHellos
+// (or the deadline elapses), returning the recorded slice.
+func waitHelloCount(t *testing.T, o *fingerprintOrigin, n int, d time.Duration) [][]byte {
+	t.Helper()
+	deadline := time.Now().Add(d)
+	for {
+		got := o.received()
+		if len(got) >= n {
+			return got
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("origin recorded %d ClientHello(s), want >= %d within %s", len(got), n, d)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 // startFingerprintOrigin starts a TLS origin whose leaf is valid for certHost
 // (plus a loopback IP SAN). Its accept loop peeks the raw ClientHello via the
 // production peekClientHello helper, records it, then hands the replay conn to

@@ -41,7 +41,7 @@ type clientHelloFields struct {
 	supportedVers   []uint16
 	alpn            []string
 	pskModes        []uint8
-	certCompression []uint16 // ext 27 (compress_certificate); undici sends none
+	certCompression []uint16 // ext 27 (compress_certificate); neither undici nor Claude Code sends one
 }
 
 func isGREASE(v uint16) bool { return (v>>8) == (v&0xff) && (v&0x0f) == 0x0a }

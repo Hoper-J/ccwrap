@@ -70,7 +70,7 @@ func ValidateLoadedHello(raw []byte) error {
 		if a, ok := ext.(*utls.ALPNExtension); ok {
 			for _, p := range a.AlpnProtocols {
 				if p == "h2" {
-					return errors.New("native-tls hello offers HTTP/2 ALPN; ccwrap forces HTTP/1.1 — load an HTTP/1.1 client's hello (e.g. Node/undici)")
+					return errors.New("native-tls hello offers HTTP/2 ALPN; ccwrap forces HTTP/1.1 — load an HTTP/1.1 client's hello, e.g. Claude Code's own (download it from the dashboard's NATIVE TLS cell)")
 				}
 			}
 		}
@@ -202,15 +202,15 @@ func classifyUpstreamError(err error, fallback string) string {
 // FAIL-CLOSED: if the fingerprint cannot be mirrored -- utls error, utls panic,
 // no ClientHello captured yet, or a test-forced failure -- it BLOCKS the request
 // (returns an error) instead of falling back to a stdlib (Go-fingerprinted)
-// handshake. A degraded fingerprint carried under undici headers is the exact
-// mismatch this feature exists to remove; emitting it would mark the traffic as
-// a non-native client upstream. On the no-hello and forced paths nothing is sent
-// (raw is closed before any handshake); on a utls-handshake failure the only
-// bytes already on the wire are the mirrored undici ClientHello -- never a Go
-// one. Combined with the upstreamTransportFor gate, which routes EVERY Anthropic
-// host (not just the API host) through this dialer, no *.anthropic.com request
-// ever carries a Go TLS fingerprint unless the operator disables the feature
-// (CCWRAP_NATIVE_TLS=0).
+// handshake. A degraded fingerprint carried under Claude Code's headers is the
+// exact mismatch this feature exists to remove; emitting it would mark the
+// traffic as a non-native client upstream. On the no-hello and forced paths
+// nothing is sent (raw is closed before any handshake); on a utls-handshake
+// failure the only bytes already on the wire are the mirrored Claude Code
+// ClientHello -- never a Go one. Combined with the upstreamTransportFor gate,
+// which routes EVERY Anthropic host (not just the API host) through this
+// dialer, no *.anthropic.com request ever carries a Go TLS fingerprint unless
+// the operator disables the feature (CCWRAP_NATIVE_TLS=0).
 func (sp *sessionProxy) nativeTLSDial(eg model.EgressConfig) func(context.Context, string, string) (net.Conn, error) {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		host, _, _ := net.SplitHostPort(addr)

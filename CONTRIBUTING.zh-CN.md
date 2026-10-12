@@ -107,7 +107,7 @@ ccwrap 本身就是为 Claude Code 服务的项目，我们不反对用 AI 辅�
 
 动这些地方之前，先读一下周边注释和对应测试：
 
-- **TLS 指纹路径**（`internal/tlsfp` 及 supervisor 的上游拨号）— ccwrap 的核心是让上游看到 Claude Code 原生的 undici 指纹，镜像失败时 **fail-closed**（阻断该次拨号，而不是退回 Go 指纹）是刻意设计，请不要"顺手修"成 fail-open。undici 基线由 `scripts/gen-undici-baseline.mjs` 生成。
+- **TLS 指纹路径**（`internal/tlsfp` 及 supervisor 的上游拨号）— ccwrap 的核心是让上游看到 Claude Code 原生的 TLS 指纹，镜像失败时 **fail-closed**（阻断该次拨号，而不是退回 Go 指纹）是刻意设计，请不要"顺手修"成 fail-open。真实 Claude Code 的基线（`internal/supervisor/testdata/claude_*`）用 `CCWRAP_LIVEFP_UPDATE_BASELINE=1` 跑一次 `TestLiveClaudeFingerprintMirror`（`-tags livefp`）刷新；守护镜像机制本身的 node/undici 基线由 `scripts/gen-undici-baseline.mjs` 生成。
 - **双语文档** — `README.md`（简体中文，默认）与 `README.en.md` 是一对，改动请两边同步。
 
 ## 许可

@@ -120,7 +120,7 @@ type sessionState struct {
 	profileToken string
 	// mirroredHelloRaw is CC's raw ClientHello bytes, captured once on the first
 	// api.anthropic.com CONNECT and reused (re-parsed per dial) by the native-TLS
-	// upstream dialer. A client property: stable per undici version, preserved
+	// upstream dialer. A client property: stable per Claude Code runtime, preserved
 	// across profile switch; drainSupersededTransports MUST NOT touch it.
 	mirroredHelloRaw atomic.Pointer[[]byte]
 	// nativeTLSBlocked is the live native-TLS block flag, written by

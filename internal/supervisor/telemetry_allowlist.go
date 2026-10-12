@@ -13,7 +13,10 @@ import "strings"
 // out of scope until observed.
 var telemetryCaptureHosts = map[string]struct{}{
 	"http-intake.logs.us5.datadoghq.com": {}, // Datadog logs (us5 region, hard-coded in CC)
-	"anthropic.sentry.io":                {}, // Sentry error reporting (CC org ingest)
+	// Sentry error reporting from older Claude Code. The native-binary CLIs
+	// carry no Sentry DSN (none in 2.1.207, 2.1.281 or 2.1.296), so current
+	// versions never reach it; kept so sessions on older versions still capture.
+	"anthropic.sentry.io": {},
 }
 
 // isTelemetryCaptureHost reports whether host is on the exact-host telemetry

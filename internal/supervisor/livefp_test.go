@@ -15,23 +15,6 @@ import (
 	"github.com/Hoper-J/ccwrap/internal/tlsfp"
 )
 
-// waitHelloCount polls the origin until it has recorded at least n ClientHellos
-// (or the deadline elapses), returning the recorded slice.
-func waitHelloCount(t *testing.T, o *fingerprintOrigin, n int, d time.Duration) [][]byte {
-	t.Helper()
-	deadline := time.Now().Add(d)
-	for {
-		got := o.received()
-		if len(got) >= n {
-			return got
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("origin recorded %d ClientHello(s), want >= %d within %s", len(got), n, d)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-}
-
 // TestLiveFingerprintCompare is a LIVE before/after fingerprint check. The
 // `livefp` build tag keeps it out of normal `go test ./...` runs; it executes
 // on demand (manual -tags livefp invocation) and WEEKLY IN CI via the

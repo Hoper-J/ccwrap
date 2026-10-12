@@ -1698,12 +1698,12 @@ func truthyEnv(v string) bool {
 
 // nativeTLSEnabled defaults native-TLS fingerprint mirroring ON. It is disabled
 // only by an explicit off value in CCWRAP_NATIVE_TLS (a hidden field kill-switch
-// for the rare case utls misbehaves on a Go/undici combo). There is no CLI flag
-// and it is not a user-facing config knob -- looking native is the default.
+// for the rare case utls cannot reproduce a Claude Code hello). There is no CLI
+// flag and it is not a user-facing config knob -- looking native is the default.
 //
 // DANGER of disabling it: with mirroring off, ccwrap dials Anthropic with Go's
-// stdlib TLS, so the upstream sees a Go fingerprint under Claude Code's undici
-// HTTP headers -- the exact mismatch that marks the traffic as a non-native
+// stdlib TLS, so the upstream sees a Go fingerprint under Claude Code's HTTP
+// headers -- the exact mismatch that marks the traffic as a non-native
 // (rewritten) client. nativeTLSDisabledWarning surfaces this loudly at launch.
 func nativeTLSEnabled(v string) bool {
 	switch strings.ToLower(strings.TrimSpace(v)) {
