@@ -50,13 +50,26 @@ func TestClaudeDialogE2E_BearerPlaceholderSkipsApprovalDialog(t *testing.T) {
 		t.Skip("go not on PATH (needed to build ccwrap)")
 	}
 
-	root := t.TempDir()
+	// Resolve symlinks: Claude Code keys project trust by the real cwd, and
+	// macOS temp dirs live behind /var → /private/var, so an unresolved
+	// workDir would miss the seeded trust entry and stall on the trust dialog.
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	ccwrapBin := filepath.Join(root, "ccwrap-e2e")
 	if out, err := exec.Command(goBin, "build", "-o", ccwrapBin, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build ccwrap: %v\n%s", err, out)
 	}
 
-	tm := &tmuxDriver{t: t, bin: tmuxBin, socket: filepath.Join(root, "tmux.sock")}
+	// The socket gets its own short dir: t.TempDir() embeds the test name, and
+	// under macOS's long $TMPDIR that overflows the 104-byte sun_path limit.
+	sockDir, err := os.MkdirTemp("", "ccwtmux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(sockDir)
+	tm := &tmuxDriver{t: t, bin: tmuxBin, socket: filepath.Join(sockDir, "tmux.sock")}
 	defer tm.killServer()
 
 	workDir := filepath.Join(root, "work")
@@ -119,7 +132,10 @@ func TestClaudeDialogE2E_BearerPlaceholderSkipsApprovalDialog(t *testing.T) {
 		tm.newSession("subject", script)
 		defer tm.killSession("subject")
 
-		ready := tm.waitFor("subject", regexp.MustCompile(`\? for shortcuts`), 90*time.Second)
+		// The idle footer shows "? for shortcuts" in default mode, but the
+		// permission-mode indicator ("… (shift+tab to cycle)") whenever another
+		// mode is active — and newer Claude Code versions default to auto mode.
+		ready := tm.waitFor("subject", regexp.MustCompile(`\? for shortcuts|shift\+tab to cycle`), 90*time.Second)
 		if ready == "" {
 			t.Fatalf("claude (under ccwrap) never reached the ready prompt; last screen:\n%s", tm.capture("subject"))
 		}
