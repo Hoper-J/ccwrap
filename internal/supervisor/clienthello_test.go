@@ -83,17 +83,20 @@ func TestCaptureMirroredHelloStoresParseableSpec(t *testing.T) {
 	_ = c1.SetReadDeadline(time.Now().Add(2 * time.Second))
 
 	sess := &sessionState{}
-	replay := captureMirroredHello(sess, c1)
+	replay, stack := captureClientHello(sess, c1)
 
 	stored := sess.mirroredHelloRaw.Load()
 	if stored == nil {
-		t.Fatalf("captureMirroredHello stored nothing")
+		t.Fatalf("captureClientHello stored no session-default hello")
 	}
 	if !bytes.Equal(*stored, framed) {
 		t.Fatalf("stored %d bytes, want the framed %d-byte record", len(*stored), len(framed))
 	}
 	if replay == nil {
-		t.Fatalf("captureMirroredHello returned a nil replay conn")
+		t.Fatalf("captureClientHello returned a nil replay conn")
+	}
+	if stack == nil || !bytes.Equal(stack.raw, framed) {
+		t.Fatalf("captureClientHello must return the hello's shape carrying the same bytes, got %+v", stack)
 	}
 	spec, err := (&utls.Fingerprinter{AllowBluntMimicry: true}).FingerprintClientHello(*stored)
 	if err != nil {

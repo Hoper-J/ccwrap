@@ -60,24 +60,6 @@ func peekClientHello(conn net.Conn) ([]byte, net.Conn, error) {
 	return raw, &replayConn{Conn: conn, r: io.MultiReader(bytes.NewReader(raw), br)}, nil
 }
 
-// captureMirroredHello peeks CC's ClientHello off conn, stores it on the session
-// (once), and returns the replay conn to use in place of conn for tls.Server. On
-// any peek error it stores nothing and returns the original conn — no hello is
-// captured, so the fail-closed upstream dialer blocks the dial (native_tls_blocked)
-// rather than falling back to a Go fingerprint. Idempotent: a no-op if already captured.
-func captureMirroredHello(sess *sessionState, conn net.Conn) net.Conn {
-	if sess == nil || sess.mirroredHelloRaw.Load() != nil {
-		return conn
-	}
-	raw, replay, err := peekClientHello(conn)
-	if err != nil {
-		return conn
-	}
-	cp := append([]byte(nil), raw...)
-	sess.mirroredHelloRaw.Store(&cp)
-	return replay
-}
-
 // replayConn serves the peeked/buffered bytes before the live conn while
 // preserving the underlying net.Conn's Write/Close/Deadline behavior.
 type replayConn struct {

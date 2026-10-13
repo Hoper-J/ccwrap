@@ -118,11 +118,19 @@ type sessionState struct {
 	// once at createSession from 16 cryptographically-random bytes; never
 	// rotated; never logged. Lowercase hex.
 	profileToken string
-	// mirroredHelloRaw is CC's raw ClientHello bytes, captured once on the first
-	// api.anthropic.com CONNECT and reused (re-parsed per dial) by the native-TLS
-	// upstream dialer. A client property: stable per Claude Code runtime, preserved
-	// across profile switch; drainSupersededTransports MUST NOT touch it.
+	// mirroredHelloRaw is the session-default ClientHello: the first one CC
+	// sent on a MITM'd Anthropic CONNECT, or the hello pinned by
+	// CCWRAP_NATIVE_TLS_HELLO. The native-TLS dialer replays it (re-parsed per
+	// dial) wherever no per-connection shape applies; requests on a MITM'd
+	// connection mirror that connection's own shape (helloStacks). A client
+	// property: preserved across profile switch; drainSupersededTransports MUST
+	// NOT touch it.
 	mirroredHelloRaw atomic.Pointer[[]byte]
+	// helloStacks are the distinct ClientHello shapes CC used on MITM'd
+	// connections, in first-seen order, at most maxHelloStacks (hellostack.go).
+	// Guarded by helloMu, as are each stack's usage fields.
+	helloMu     sync.Mutex
+	helloStacks []*helloStack
 	// nativeTLSBlocked is the live native-TLS block flag, written by
 	// recordNativeTLS under sess.mu: true while the most recent dial BLOCKED the
 	// request (fail-closed — the fingerprint could not be mirrored, so no request

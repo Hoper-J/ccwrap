@@ -37,7 +37,8 @@ type sessionProxy struct {
 	inner            map[*http.Server]struct{}
 	tracked          map[net.Conn]struct{}
 	transports       map[string]*http.Transport
-	nativeTransports map[string]*http.Transport // SEPARATE native-TLS cache; Anthropic-route ReverseProxy only. Never shared with telemetry/forward.
+	nativeTransports map[string]*http.Transport            // SEPARATE native-TLS cache; Anthropic-route ReverseProxy only. Never shared with telemetry/forward.
+	stackTransports  map[stackTransportKey]*http.Transport // native-TLS cache per egress and ClientHello shape (hellostack.go); guarded by mu
 	wg               sync.WaitGroup
 	pinnedTelemetry  map[string]struct{} // telemetry hosts that rejected our MITM cert this session -> fall back to tunnel; guarded by mu
 	webAllowedHosts  map[string]struct{} // extra Hosts admitted to info endpoints (CCWRAP_WEB_ALLOWED_HOSTS, launch-time snapshot); read-only after construction. See webhosts.go.
@@ -65,6 +66,7 @@ func newSessionProxy(supervisor *Supervisor, session *sessionState) (*sessionPro
 		tracked:          map[net.Conn]struct{}{},
 		transports:       map[string]*http.Transport{},
 		nativeTransports: map[string]*http.Transport{},
+		stackTransports:  map[stackTransportKey]*http.Transport{},
 		webAllowedHosts:  webAllowedHostsFromEnv(),
 	}
 	sp.httpServer = &http.Server{
@@ -588,12 +590,15 @@ func writeBodyMissJSON(w http.ResponseWriter, reason string) {
 	_ = enc.Encode(map[string]string{"error": reason})
 }
 
-// handleNativeTLSInfo serves the read-only GET /native-tls JSON endpoint:
-// the mirrored Claude Code ClientHello (hex) plus its computed JA3/JA4/
-// peetprint fingerprints. Nil-safe: before the first Anthropic dial the
-// mirrored hello is unset and the endpoint reports captured:false without
-// touching the raw bytes. The hello carries no credentials (TLS handshake
-// precedes any HTTP request), so the hex/fingerprints leak no secrets.
+// handleNativeTLSInfo serves the read-only GET /native-tls JSON endpoint: the
+// Claude Code ClientHellos ccwrap mirrors, with their JA3/JA4/peetprint.
+// "stacks" lists every shape seen on MITM'd connections (hellostack.go), main
+// one first: the shape that carried /v1/messages, else the first seen. The
+// top-level fields describe the main shape, or the session-default hello
+// before any shape is known (and for a pinned hello, which has none).
+// Nil-safe: before the first Anthropic connection it reports captured:false.
+// A hello carries no credentials (the TLS handshake precedes any HTTP
+// request), so none of this leaks secrets.
 func (sp *sessionProxy) handleNativeTLSInfo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	p := sp.session.mirroredHelloRaw.Load()
@@ -603,10 +608,18 @@ func (sp *sessionProxy) handleNativeTLSInfo(w http.ResponseWriter, r *http.Reque
 	}
 	raw := *p
 	source := "captured"
-	note := "Claude Code ClientHello that ccwrap mirrors; outbound SNI is rewritten per dial, so all three fingerprints equal what is sent upstream."
+	note := "Claude Code's ClientHello that ccwrap mirrors; outbound SNI is rewritten per dial, so all three fingerprints equal what is sent upstream."
+	stacks := sp.session.helloStackViews()
+	if len(stacks) > 1 {
+		note = "Claude Code uses more than one TLS stack; each connection's requests go upstream mirroring its own ClientHello. The first is the one its /v1/messages calls use. Outbound SNI is rewritten per dial."
+	}
 	if sp.session.nativeTLSHelloLoaded {
 		source = "loaded"
 		note = "Loaded from CCWRAP_NATIVE_TLS_HELLO — a pinned fingerprint, not the live client's. Outbound SNI is rewritten per dial."
+		stacks = nil
+	}
+	if len(stacks) > 0 {
+		raw = stacks[0].raw
 	}
 	out := map[string]any{
 		"captured":         true,
@@ -621,23 +634,43 @@ func (sp *sessionProxy) handleNativeTLSInfo(w http.ResponseWriter, r *http.Reque
 	} else {
 		out["parse_error"] = err.Error()
 	}
+	if len(stacks) > 0 {
+		out["stacks"] = stacks
+	}
 	_ = json.NewEncoder(w).Encode(out)
 }
 
-// handleNativeTLSClientHello serves the raw mirrored ClientHello bytes as a
-// download (GET /native-tls/clienthello.bin). Nil-safe: before the first
-// Anthropic dial the mirrored hello is unset and the endpoint 404s. The hello
-// carries no credentials (the TLS handshake precedes any HTTP request), so the
-// raw bytes leak no secrets.
+// handleNativeTLSClientHello serves raw ClientHello bytes as a download (GET
+// /native-tls/clienthello.bin): the shape named by ?key= (a "stacks" key of
+// GET /native-tls), else the main shape, else the session-default hello.
+// Nil-safe: before the first Anthropic connection, or for an unknown key, it
+// 404s. A hello carries no credentials, so the raw bytes leak no secrets.
 func (sp *sessionProxy) handleNativeTLSClientHello(w http.ResponseWriter, r *http.Request) {
-	p := sp.session.mirroredHelloRaw.Load()
-	if p == nil {
+	var raw []byte
+	if p := sp.session.mirroredHelloRaw.Load(); p != nil {
+		raw = *p
+	}
+	stacks := sp.session.helloStackViews()
+	if sp.session.nativeTLSHelloLoaded {
+		stacks = nil
+	}
+	if key := r.URL.Query().Get("key"); key != "" {
+		raw = nil
+		for _, s := range stacks {
+			if s.Key == key {
+				raw = s.raw
+			}
+		}
+	} else if len(stacks) > 0 {
+		raw = stacks[0].raw
+	}
+	if raw == nil {
 		http.NotFound(w, r)
 		return
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", `attachment; filename="clienthello.bin"`)
-	_, _ = w.Write(*p)
+	_, _ = w.Write(raw)
 }
 
 // handleProfileCatalog returns the browser-facing fresh-fetched catalog.
@@ -1462,12 +1495,13 @@ func (sp *sessionProxy) handleAnthropicMITM(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Native-TLS opt-in: synchronously mirror CC's raw ClientHello before the
-	// CC<->ccwrap tls.Server handshake consumes it, so the native-TLS upstream
-	// dialer can replay it. Captures once per session; hands tls.Server a replay
-	// conn so the inner handshake is unaffected. Default off => exact prior path.
+	// Native TLS: peek CC's raw ClientHello before the CC<->ccwrap tls.Server
+	// handshake consumes it, so this connection's requests go upstream
+	// mirroring its shape (hellostack.go). tls.Server gets a replay conn, so
+	// the inner handshake is unaffected. Native TLS off => exact prior path.
+	var hello *helloStack
 	if ap := sp.session.active.Load(); ap != nil && ap.l.nativeTLS {
-		clientConn = captureMirroredHello(sp.session, clientConn)
+		clientConn, hello = captureClientHello(sp.session, clientConn)
 	}
 
 	cert, err := sp.supervisor.ca.IssueServerCert(logicalHost)
@@ -1527,7 +1561,7 @@ func (sp *sessionProxy) handleAnthropicMITM(w http.ResponseWriter, r *http.Reque
 		ReadHeaderTimeout: 30 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		ConnContext: func(ctx context.Context, _ net.Conn) context.Context {
-			return withWireOrderRecorder(ctx, wire)
+			return withHelloStack(withWireOrderRecorder(ctx, wire), hello)
 		},
 	}
 	listener := newSingleConnListener(wire)
@@ -1702,7 +1736,12 @@ func (sp *sessionProxy) mitmHandler(logicalHost string) http.Handler {
 		// that telemetry/forward reuse. upstreamTransportFor selects it for EVERY
 		// Anthropic host when nativeTLS is on (so no *.anthropic.com dial leaks a
 		// Go fingerprint); default nativeTLS=false keeps the plain path.
-		upstreamTr := sp.upstreamTransportFor(logicalHost, ap.r.egress, ap.l.nativeTLS)
+		// Requests mirror their own connection's ClientHello shape upstream.
+		hello := helloStackFrom(r.Context())
+		if !ap.l.nativeTLS {
+			hello = nil
+		}
+		upstreamTr := sp.upstreamTransportForStack(logicalHost, ap.r.egress, ap.l.nativeTLS, hello)
 		// Response-body tap: when capture is on, the ModifyResponse hook below
 		// tees the streamed response into a spill WITHOUT buffering (preserves
 		// SSE streaming). Set from the tee's Close, read by recordRequest below
@@ -1792,10 +1831,16 @@ func (sp *sessionProxy) mitmHandler(logicalHost string) http.Handler {
 		rw := newCaptureResponseWriter(w)
 		proxy.ServeHTTP(rw, withWireOrder(r, clientOrder))
 		latency := time.Since(start)
+		sp.session.noteHelloUse(hello, logicalHost, r.Method, r.URL.Path)
+		var helloKey string
+		if hello != nil {
+			helloKey = hello.key
+		}
 		sp.supervisor.recordRequest(sp.session.public.ID, model.RequestRecord{
 			Timestamp:          start,
 			SessionID:          sp.session.public.ID,
 			Method:             r.Method,
+			ClientHelloKey:     helloKey,
 			LogicalTargetHost:  logicalHost,
 			ActualUpstreamHost: upstreamHostForRequest,
 			Path:               pathAndQuery(r.URL),

@@ -158,7 +158,7 @@ Ctrl+click the local URL after `inspect` in the launch banner to open the dashbo
 
 6. **Keep Claude Code's native TLS fingerprint**
 
-   A vanilla Go forward would swap the TLS fingerprint for Go's `crypto/tls` one — Claude Code-shaped headers under a Go fingerprint, and that mismatch is itself a tell. ccwrap uses [utls](https://github.com/refraction-networking/utls) to replay Claude Code's own ClientHello upstream byte-for-byte. The same goes for the HTTP layer: a Go forward re-sorts the request headers and canonicalizes their casing; ccwrap sends them in Claude Code's own order and casing.
+   A vanilla Go forward would swap the TLS fingerprint for Go's `crypto/tls` one — Claude Code-shaped headers under a Go fingerprint, and that mismatch is itself a tell. ccwrap uses [utls](https://github.com/refraction-networking/utls) to replay Claude Code's own ClientHello upstream byte-for-byte. Claude Code runs more than one TLS stack (in 2.1.296, `/v1/messages` and most other calls use different ClientHellos), so ccwrap mirrors per connection: every request goes upstream with the fingerprint of the connection it came in on. The same goes for the HTTP layer: a Go forward re-sorts the request headers and canonicalizes their casing; ccwrap sends them in Claude Code's own order and casing.
 
 7. **Align the timezone so the request date doesn't reveal your region**
 

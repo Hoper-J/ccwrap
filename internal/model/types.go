@@ -376,6 +376,10 @@ type RequestRecord struct {
 	// latest posture (timeline correctness).
 	ActiveProfileName     string `json:"active_profile_name,omitempty"`
 	ActiveProfileProvider string `json:"active_profile_provider,omitempty"`
+	// ClientHelloKey names the ClientHello shape (GET /native-tls "stacks")
+	// this request's upstream connection mirrored. Empty when native TLS did
+	// not apply or the session-default hello was used.
+	ClientHelloKey string `json:"client_hello_key,omitempty"`
 }
 
 // RequestBodyRef is the in-ring reference to a request body spilled to a

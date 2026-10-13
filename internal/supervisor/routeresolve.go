@@ -75,6 +75,15 @@ func (sp *sessionProxy) nativeUpstreamTransport(cfg model.EgressConfig) *http.Tr
 	if tr := sp.nativeTransports[key]; tr != nil {
 		return tr
 	}
+	tr := sp.newNativeTransport(cfg, nil)
+	sp.nativeTransports[key] = tr
+	return tr
+}
+
+// newNativeTransport builds a native-TLS transport whose TLS dials mirror
+// hello, or the session-default hello when hello is nil (read at dial time).
+// Callers cache it under sp.mu.
+func (sp *sessionProxy) newNativeTransport(cfg model.EgressConfig, hello []byte) *http.Transport {
 	tr := sp.supervisor.transport.Clone()
 	tr.ForceAttemptHTTP2 = false
 	// https keeps its egress inside the TLS dial below. http:// upstreams take
@@ -102,8 +111,7 @@ func (sp *sessionProxy) nativeUpstreamTransport(cfg model.EgressConfig) *http.Tr
 	// Accept-Encoding the client never sent.
 	tr.DisableCompression = true
 	tr.DialContext = wireOrderDial(dial)
-	tr.DialTLSContext = wireOrderDial(sp.nativeTLSDial(cfg))
-	sp.nativeTransports[key] = tr
+	tr.DialTLSContext = wireOrderDial(sp.nativeTLSDialHello(cfg, hello))
 	return tr
 }
 
@@ -116,8 +124,15 @@ func (sp *sessionProxy) nativeUpstreamTransport(cfg model.EgressConfig) *http.Tr
 // silently leaking a Go fingerprint to Anthropic. (Telemetry hosts are never
 // Anthropic, so the telemetry MITM keeps the plain transport via this same rule.)
 func (sp *sessionProxy) upstreamTransportFor(logicalHost string, cfg model.EgressConfig, nativeTLS bool) *http.Transport {
+	return sp.upstreamTransportForStack(logicalHost, cfg, nativeTLS, nil)
+}
+
+// upstreamTransportForStack is upstreamTransportFor for a request that came in
+// over a MITM'd connection with ClientHello shape s: on the native path its
+// upstream connections mirror that shape (nativeStackTransport).
+func (sp *sessionProxy) upstreamTransportForStack(logicalHost string, cfg model.EgressConfig, nativeTLS bool, s *helloStack) *http.Transport {
 	if nativeTLS && isAnthropicHost(logicalHost) {
-		return sp.nativeUpstreamTransport(cfg)
+		return sp.nativeStackTransport(cfg, s)
 	}
 	return sp.upstreamTransport(cfg)
 }
@@ -148,16 +163,23 @@ func (sp *sessionProxy) drainSupersededTransports(newKey string) {
 		drained = append(drained, tr)
 		delete(sp.transports, k)
 	}
-	// Drain the SEPARATE native-TLS cache the same way, so a profile switch
-	// that changes egress does not leak native idle conns bound to the old
-	// egress. sess.mirroredHelloRaw is untouched — the captured ClientHello
-	// survives the switch (server.go documents this invariant).
+	// Drain the SEPARATE native-TLS caches (session default and per hello
+	// shape) the same way, so a profile switch that changes egress does not
+	// leak native idle conns bound to the old egress. The captured hellos are
+	// untouched: they are client properties and survive the switch.
 	for k, tr := range sp.nativeTransports {
 		if k == newKey {
 			continue
 		}
 		drained = append(drained, tr)
 		delete(sp.nativeTransports, k)
+	}
+	for k, tr := range sp.stackTransports {
+		if k.egress == newKey {
+			continue
+		}
+		drained = append(drained, tr)
+		delete(sp.stackTransports, k)
 	}
 	sp.mu.Unlock()
 	for _, tr := range drained {

@@ -63,11 +63,14 @@ func TestNativeTLSHelloPreseed(t *testing.T) {
 		t.Error("public NativeTLSLoaded must be true")
 	}
 
-	// A capture attempt now MUST no-op (mirroredHelloRaw already set) — loaded bytes survive.
+	// With a pinned hello a capture attempt MUST no-op: nothing is peeked, no
+	// per-connection shape applies, and the loaded bytes survive.
 	a, b := net.Pipe()
 	defer a.Close()
 	defer b.Close()
-	_ = captureMirroredHello(sess, a) // returns immediately via the idempotency guard; conn unused
+	if _, stack := captureClientHello(sess, a); stack != nil {
+		t.Error("a pinned hello must leave connections without a shape of their own")
+	}
 	if p2 := sess.mirroredHelloRaw.Load(); p2 == nil || !bytes.Equal(*p2, undici) {
 		t.Error("capture must not overwrite a pre-seeded loaded hello")
 	}

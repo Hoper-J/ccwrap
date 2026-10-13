@@ -4230,16 +4230,37 @@ details.req-sub{border:1px solid var(--line);border-radius:6px;margin:6px 0;back
         row.appendChild(k); row.appendChild(v);
         return row;
       }
-      var rows = [['JA3', d.ja3], ['JA4', d.ja4], ['peetprint', d.peetprint]];
-      for (var i = 0; i < rows.length; i++) {
-        if (!rows[i][1]) continue;
-        pop.appendChild(cmdRow(rows[i][0], rows[i][1]));
+      // Claude Code can run more than one TLS stack; /native-tls lists each
+      // ClientHello shape (the one its /v1/messages calls use first) with the
+      // request paths it carried. The top-level fields are the first shape.
+      var stacks = d.stacks || [];
+      function usedBy(s){
+        var n = document.createElement('div'); n.className = 'ntls-note';
+        n.textContent = 'used by: ' + ((s.paths && s.paths.length) ? s.paths.join(', ') : 'no request yet');
+        return n;
       }
-      var dl = document.createElement('a'); dl.className = 'bv-dl';
-      dl.textContent = 'download clienthello.bin';
-      dl.setAttribute('href', '/native-tls/clienthello.bin');
-      dl.setAttribute('download', 'clienthello.bin');
-      pop.appendChild(dl);
+      function fpRows(f){
+        var rows = [['JA3', f.ja3], ['JA4', f.ja4], ['peetprint', f.peetprint]];
+        for (var i = 0; i < rows.length; i++) {
+          if (!rows[i][1]) continue;
+          pop.appendChild(cmdRow(rows[i][0], rows[i][1]));
+        }
+      }
+      function dlLink(href, name){
+        var dl = document.createElement('a'); dl.className = 'bv-dl';
+        dl.textContent = 'download ' + name;
+        dl.setAttribute('href', href);
+        dl.setAttribute('download', name);
+        return dl;
+      }
+      if (stacks.length > 1) pop.appendChild(usedBy(stacks[0]));
+      fpRows(d);
+      pop.appendChild(dlLink('/native-tls/clienthello.bin', 'clienthello.bin'));
+      for (var si = 1; si < stacks.length; si++) {
+        pop.appendChild(usedBy(stacks[si]));
+        fpRows(stacks[si]);
+        pop.appendChild(dlLink('/native-tls/clienthello.bin?key=' + encodeURIComponent(stacks[si].key), 'clienthello-' + stacks[si].key + '.bin'));
+      }
       if (d.note) {
         var note = document.createElement('div'); note.className = 'ntls-note';
         note.textContent = d.note;

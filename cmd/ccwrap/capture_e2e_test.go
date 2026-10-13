@@ -29,6 +29,7 @@ type recentServer struct {
 	records  []model.RequestRecord
 	bodies   map[string][]byte // id -> body bytes
 	hello    []byte            // raw ClientHello bytes (may be nil)
+	hellos   map[string][]byte // ?key= -> raw ClientHello of that shape
 	bodyMiss map[string]int    // id -> remaining 404s before serving (spill retry)
 }
 
@@ -60,6 +61,9 @@ func (s *recentServer) handler() http.Handler {
 	mux.HandleFunc("/native-tls/clienthello.bin", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		hello := s.hello
+		if key := r.URL.Query().Get("key"); key != "" {
+			hello = s.hellos[key]
+		}
 		s.mu.Unlock()
 		if len(hello) == 0 {
 			http.Error(w, "no hello", http.StatusNotFound)
@@ -515,4 +519,45 @@ func TestRunCaptureLoop_MatesWithRealSupervisor(t *testing.T) {
 // internal/supervisor.
 func TestCaptureCommand_FullLauncherE2E(t *testing.T) {
 	t.Skip("full fake-claude launcher E2E deferred: needs an exported upstream-remap + egress-trust test seam from internal/supervisor (see doc comment); runCaptureLoop httptest gate is the primary acceptance test")
+}
+
+// Claude Code runs more than one TLS stack: capture reports the hello of the
+// shape the captured request's connection mirrored (its ClientHelloKey), not
+// the session's main one.
+func TestRunCaptureLoop_TLSFollowsTheCapturedRequest(t *testing.T) {
+	claude, err := os.ReadFile("../../internal/supervisor/testdata/claude_hello_messages.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const claudeJA3 = "1523504b38f0fae0d881d4b6554aac1b"
+	srv := &recentServer{
+		records: []model.RequestRecord{{
+			Method: "POST", LogicalTargetHost: "api.anthropic.com", Path: "/v1/messages", StatusCode: 200,
+			BodyRef: &model.RequestBodyRef{ID: "req1"}, ClientHelloKey: "messages-shape",
+		}},
+		bodies: map[string][]byte{"req1": []byte(`{"model":"claude-x"}`)},
+		hello:  undiciHello(t),
+		hellos: map[string][]byte{"messages-shape": claude},
+	}
+	ts := httptest.NewServer(srv.handler())
+	defer ts.Close()
+
+	start := time.Now()
+	res, _, err := runCaptureLoop(ts.URL, captureOpts{TLSOnly: true, Host: "api.anthropic.com", Path: "/v1/messages"}, time.Now().Add(5*time.Second), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.TLS == nil || res.TLS.JA3 != claudeJA3 {
+		t.Fatalf("--tls-only must report the captured request's shape: %+v", res.TLS)
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Fatalf("--tls-only should return as soon as the request lands, took %v", time.Since(start))
+	}
+	res, _, err = runCaptureLoop(ts.URL, captureOpts{TLS: true, Response: false, Host: "api.anthropic.com", Path: "/v1/messages"}, time.Now().Add(5*time.Second), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.TLS == nil || res.TLS.JA3 != claudeJA3 {
+		t.Fatalf("--with-tls must report the captured request's shape: %+v", res.TLS)
+	}
 }

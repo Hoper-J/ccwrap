@@ -8,9 +8,11 @@ name: Fingerprint Drift Watch
 # Normal CI only replays committed hellos offline; this scheduled job checks
 # the live ones so drift surfaces proactively instead of in the field:
 #
-#   - TestLiveClaudeFingerprintMirror: the LATEST Claude Code's real hello must
-#     mirror byte-faithfully (hard fail); a mismatch with the committed
-#     baseline is surfaced as a warning.
+#   - TestLiveClaudeFingerprintMirror: every ClientHello the LATEST Claude Code
+#     sends (it runs more than one TLS stack) must mirror byte-faithfully, and
+#     through ccwrap each request must go upstream with its own connection's
+#     hello (hard fail); a stack differing from the committed baseline is
+#     surfaced as a warning.
 #   - TestLiveFingerprintCompare: the same mirror check against live
 #     node/undici, kept as a regression net for the mirror machinery.
 #   - TestLiveClaudeHeaderWireOrder: the request head ccwrap forwards must keep

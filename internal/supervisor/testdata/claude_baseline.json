@@ -1,8 +1,35 @@
 {
   "claude_version": "2.1.296",
-  "captured_at": "2026-10-12T05:53:17Z",
-  "ja3": "5355e3851d76d069ab8a98fdb51cf1b4",
-  "ja4": "t13d181000_5d04281c6031_78e6aca7449b",
-  "peetprint": "c69812ca40e5e9ea7b52fb64af77bf7e",
-  "note": "raw ClientHello of the real Claude Code binary via the CONNECT path (SNI api.anthropic.com), captured by TestLiveClaudeFingerprintMirror; ja3/ja4/peetprint are Go-computed (internal/tlsfp); regenerate both files together with CCWRAP_LIVEFP_UPDATE_BASELINE=1"
+  "captured_at": "2026-10-13T12:05:50Z",
+  "stacks": [
+    {
+      "role": "messages",
+      "file": "claude_hello_messages.bin",
+      "ja3": "1523504b38f0fae0d881d4b6554aac1b",
+      "ja4": "t13d1713h1_5b57614c22b0_6a3d802a7139",
+      "peetprint": "e889e07ce773daea44b052faf11774eb",
+      "paths": [
+        "/api/eval/sdk-zAZezfDKGoZuXXKe",
+        "/v1/messages",
+        "/api/event_logging/v2/batch"
+      ]
+    },
+    {
+      "role": "other",
+      "file": "claude_hello_other.bin",
+      "ja3": "5355e3851d76d069ab8a98fdb51cf1b4",
+      "ja4": "t13d181000_5d04281c6031_78e6aca7449b",
+      "peetprint": "c69812ca40e5e9ea7b52fb64af77bf7e",
+      "paths": [
+        "/api/claude_code/settings",
+        "/api/claude_code/policy_limits",
+        "/api/claude_cli/bootstrap",
+        "/api/claude_code_penguin_mode",
+        "/mcp-registry/v0/servers",
+        "/api/claude_code/organizations/metrics_enabled",
+        "/api/event_logging/v2/batch"
+      ]
+    }
+  ],
+  "note": "raw ClientHellos of the real Claude Code binary via the CONNECT path (SNI api.anthropic.com), one per TLS stack: \"messages\" carried /v1/messages, \"other\" most of the other calls. Captured by TestLiveClaudeFingerprintMirror; ja3/ja4/peetprint are Go-computed (internal/tlsfp); regenerate everything together with CCWRAP_LIVEFP_UPDATE_BASELINE=1"
 }

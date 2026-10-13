@@ -158,7 +158,7 @@ Ctrl + 点击启动横幅里 `inspect` 后面那个本地 URL 打开 dashboard�
 
 6. **保持 Claude Code 的原生 TLS 指纹**
 
-   普通 Go 转发时会把 TLS 指纹换成 Go `crypto/tls` 的——header 是 Claude Code 的形状、指纹却是 Go 的，这个错位本身是识别特征。ccwrap 用 [utls](https://github.com/refraction-networking/utls) 把 Claude Code 自己的 ClientHello 原样复刻到上游。HTTP 层也一样：Go 转发会把请求头按字母重排、统一大小写，ccwrap 照 Claude Code 原本的顺序和大小写发出去。
+   普通 Go 转发时会把 TLS 指纹换成 Go `crypto/tls` 的——header 是 Claude Code 的形状、指纹却是 Go 的，这个错位本身是识别特征。ccwrap 用 [utls](https://github.com/refraction-networking/utls) 把 Claude Code 自己的 ClientHello 原样复刻到上游。Claude Code 内部不止一套 TLS（2.1.296 里 `/v1/messages` 和大部分其他请求用的 ClientHello 就不同），所以 ccwrap 按连接复刻：每个请求都带着它所在连接的那份指纹发往上游。HTTP 层也一样：Go 转发会把请求头按字母重排、统一大小写，ccwrap 照 Claude Code 原本的顺序和大小写发出去。
 
 7. **对齐时区，避免请求日期暴露地区**
 

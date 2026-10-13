@@ -312,6 +312,13 @@ func matchesRecord(rec model.RequestRecord, opts captureOpts) bool {
 	return true
 }
 
+// matchesRequestPath matches any record on the requested path and host, with
+// or without a spilled body: enough for --tls-only, which reads only the
+// record's ClientHelloKey.
+func matchesRequestPath(rec model.RequestRecord, opts captureOpts) bool {
+	return pathWithoutQuery(rec.Path) == pathWithoutQuery(opts.Path) && (opts.Host == "" || rec.LogicalTargetHost == opts.Host)
+}
+
 // matchesRequestOnly is the relaxed give-up matcher: it requires only that the
 // REQUEST landed (correct path/host with a spilled body, or a synthetic record),
 // ignoring ResponseBodyRef entirely. It exists so a request that succeeded but
@@ -498,11 +505,17 @@ func getBytes(u string) ([]byte, int, error) {
 	return b, resp.StatusCode, err
 }
 
-// fetchTLS GETs the captured ClientHello from the session proxy and computes
-// the fingerprint. It returns a nil result (and no error) when no hello has
-// been captured yet — TLS is best-effort and never fails the capture.
-func fetchTLS(base string) (*tlsfp.Result, string) {
-	raw, _, _ := getBytes(base + "/native-tls/clienthello.bin")
+// fetchTLS GETs a captured ClientHello from the session proxy and computes the
+// fingerprint: the shape named by key (a record's ClientHelloKey), or the
+// main one when key is empty. It returns a nil result (and no error) when no
+// hello has been captured yet — TLS is best-effort and never fails the
+// capture.
+func fetchTLS(base, key string) (*tlsfp.Result, string) {
+	u := base + "/native-tls/clienthello.bin"
+	if key != "" {
+		u += "?key=" + url.QueryEscape(key)
+	}
+	raw, _, _ := getBytes(u)
 	if len(raw) == 0 {
 		return nil, ""
 	}
@@ -522,21 +535,33 @@ func fetchTLS(base string) (*tlsfp.Result, string) {
 // record was a synthetic (e.g. auth-missing 502) so the caller can choose a
 // non-zero exit even though the object itself is well-formed.
 func runCaptureLoop(base string, opts captureOpts, deadline time.Time, childExited <-chan struct{}) (captureResult, bool, error) {
-	// --tls-only: no request record needed. Poll for the ClientHello until it
-	// is captured or the deadline passes.
+	// --tls-only: the fingerprint of the matching request's connection (by
+	// default the first /v1/messages). Claude Code runs more than one TLS
+	// stack, so another connection's hello may differ. If no matching request
+	// lands before the deadline or the child exits, report the main hello.
 	if opts.TLSOnly {
 		tick := time.NewTicker(100 * time.Millisecond)
 		defer tick.Stop()
+		childGone := false
 		for {
-			if tls, hexStr := fetchTLS(base); tls != nil {
-				in := captureInputs{tls: tls, clientHelloHex: hexStr}
-				return buildCaptureResult(opts, in), false, nil
+			if rec, ok := fetchRecentMatchWith(base, opts, matchesRequestPath); ok {
+				if tls, hexStr := fetchTLS(base, rec.ClientHelloKey); tls != nil {
+					return buildCaptureResult(opts, captureInputs{tls: tls, clientHelloHex: hexStr}), false, nil
+				}
 			}
-			if time.Now().After(deadline) {
+			if childGone || time.Now().After(deadline) {
+				if tls, hexStr := fetchTLS(base, ""); tls != nil {
+					return buildCaptureResult(opts, captureInputs{tls: tls, clientHelloHex: hexStr}), false, nil
+				}
 				return captureResult{}, false, fmt.Errorf(
 					"no native-TLS ClientHello captured within %s — is native-TLS enabled and a request attempted?", opts.Timeout)
 			}
-			<-tick.C
+			select {
+			case <-tick.C:
+			case <-childExited:
+				childGone = true
+				childExited = nil
+			}
 		}
 	}
 
@@ -603,7 +628,7 @@ func assembleCaptureAbsentResponse(base string, opts captureOpts, rec model.Requ
 		}
 	}
 	if opts.TLS || opts.TLSOnly {
-		if tls, hexStr := fetchTLS(base); tls != nil {
+		if tls, hexStr := fetchTLS(base, rec.ClientHelloKey); tls != nil {
 			in.tls = tls
 			in.clientHelloHex = hexStr
 		}
@@ -628,7 +653,7 @@ func assembleCapture(base string, opts captureOpts, rec model.RequestRecord) cap
 		}
 	}
 	if opts.TLS || opts.TLSOnly {
-		if tls, hexStr := fetchTLS(base); tls != nil {
+		if tls, hexStr := fetchTLS(base, rec.ClientHelloKey); tls != nil {
 			in.tls = tls
 			in.clientHelloHex = hexStr
 		}

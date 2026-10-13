@@ -212,15 +212,23 @@ func classifyUpstreamError(err error, fallback string) string {
 // dialer, no *.anthropic.com request ever carries a Go TLS fingerprint unless
 // the operator disables the feature (CCWRAP_NATIVE_TLS=0).
 func (sp *sessionProxy) nativeTLSDial(eg model.EgressConfig) func(context.Context, string, string) (net.Conn, error) {
+	return sp.nativeTLSDialHello(eg, nil)
+}
+
+// nativeTLSDialHello is nativeTLSDial mirroring hello, or the session default
+// (read per dial) when hello is nil.
+func (sp *sessionProxy) nativeTLSDialHello(eg model.EgressConfig, hello []byte) func(context.Context, string, string) (net.Conn, error) {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		host, _, _ := net.SplitHostPort(addr)
 		raw, err := egress.DialContext(ctx, eg, "tcp", addr)
 		if err != nil {
 			return nil, err // egress down: surfaces as 502; do not retry
 		}
-		var rawHello []byte
-		if p := sp.session.mirroredHelloRaw.Load(); p != nil {
-			rawHello = *p
+		rawHello := hello
+		if rawHello == nil {
+			if p := sp.session.mirroredHelloRaw.Load(); p != nil {
+				rawHello = *p
+			}
 		}
 		var reason string
 		switch {
