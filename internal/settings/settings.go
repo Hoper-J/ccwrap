@@ -341,6 +341,71 @@ func EffectiveModelEnvFromInspection(parentEnv []string, inspect *InspectionResu
 	}, nil
 }
 
+// TrustedEnvValues returns the values Claude Code would see for keys: parentEnv
+// overlaid by the env blocks of the trusted settings sources, in the same
+// pre-trust order as provider/auth env (globalConfig, userSettings,
+// flagSettings, then policySettings). Unreadable env blocks are skipped; the
+// preflight reports those on its own.
+func TrustedEnvValues(parentEnv []string, inspect *InspectionResult, keys []string) map[string]string {
+	want := make(map[string]struct{}, len(keys))
+	for _, k := range keys {
+		want[k] = struct{}{}
+	}
+	pick := func(dst, src map[string]string) {
+		for k, v := range src {
+			if _, ok := want[k]; ok {
+				dst[k] = v
+			}
+		}
+	}
+	env := map[string]string{}
+	pick(env, envSliceToMap(parentEnv))
+	if inspect == nil {
+		return env
+	}
+	for _, source := range []string{"globalConfig", "userSettings", "flagSettings", "policySettings"} {
+		for _, doc := range inspect.docs {
+			if doc.Source == source && doc.EnvErr == nil {
+				pick(env, doc.Env)
+			}
+		}
+	}
+	return env
+}
+
+// AppliedEnv is a value Claude Code takes from one of its own settings files.
+type AppliedEnv struct {
+	Value  string
+	Source string
+	Path   string
+}
+
+// ClaudeAppliedEnv returns the values Claude Code itself takes for keys from
+// its settings files, merged the way it merges them: managed (policy) settings
+// over local over project over user settings over the global config.
+// flagSettings is left out: Claude Code gets ccwrap's generated settings in its
+// place, which strip provider keys. Project and local settings count as
+// applied, as they are once the workspace is trusted.
+func ClaudeAppliedEnv(inspect *InspectionResult, keys []string) map[string]AppliedEnv {
+	out := map[string]AppliedEnv{}
+	if inspect == nil {
+		return out
+	}
+	for _, source := range []string{"globalConfig", "userSettings", "projectSettings", "localSettings", "policySettings"} {
+		for _, doc := range inspect.docs {
+			if doc.Source != source || doc.EnvErr != nil {
+				continue
+			}
+			for _, k := range keys {
+				if v, ok := doc.Env[k]; ok {
+					out[k] = AppliedEnv{Value: v, Source: doc.Source, Path: doc.Path}
+				}
+			}
+		}
+	}
+	return out
+}
+
 func InspectLaunch(cwd string, childArgs []string) (*InspectionResult, error) {
 	parsed, err := ParseClaudeSettingsFlags(cwd, childArgs)
 	if err != nil {

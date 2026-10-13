@@ -19,6 +19,14 @@ name: Fingerprint Drift Watch
 #   - TestLiveClaudeReminderSwitches: the latest Claude Code must still read the
 #     reminder env switches ccwrap sets for non-Claude aliases; a missing one
 #     is surfaced as a warning.
+#   - TestLiveClaudeAnthropicProfile: with ccwrap's placeholder credential, the
+#     latest Claude Code must leave Anthropic SDK profiles alone instead of
+#     following a profile's base_url past ccwrap (hard fail); a change in how it
+#     picks up a profile on its own credentials is surfaced as a warning.
+#   - TestLiveClaudeSettingsRoute: likewise for routing env in Claude Code's own
+#     settings files (ANTHROPIC_BASE_URL, a provider switch): dropped under
+#     ccwrap's placeholder (hard fail if not), followed on Claude Code's own
+#     credentials (a warning if not).
 #
 # NOTE: GitHub auto-disables `schedule` workflows after ~60 days without repo
 # activity — exactly the maintenance-lull window when drift is most likely to
@@ -56,7 +64,7 @@ jobs:
         # first, with a message that names the remediation. Removing a test has
         # to be a visible decision: restore it or retire this workflow with it.
         run: |
-          for f in internal/supervisor/livefp_test.go internal/supervisor/livefp_claude_test.go cmd/ccwrap/livefp_header_order_test.go internal/preflight/livefp_reminder_test.go; do
+          for f in internal/supervisor/livefp_test.go internal/supervisor/livefp_claude_test.go cmd/ccwrap/livefp_header_order_test.go internal/preflight/livefp_reminder_test.go cmd/ccwrap/livefp_anthropic_profile_test.go cmd/ccwrap/livefp_claude_settings_test.go; do
             if [ ! -f "$f" ]; then
               echo "::error::$f is missing from the checkout. The fingerprint drift watch CANNOT run — restore the livefp test or remove this workflow."
               exit 1
@@ -64,7 +72,9 @@ jobs:
           done
       - name: live mirror-fidelity + baseline check
         # Hard-fails if ccwrap's mirrored ClientHello != the live one (mirror
-        # broke) or its forwarded head loses Claude Code's layout.
+        # broke), its forwarded head loses Claude Code's layout, or Claude Code
+        # follows an Anthropic profile or its own settings' routing env past
+        # ccwrap's placeholder credential.
         # CCWRAP_LIVEFP_REQUIRE_CLAUDE turns a missing claude into a
         # failure instead of a skip. Belt-and-braces: also fail if the -run
         # pattern matched nothing or the Claude Code test did not pass (e.g. a
@@ -72,13 +82,13 @@ jobs:
         env:
           CCWRAP_LIVEFP_REQUIRE_CLAUDE: "1"
         run: |
-          out=$(go test ./internal/supervisor/ ./cmd/ccwrap/ ./internal/preflight/ -tags livefp -run 'TestLiveFingerprintCompare|TestLiveClaudeFingerprintMirror|TestLiveClaudeHeaderWireOrder|TestLiveClaudeReminderSwitches' -v 2>&1) || { echo "$out"; exit 1; }
+          out=$(go test ./internal/supervisor/ ./cmd/ccwrap/ ./internal/preflight/ -tags livefp -run 'TestLiveFingerprintCompare|TestLiveClaudeFingerprintMirror|TestLiveClaudeHeaderWireOrder|TestLiveClaudeReminderSwitches|TestLiveClaudeAnthropicProfile|TestLiveClaudeSettingsRoute' -v 2>&1) || { echo "$out"; exit 1; }
           echo "$out"
           if echo "$out" | grep -q "no tests to run"; then
             echo "::error::the -run pattern matched no tests; the drift watch ran vacuously."
             exit 1
           fi
-          for t in TestLiveFingerprintCompare TestLiveClaudeFingerprintMirror TestLiveClaudeHeaderWireOrder TestLiveClaudeReminderSwitches; do
+          for t in TestLiveFingerprintCompare TestLiveClaudeFingerprintMirror TestLiveClaudeHeaderWireOrder TestLiveClaudeReminderSwitches TestLiveClaudeAnthropicProfile TestLiveClaudeSettingsRoute; do
             if ! echo "$out" | grep -q -- "--- PASS: $t "; then
               echo "::error::$t did not run to a PASS; the drift watch ran vacuously."
               exit 1
@@ -90,3 +100,9 @@ jobs:
           echo "$out" | grep -o 'CLAUDE_REMINDER_SWITCH_MISSING.*' | while read -r missing; do
             echo "::warning title=Claude Code reminder switch missing::$missing"
           done
+          if drift=$(echo "$out" | grep -m1 -o 'CLAUDE_ANTHROPIC_PROFILE_DRIFT.*'); then
+            echo "::warning title=Claude Code Anthropic profile drift::$drift"
+          fi
+          if drift=$(echo "$out" | grep -m1 -o 'CLAUDE_SETTINGS_ROUTE_DRIFT.*'); then
+            echo "::warning title=Claude Code settings route drift::$drift"
+          fi

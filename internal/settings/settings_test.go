@@ -784,3 +784,52 @@ func TestInspectLaunchClassifiesPolicyOTELEndpointAsBlocking(t *testing.T) {
 		t.Fatalf("expected OTEL endpoint key, got %#v", inspect.PolicyNetworkEnv[0])
 	}
 }
+
+// Claude Code merges the env of its settings files by precedence (managed over
+// local over project over user); the --settings value never reaches it, since
+// ccwrap passes its generated settings in its place.
+func TestClaudeAppliedEnvFollowsClaudePrecedence(t *testing.T) {
+	configDir, managedDir := t.TempDir(), t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
+	t.Setenv("CCWRAP_MANAGED_SETTINGS_DIR", managedDir)
+	cwd := t.TempDir()
+	write := func(path, env string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(`{"env":`+env+`}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	userFile := filepath.Join(configDir, "settings.json")
+	projectFile := filepath.Join(cwd, ".claude", "settings.json")
+	localFile := filepath.Join(cwd, ".claude", "settings.local.json")
+	managedFile := filepath.Join(managedDir, "managed-settings.json")
+	write(userFile, `{"A":"user","B":"user","C":"user","D":"user"}`)
+	write(projectFile, `{"B":"project","C":"project","D":"project"}`)
+	write(localFile, `{"C":"local","D":"local"}`)
+	write(managedFile, `{"D":"managed"}`)
+	inspect, err := InspectLaunch(cwd, []string{"--settings", `{"env":{"A":"flag","E":"flag"}}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ClaudeAppliedEnv(inspect, []string{"A", "B", "C", "D", "E"})
+	want := map[string]AppliedEnv{
+		"A": {Value: "user", Source: "userSettings", Path: userFile},
+		"B": {Value: "project", Source: "projectSettings", Path: projectFile},
+		"C": {Value: "local", Source: "localSettings", Path: localFile},
+		"D": {Value: "managed", Source: "policySettings", Path: managedFile},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v, want %+v (E comes only from --settings and must be absent)", got, want)
+	}
+	for k, w := range want {
+		if got[k] != w {
+			t.Errorf("%s = %+v, want %+v", k, got[k], w)
+		}
+	}
+	if len(ClaudeAppliedEnv(nil, []string{"A"})) != 0 {
+		t.Error("nil inspection must yield nothing")
+	}
+}

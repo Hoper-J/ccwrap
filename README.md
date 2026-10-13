@@ -502,6 +502,13 @@ ccwrap 从子进程和生成的 settings 里**剥离**这些 env key（它们会
 - Bedrock / Vertex / Foundry 路由 key、`VERTEX_REGION_CLAUDE_*`
 - `OTEL_EXPORTER_OTLP_ENDPOINT`、`OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`、`OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`、`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`（OTEL header 类 env 留着，除非有被阻止的 endpoint）
 
+这份剥离清单只管子进程环境和 ccwrap 生成的 settings。Claude Code 还会自己读两处配置，可能把请求直接带离 ccwrap：
+
+- 它自己的 settings 文件（`~/.claude/settings.json`、项目里的 `.claude/settings.json` 等）里的 `ANTHROPIC_BASE_URL`，或 `CLAUDE_CODE_USE_*` 这类 provider 开关
+- Anthropic SDK 的凭据 profile（`ANTHROPIC_CONFIG_DIR`、`$XDG_CONFIG_HOME/anthropic` 或 `~/.config/anthropic` 下的 `configs/<name>.json`），不需要任何 env 就会生效，里面的 `base_url` 决定请求发往哪里
+
+其中任何一处会把请求带到 api.anthropic.com 以外时，ccwrap **拒绝启动**，并一次列出所有问题和改法。settings 按 Claude Code 自己的优先级合并后再判断，所以在项目的 `.claude/settings.local.json` 里改回官方地址（或把开关设为 `0`）就不会被拦；ccwrap 自己提供凭据的第三方路由不受影响（这时 Claude Code 会忽略这两处）。`ccwrap doctor` 里分别对应 `claude_settings_route` 和 `anthropic_profile`。
+
 ccwrap **保留但不预执行**：
 
 - `apiKeyHelper` — 任意 shell 代码，preflight 不跑

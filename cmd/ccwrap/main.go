@@ -271,7 +271,10 @@ func composeLaunch(opts preflight.Options) (*settings.InspectionResult, *preflig
 		opts.UpstreamHeaderEnvFileContent = data
 	}
 	pre, err := preflight.RunWithInspection(opts, inspect)
-	return inspect, pre, opts, err
+	if err != nil {
+		return inspect, pre, opts, err
+	}
+	return inspect, pre, opts, preflight.LaunchBypass(pre, opts, inspect)
 }
 
 // lookupEnv returns the value for key in a []string of "KEY=VALUE" entries
@@ -966,18 +969,55 @@ func doctorCommand(paths app.Paths, args []string) error {
 			add("flag_settings", "pass", "no user-provided Claude --settings flag detected", "")
 		}
 	}
-	if profileErr != nil {
-		add("launch_contract", "fail", "current launch would be rejected: could not resolve the launch profile", profileErr.Error())
-	} else if _, err := preflight.RunWithInspection(preflight.Options{
+	launchOpts := preflight.Options{
 		Profile:          profileInput,
 		EgressProxy:      *egressProxy,
 		ParentEnv:        parentEnv,
 		WorkingDirectory: cwd,
 		ChildArgs:        childArgs,
-	}, inspect); err != nil {
+	}
+	var launchPre *preflight.Result
+	if profileErr != nil {
+		add("launch_contract", "fail", "current launch would be rejected: could not resolve the launch profile", profileErr.Error())
+	} else if pre, err := preflight.RunWithInspection(launchOpts, inspect); err != nil {
 		add("launch_contract", "fail", "current launch would be rejected by CCWRAP preflight", err.Error())
 	} else {
-		add("launch_contract", "pass", "current launch satisfies CCWRAP MITM preflight checks", "")
+		launchPre = pre
+		if err := preflight.LaunchBypass(pre, launchOpts, inspect); err != nil {
+			add("launch_contract", "fail", "current launch would be rejected: Claude Code's own config would take its requests past ccwrap", err.Error())
+		} else {
+			add("launch_contract", "pass", "current launch satisfies CCWRAP MITM preflight checks", "")
+		}
+	}
+	// Anthropic SDK credential profiles are a sign-in (and base URL) source
+	// Claude Code reads on its own; see preflight.LaunchBypass.
+	switch p := preflight.LaunchAnthropicProfile(launchOpts, inspect); {
+	case p == nil:
+		add("anthropic_profile", "pass", "Claude Code has no Anthropic SDK profile to sign in with", "")
+	case !p.LeavesAnthropicAPI():
+		add("anthropic_profile", "pass", fmt.Sprintf("Claude Code can sign in with Anthropic profile %q; its requests stay on the Anthropic API", p.Name), maybeDetail(*verbose, p.Path))
+	case launchPre != nil && launchPre.AuthBootstrap == model.AuthBootstrapPlaceholderActive:
+		add("anthropic_profile", "pass", fmt.Sprintf("Anthropic profile %q sets base_url %s, which Claude Code ignores on this route: ccwrap supplies the credential", p.Name, p.Target()), maybeDetail(*verbose, p.Path))
+	default:
+		add("anthropic_profile", "fail", fmt.Sprintf("Anthropic profile %q sets base_url %s: Claude Code can send its requests there, past ccwrap", p.Name, p.Target()), maybeDetail(*verbose, p.Path))
+	}
+	// So can routing env in Claude Code's own settings files; see
+	// preflight.LaunchBypass.
+	if inspectErr == nil {
+		bypasses := preflight.ClaudeSettingsBypasses(inspect)
+		var found, files []string
+		for _, b := range bypasses {
+			found = append(found, b.What+" in "+b.Source)
+			files = append(files, b.String())
+		}
+		switch {
+		case len(bypasses) == 0:
+			add("claude_settings_route", "pass", "no Claude Code settings move its requests off the Anthropic API", "")
+		case launchPre != nil && launchPre.AuthBootstrap == model.AuthBootstrapPlaceholderActive:
+			add("claude_settings_route", "pass", "Claude Code ignores these on this route, as ccwrap supplies the credential: "+strings.Join(found, ", "), maybeDetail(*verbose, strings.Join(files, "\n")))
+		default:
+			add("claude_settings_route", "fail", "Claude Code's settings would send its requests past ccwrap: "+strings.Join(found, ", "), strings.Join(files, "\n"))
+		}
 	}
 	discovered, err := discovery.Scan(paths)
 	if err != nil {
@@ -1046,7 +1086,8 @@ func doctorCommand(paths app.Paths, args []string) error {
 		for _, c := range checks {
 			fmt.Printf("    %s %-*s  %s\n", ui.StatusGlyph(pal, c.Status), nameW, c.Name, c.Summary)
 			if *verbose && c.Detail != "" {
-				fmt.Printf("      %s%s\n", strings.Repeat(" ", nameW), c.Detail)
+				pad := "      " + strings.Repeat(" ", nameW)
+				fmt.Printf("%s%s\n", pad, strings.ReplaceAll(c.Detail, "\n", "\n"+pad))
 			}
 		}
 	}

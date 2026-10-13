@@ -502,6 +502,13 @@ ccwrap **strips** these env keys from the child process and generated settings (
 - Bedrock / Vertex / Foundry routing keys, `VERTEX_REGION_CLAUDE_*`
 - `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`, `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`, `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (OTEL header-class env is kept unless a blocked endpoint is present)
 
+That strip list covers the child env and ccwrap's generated settings. Claude Code also reads two sources on its own that can take its requests straight around ccwrap:
+
+- its own settings files (`~/.claude/settings.json`, a project's `.claude/settings.json`, …): `ANTHROPIC_BASE_URL`, or a provider switch such as `CLAUDE_CODE_USE_*`
+- Anthropic SDK credential profiles (`configs/<name>.json` under `ANTHROPIC_CONFIG_DIR`, `$XDG_CONFIG_HOME/anthropic` or `~/.config/anthropic`), which apply with no env at all; a profile's `base_url` decides where requests go
+
+When either would send requests anywhere but api.anthropic.com, ccwrap **refuses to launch**, listing every such entry and how to clear it. Settings are judged after merging them the way Claude Code does, so overriding a project's value in its `.claude/settings.local.json` (the official URL, or a switch set to `0`) clears it. Third-party routes where ccwrap supplies the credential are unaffected (Claude Code ignores both there). `ccwrap doctor` reports them as `claude_settings_route` and `anthropic_profile`.
+
 ccwrap **preserves but does not pre-execute**:
 
 - `apiKeyHelper` — arbitrary shell code; not run during preflight

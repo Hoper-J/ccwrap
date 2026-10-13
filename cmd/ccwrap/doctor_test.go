@@ -318,10 +318,10 @@ func TestDoctorGroupForCheck(t *testing.T) {
 	all := []string{
 		"paths", "ca", "session_listener", "inherited_upstream", "provider_selection", "unsupported_env",
 		"parent_env_auth_sources", "egress_proxy", "active_setting_sources",
-		"effective_upstream", "auth_sources", "upstream_inputs", "hidden_auth_contract",
+		"effective_upstream", "auth_sources", "upstream_inputs", "hidden_auth_contract", "anthropic_profile",
 		"settings_unsupported_env", "settings_malformed_env", "settings_overridden_network_env",
 		"settings_policy_network_env", "api_key_helper", "dangerous_shell_settings",
-		"ccwrap_internal_keys_in_settings", "custom_headers_auth", "flag_settings",
+		"ccwrap_internal_keys_in_settings", "custom_headers_auth", "claude_settings_route", "flag_settings",
 		"settings_inspection", "launch_contract", "discovery", "session",
 		"update",
 	}
