@@ -138,6 +138,8 @@ func settingsSourceLabel(source string) string {
 		return "managed settings"
 	case "globalConfig":
 		return "global config"
+	case "flagSettings":
+		return "--settings"
 	}
 	return source
 }

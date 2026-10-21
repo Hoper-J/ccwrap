@@ -155,7 +155,7 @@ Launch flags:
   --session-name NAME
   --claude-bin PATH
   --profile NAME                            (or env CCWRAP_PROFILE; from profiles.json)
-  --model-alias LOGICAL=PROVIDER            (repeatable)
+  --model-alias LOGICAL=PROVIDER            (repeatable; '*=PROVIDER' maps every other Claude model)
   --model-alias-file PATH                   (or env CCWRAP_MODEL_ALIASES_FILE / _JSON)
   --upstream-header NAME=VALUE              (repeatable; CCWRAP-owned, never Claude-visible)
   --upstream-headers-file PATH              (or env CCWRAP_UPSTREAM_HEADERS_FILE / _JSON)
@@ -991,6 +991,34 @@ func doctorCommand(paths app.Paths, args []string) error {
 			add("launch_contract", "pass", "current launch satisfies CCWRAP MITM preflight checks", "")
 		}
 	}
+	// A third-party base URL ending in /v1 doubles the version segment.
+	if launchPre != nil && launchPre.RouteClass != model.RouteClassFirstParty {
+		if lines := baseURLLines(launchPre); len(lines) > 0 {
+			add("upstream_path", "warn", "the base URL ends in /v1, and Claude Code adds /v1 itself: requests would go to /v1/v1/messages", strings.TrimSpace(lines[len(lines)-1]))
+		} else {
+			add("upstream_path", "pass", "the base URL leaves the /v1 prefix to Claude Code", "")
+		}
+	}
+	// On a route that maps model names, Claude Code's starting model needs an
+	// alias, or the upstream gets the Claude name.
+	if launchPre != nil {
+		alias := launchPre.ModelAlias
+		mainModel, mainSource := preflight.ClaudeMainModel(launchPre.RewrittenChildArgs, launchPre.ModelEnv, inspect)
+		switch {
+		case launchPre.RouteClass == model.RouteClassFirstParty || !alias.Enabled():
+			add("model_aliases", "pass", "this route passes Claude Code's model names through unchanged", "")
+		case launchPre.UncoveredModel != nil:
+			u := launchPre.UncoveredModel
+			fix := modelCoverageLines(launchPre)
+			add("model_aliases", "warn", fmt.Sprintf("Claude Code's model %s (from %s) has no alias on this route", u.Model, u.Source), strings.TrimSpace(fix[len(fix)-1]))
+		case alias.Default() != "":
+			add("model_aliases", "pass", "Claude models without their own alias go to "+alias.Default(), "")
+		case mainModel != "":
+			add("model_aliases", "pass", fmt.Sprintf("Claude Code's model %s (from %s) has an alias on this route", mainModel, mainSource), "")
+		default:
+			add("model_aliases", "pass", "Claude Code starts on its built-in default model; any Claude model without an alias reaches the upstream unchanged", "")
+		}
+	}
 	// Anthropic SDK credential profiles are a sign-in (and base URL) source
 	// Claude Code reads on its own; see preflight.LaunchBypass.
 	switch p := preflight.LaunchAnthropicProfile(launchOpts, inspect); {
@@ -1503,17 +1531,13 @@ func printLaunchSummary(sessionID, proxyURL, upstream string, routeSource model.
 	// keys sorted so output is stable across runs).
 	modelsLine := "0 aliases"
 	if alias.Enabled() && alias.Count() > 0 {
-		keys := make([]string, 0, len(alias.Forward))
-		for k := range alias.Forward {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
+		keys := aliasKeysForDisplay(alias.Forward)
 		first := keys[0]
 		if alias.Count() == 1 {
-			modelsLine = "1 alias · " + first + " → " + alias.Forward[first]
+			modelsLine = "1 alias · " + aliasKeyLabel(first) + " → " + alias.Forward[first]
 		} else {
 			modelsLine = fmt.Sprintf("%d aliases · %s → %s, +%d more",
-				alias.Count(), first, alias.Forward[first], alias.Count()-1)
+				alias.Count(), aliasKeyLabel(first), alias.Forward[first], alias.Count()-1)
 		}
 	}
 
@@ -1589,6 +1613,74 @@ func printLaunchSummary(sessionID, proxyURL, upstream string, routeSource model.
 
 	for _, line := range lines {
 		fmt.Fprintln(os.Stderr, line)
+	}
+}
+
+// aliasKeysForDisplay sorts alias keys, with the default rule last.
+func aliasKeysForDisplay(forward map[string]string) []string {
+	keys := make([]string, 0, len(forward))
+	for k := range forward {
+		if k != modelalias.DefaultKey {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	if _, ok := forward[modelalias.DefaultKey]; ok {
+		keys = append(keys, modelalias.DefaultKey)
+	}
+	return keys
+}
+
+func aliasKeyLabel(key string) string {
+	if key == modelalias.DefaultKey {
+		return "other Claude models"
+	}
+	return key
+}
+
+// launchWarningLines are the banner's config warnings, each with its
+// one-line fix: a base URL ending in /v1, then an unaliased starting model.
+func launchWarningLines(pre *preflight.Result) []string {
+	return append(baseURLLines(pre), modelCoverageLines(pre)...)
+}
+
+// baseURLLines warns about a third-party base URL ending in /v1.
+func baseURLLines(pre *preflight.Result) []string {
+	if pre.RouteClass == model.RouteClassFirstParty {
+		return nil
+	}
+	fixed, ok := preflight.DoubledV1Base(pre.APIBaseURL)
+	if !ok {
+		return nil
+	}
+	fix := "set the base URL to " + fixed
+	if pre.ActiveProfileName != "" {
+		fix = "ccwrap profile edit " + pre.ActiveProfileName + " --base-url " + fixed
+	}
+	return []string{
+		"  ⚠ The base URL ends in /v1, and Claude Code adds /v1 itself: requests would go to /v1/v1/messages.",
+		"    Drop the /v1: " + fix,
+	}
+}
+
+// modelCoverageLines warns that Claude Code starts on a model this route
+// has no alias for, and shows the one-line fix.
+func modelCoverageLines(pre *preflight.Result) []string {
+	u := pre.UncoveredModel
+	if u == nil {
+		return nil
+	}
+	target := "<model>"
+	if keys := aliasKeysForDisplay(pre.ModelAlias.Forward); len(keys) > 0 {
+		target = pre.ModelAlias.Forward[keys[0]]
+	}
+	fix := fmt.Sprintf("--model-alias '%s=%s'", modelalias.DefaultKey, target)
+	if pre.ActiveProfileName != "" {
+		fix = "ccwrap profile edit " + pre.ActiveProfileName + " " + fix
+	}
+	return []string{
+		fmt.Sprintf("  ⚠ Claude Code's model %s (from %s) has no alias on this route; the upstream gets that name as-is.", u.Model, u.Source),
+		"    Send every unaliased Claude model to one target: " + fix,
 	}
 }
 

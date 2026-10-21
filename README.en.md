@@ -120,6 +120,14 @@ Ctrl+click the local URL after `inspect` in the launch banner to open the dashbo
 
    Response-side model fields (JSON / SSE / batch JSONL) are normalized back to the Claude model too, so Claude only ever sees official model IDs.
 
+   A Claude model with no alias goes to the upstream unchanged. If the upstream only knows its own model names (say, a GPT-only gateway), give "every other Claude model" a default target with `*`:
+
+   ```bash
+   ccwrap profile edit <name> --model-alias '*=gpt-5.5'
+   ```
+
+   Models without their own alias, like a `fable` set in your settings, then land on that target, and responses still come back under their own names. If the model Claude Code is about to start on (`--model` > `ANTHROPIC_MODEL` > the `model` setting) has no alias on the current route, the launch banner and `ccwrap doctor` (the `model_aliases` row) print that command for you.
+
    **Bonus: study a model's request shape**
 
    With a model name that hasn't "shipped" yet, you can see how Claude Code organizes a request for it, then use an alias to route the actual call to a model that can answer:
@@ -262,6 +270,8 @@ A profile is a named bundle of config: base URL, auth, model aliases, upstream h
   }
 }
 ```
+
+Set `base_url` to the gateway's root, without `/v1`: Claude Code appends `/v1/messages` itself, so `https://gateway.example/v1` sends requests to `/v1/v1/messages` (many gateway docs quote the OpenAI-style `/v1` address). The launch banner and `ccwrap doctor` (the `upstream_path` row) flag it with the corrected address.
 
 Auth modes:
 

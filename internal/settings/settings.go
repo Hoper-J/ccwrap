@@ -406,6 +406,26 @@ func ClaudeAppliedEnv(inspect *InspectionResult, keys []string) map[string]Appli
 	return out
 }
 
+// ClaudeModelSetting returns the "model" setting Claude Code applies, merged
+// by its own precedence (user < project < local < --settings < managed), and
+// the source it came from. "" when no settings file sets it.
+func ClaudeModelSetting(inspect *InspectionResult) (value, source string) {
+	if inspect == nil {
+		return "", ""
+	}
+	for _, src := range []string{"userSettings", "projectSettings", "localSettings", "flagSettings", "policySettings"} {
+		for _, doc := range inspect.docs {
+			if doc.Source != src {
+				continue
+			}
+			if v, ok := doc.Settings["model"].(string); ok && strings.TrimSpace(v) != "" {
+				value, source = strings.TrimSpace(v), doc.Source
+			}
+		}
+	}
+	return value, source
+}
+
 func InspectLaunch(cwd string, childArgs []string) (*InspectionResult, error) {
 	parsed, err := ParseClaudeSettingsFlags(cwd, childArgs)
 	if err != nil {

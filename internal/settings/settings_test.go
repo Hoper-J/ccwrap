@@ -833,3 +833,48 @@ func TestClaudeAppliedEnvFollowsClaudePrecedence(t *testing.T) {
 		t.Error("nil inspection must yield nothing")
 	}
 }
+
+// The "model" setting merges by Claude Code's precedence: user < project <
+// local < --settings < managed.
+func TestClaudeModelSettingFollowsClaudePrecedence(t *testing.T) {
+	configDir, managedDir := t.TempDir(), t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
+	t.Setenv("CCWRAP_MANAGED_SETTINGS_DIR", managedDir)
+	cwd := t.TempDir()
+	write := func(path, model string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(`{"model":"`+model+`"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(configDir, "settings.json"), "user")
+	write(filepath.Join(cwd, ".claude", "settings.json"), "project")
+	write(filepath.Join(cwd, ".claude", "settings.local.json"), "local")
+	steps := []struct {
+		args          []string
+		value, source string
+	}{
+		{nil, "local", "localSettings"},
+		{[]string{"--settings", `{"model":"flag"}`}, "flag", "flagSettings"},
+	}
+	for _, st := range steps {
+		inspect, err := InspectLaunch(cwd, st.args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v, src := ClaudeModelSetting(inspect); v != st.value || src != st.source {
+			t.Errorf("args=%v: got (%q, %q), want (%q, %q)", st.args, v, src, st.value, st.source)
+		}
+	}
+	write(filepath.Join(managedDir, "managed-settings.json"), "managed")
+	inspect, err := InspectLaunch(cwd, []string{"--settings", `{"model":"flag"}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, src := ClaudeModelSetting(inspect); v != "managed" || src != "policySettings" {
+		t.Errorf("managed: got (%q, %q)", v, src)
+	}
+}

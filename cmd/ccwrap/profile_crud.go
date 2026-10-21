@@ -136,7 +136,7 @@ func parseCRUDFlags(prog, name string, args []string, requireAddSemantics bool) 
 	egressURL := fs.String("egress-url", "", "Egress proxy URL (required when egress-mode=http|socks5|socks5h; scheme must match mode)")
 	setDefault := fs.Bool("set-default", false, "Set this profile as the file's default after the change")
 	var aliasPairs repeatedFlag
-	fs.Var(&aliasPairs, "model-alias", "Model alias logical=provider (repeatable)")
+	fs.Var(&aliasPairs, "model-alias", "Model alias logical=provider (repeatable; '*=provider' maps every other Claude model)")
 	var headerPairs repeatedFlag
 	fs.Var(&headerPairs, "upstream-header", "Upstream header Name=Value (repeatable; CCWRAP-owned, never Claude-visible)")
 

@@ -23,6 +23,10 @@ const (
 
 	EnvAliasesFile = "CCWRAP_MODEL_ALIASES_FILE"
 	EnvAliasesJSON = "CCWRAP_MODEL_ALIASES_JSON"
+
+	// DefaultKey is the alias key for "any other Claude model": a Claude
+	// model with no alias of its own goes to this key's target.
+	DefaultKey = "*"
 )
 
 type Config struct {
@@ -68,6 +72,12 @@ func New(forward map[string]string, source string, strict bool) (Config, error) 
 		}
 		if LooksProviderSpecific(logical) {
 			return Config{}, fmt.Errorf("model alias logical model %q looks provider-specific; use a Claude logical model as the alias key", logical)
+		}
+		if logical == DefaultKey {
+			// The default may share its target with an explicit alias;
+			// responses map back per request, so there is no ambiguity.
+			clean[logical] = provider
+			continue
 		}
 		if prev, ok := seenProvider[provider]; ok && prev != logical {
 			return Config{}, fmt.Errorf("provider model %q is mapped from both %q and %q; duplicate provider aliases are not supported", provider, prev, logical)
@@ -151,6 +161,35 @@ func Resolve(opts ResolveOptions) (Config, []string, error) {
 
 func (c Config) Enabled() bool { return len(c.Forward) > 0 }
 func (c Config) Count() int    { return len(c.Forward) }
+
+// Default returns the target for Claude models without their own alias, or
+// "" when none is configured.
+func (c Config) Default() string { return c.Forward[DefaultKey] }
+
+// Covers reports whether a Claude Code model setting is mapped: an exact
+// alias, the default, or — for a family alias like "opus" or "sonnet[1m]",
+// which Claude Code resolves to a full ID at runtime — an alias for some
+// model of that family.
+func (c Config) Covers(model string) bool {
+	model = strings.TrimSpace(model)
+	if model == "" || c.Default() != "" {
+		return true
+	}
+	if _, ok := c.Forward[model]; ok {
+		return true
+	}
+	lower := strings.ToLower(model)
+	if strings.HasPrefix(lower, "claude-") {
+		return false
+	}
+	family, _, _ := strings.Cut(lower, "[")
+	for logical := range c.Forward {
+		if strings.HasPrefix(strings.ToLower(logical), "claude-"+family+"-") {
+			return true
+		}
+	}
+	return false
+}
 func (c Config) Mode() string {
 	if c.Enabled() {
 		return ModeRewrite
@@ -164,7 +203,7 @@ func (c Config) LogicalForProvider(provider string) (string, bool) {
 		return "", false
 	}
 	for logical, upstream := range c.Forward {
-		if upstream == provider {
+		if upstream == provider && logical != DefaultKey {
 			return logical, true
 		}
 	}
@@ -567,6 +606,9 @@ func RewriteJSONRequestBody(path string, body []byte, cfg Config) ([]byte, *Cont
 	ctx.NormalizeResponse = true
 	ctx.LogicalModel = logical
 	ctx.UpstreamModel = provider
+	// This request's own mapping wins when normalizing its response: the
+	// default can share a target with an explicit alias.
+	ctx.Reverse = withReverse(ctx.Reverse, provider, logical)
 	return out, ctx, nil
 }
 
@@ -630,7 +672,12 @@ func rewriteRequestObjectModel(obj map[string]json.RawMessage, cfg Config) (chan
 	if err := json.Unmarshal(rawModel, &modelID); err != nil {
 		return false, "", "", fmt.Errorf("request model field must be a string")
 	}
-	if provider, ok := cfg.Forward[modelID]; ok {
+	provider, ok = cfg.Forward[modelID]
+	if !ok && isClaudeModel(modelID) {
+		provider = cfg.Default()
+		ok = provider != ""
+	}
+	if ok && modelID != DefaultKey {
 		encoded, _ := json.Marshal(provider)
 		obj["model"] = encoded
 		return true, modelID, provider, nil
@@ -915,8 +962,20 @@ func reverseMap(forward map[string]string) map[string]string {
 	}
 	out := make(map[string]string, len(forward))
 	for logical, provider := range forward {
+		if logical == DefaultKey {
+			continue
+		}
 		out[provider] = logical
 	}
+	return out
+}
+
+func withReverse(reverse map[string]string, provider, logical string) map[string]string {
+	out := make(map[string]string, len(reverse)+1)
+	for k, v := range reverse {
+		out[k] = v
+	}
+	out[provider] = logical
 	return out
 }
 func isJSONContentType(ct string) bool {

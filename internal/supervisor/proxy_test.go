@@ -1441,6 +1441,7 @@ func TestSessionProxyThirdPartyPathAwareSyntheticAndBlockedPaths(t *testing.T) {
 		OverrideAuth:      &model.AuthOverride{Mode: model.AuthModeOverrideXAPIKey, Source: model.AuthSourceAnthropicAPIKey, HeaderName: "X-API-Key", HeaderValue: "real"},
 		ModelAlias: model.ModelAliasConfig{Mode: model.ModelAliasRewrite, Strict: true, Source: "test", Forward: map[string]string{
 			"claude-sonnet-4-6": "gateway/sonnet-4.6-prod",
+			"*":                 "gateway/default",
 		}},
 	}); err != nil {
 		t.Fatal(err)
@@ -1465,8 +1466,12 @@ func TestSessionProxyThirdPartyPathAwareSyntheticAndBlockedPaths(t *testing.T) {
 	if modelsResp.StatusCode != http.StatusOK {
 		t.Fatalf("models status = %d body=%s", modelsResp.StatusCode, modelsBody)
 	}
-	if !strings.Contains(string(modelsBody), "claude-sonnet-4-6") || strings.Contains(string(modelsBody), "gateway/sonnet") {
+	if !strings.Contains(string(modelsBody), "claude-sonnet-4-6") || strings.Contains(string(modelsBody), "gateway/") {
 		t.Fatalf("synthetic models should expose only logical IDs, got %s", modelsBody)
+	}
+	// The default alias ('*') is a rule, not a model.
+	if strings.Contains(string(modelsBody), `"id":"*"`) {
+		t.Fatalf("synthetic models must not list the default alias key, got %s", modelsBody)
 	}
 	if upstreamRequests != 0 {
 		t.Fatalf("/v1/models should not reach third-party upstream in hidden mode, got %d upstream requests", upstreamRequests)

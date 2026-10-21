@@ -93,6 +93,9 @@ type Result struct {
 	// so inspect/popover/switch tools are reachable; only an actual request to a
 	// host requiring ccwrap-owned auth gets refused.
 	MissingAuthEnv string
+	// UncoveredModel is set when the route maps model names but not the one
+	// Claude Code starts with; nil otherwise.
+	UncoveredModel *UncoveredModel
 }
 
 // ChildAuthBootstrap describes the non-secret auth value injected into the

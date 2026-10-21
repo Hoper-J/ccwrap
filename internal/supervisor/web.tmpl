@@ -4032,7 +4032,9 @@ details.req-sub{border:1px solid var(--line);border-radius:6px;margin:6px 0;back
     if (!modelsCell) return;
     closeAllRibbonPops();
     var forward = (state.session && state.session.model_alias_forward) || {};
-    var keys = Object.keys(forward).sort();
+    // The default ('*') reads as a rule, so it goes last, spelled out.
+    var keys = Object.keys(forward).filter(function(k){ return k !== '*'; }).sort();
+    if (Object.prototype.hasOwnProperty.call(forward, '*')) keys.push('*');
     if (keys.length === 0) return;
     modelsPop = document.createElement('div');
     modelsPop.className = 'sp3-models-pop';
@@ -4044,7 +4046,7 @@ details.req-sub{border:1px solid var(--line);border-radius:6px;margin:6px 0;back
     var tbl = document.createElement('table');
     for (var i = 0; i < keys.length; i++) {
       var tr = document.createElement('tr');
-      var tdFrom = document.createElement('td'); tdFrom.className = 'from'; tdFrom.textContent = keys[i];
+      var tdFrom = document.createElement('td'); tdFrom.className = 'from'; tdFrom.textContent = keys[i] === '*' ? 'any other Claude model' : keys[i];
       var tdArrow = document.createElement('td'); tdArrow.className = 'arrow'; tdArrow.textContent = '→';
       var tdTo = document.createElement('td'); tdTo.className = 'to'; tdTo.textContent = forward[keys[i]];
       tr.appendChild(tdFrom); tr.appendChild(tdArrow); tr.appendChild(tdTo);

@@ -536,6 +536,7 @@ func ResolveProfile(opts Options, inspect *settings.InspectionResult) (*Result, 
 		// (still empty) for Case B (no key_env named, no source found) —
 		// AuthBootstrap == Missing carries the signal in both cases.
 		MissingAuthEnv: missingAuthEnv,
+		UncoveredModel: uncoveredMainModel(routeClass, aliasCfg, rewrittenArgs, modelEnv.Env, inspect),
 	}, nil
 }
 

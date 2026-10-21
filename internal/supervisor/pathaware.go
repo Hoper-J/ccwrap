@@ -188,6 +188,10 @@ func (sp *sessionProxy) handleThirdPartySyntheticOrBlock(w http.ResponseWriter, 
 func (sp *sessionProxy) writeSyntheticModels(w http.ResponseWriter, r *http.Request, start time.Time, logicalHost string, aliasCfg modelalias.Config, ap *posture) {
 	ids := make([]string, 0, len(aliasCfg.Forward))
 	for logical := range aliasCfg.Forward {
+		// The default alias is a rule, not a model Claude Code can pick.
+		if logical == modelalias.DefaultKey {
+			continue
+		}
 		ids = append(ids, logical)
 	}
 	sort.Strings(ids)

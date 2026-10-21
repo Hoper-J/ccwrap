@@ -120,6 +120,14 @@ Ctrl + 点击启动横幅里 `inspect` 后面那个本地 URL 打开 dashboard�
 
    响应端（JSON / SSE / batch JSONL）的 model 字段也会反向归一化回 Claude 模型，Claude 始终只看到官方模型 id。
 
+   没配别名的 Claude 模型会原样发给上游。如果上游只认它自己的模型名（比如只提供 GPT 的网关），可以用 `*` 给“其余所有 Claude 模型”指定一个默认目标：
+
+   ```bash
+   ccwrap profile edit <name> --model-alias '*=gpt-5.5'
+   ```
+
+   这样像 settings 里配的 `fable` 这类没有单独映射的模型也会落到这个目标上，响应里仍然还原成各自的名字。启动时如果 Claude Code 将要用的模型（按 `--model` > `ANTHROPIC_MODEL` > settings 里的 `model`）在当前路由上没有映射，启动横幅和 `ccwrap doctor`（`model_aliases` 一项）会直接给出这条命令。
+
    **拓展：研究某个模型的请求形态**
 
    用一个还没“开放”的模型名，可以看到 Claude Code 会怎么为它组织请求，接着用 alias 把实际调用路由到一个能应答的模型上：
@@ -262,6 +270,8 @@ profile 是预定义的配置：base URL、auth、model alias、上游 header、
   }
 }
 ```
+
+`base_url` 填网关的根地址，不要带 `/v1`：Claude Code 会自己拼上 `/v1/messages`，写成 `https://gateway.example/v1` 请求就会发到 `/v1/v1/messages`（不少网关文档给的是 OpenAI 风格、带 `/v1` 的地址）。写错时启动横幅和 `ccwrap doctor`（`upstream_path` 一项）会提示，并给出改好的地址。
 
 Auth 模式：
 

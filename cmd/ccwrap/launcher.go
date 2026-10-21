@@ -388,6 +388,9 @@ func (l *sessionLauncher) PrintSummary() {
 		if l.pre.AuthBootstrap == model.AuthBootstrapMissing {
 			fmt.Fprintln(os.Stderr, "  ⚠ Requests will fail until you "+authMissingRecoverHint(l.pre.MissingAuthEnv)+".")
 		}
+		for _, line := range launchWarningLines(l.pre) {
+			fmt.Fprintln(os.Stderr, line)
+		}
 		return
 	}
 	printLaunchSummary(
@@ -411,6 +414,12 @@ func (l *sessionLauncher) PrintSummary() {
 		l.pre.ActiveProfileProvider,
 		l.pre.MissingAuthEnv,
 	)
+	if lines := launchWarningLines(l.pre); len(lines) > 0 {
+		fmt.Fprintln(os.Stderr)
+		for _, line := range lines {
+			fmt.Fprintln(os.Stderr, line)
+		}
+	}
 	pal := ui.New(ui.IsTerminal(os.Stderr))
 	full, _, disclosure := updateBannerLines(l.paths.StateDir, versionString(), l.launch.NoUpdateCheck, os.Getenv, ui.IsTerminal(os.Stderr), pal)
 	if full != "" {

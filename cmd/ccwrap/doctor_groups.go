@@ -18,6 +18,8 @@ var doctorGroupExplicit = map[string]string{
 	"parent_env_auth_sources":          "Provider + Auth",
 	"hidden_auth_contract":             "Provider + Auth",
 	"anthropic_profile":                "Provider + Auth",
+	"model_aliases":                    "Provider + Auth",
+	"upstream_path":                    "Provider + Auth",
 	"unsupported_env":                  "Provider + Auth",
 	"settings_inspection":              "Settings inspection",
 	"active_setting_sources":           "Settings inspection",
