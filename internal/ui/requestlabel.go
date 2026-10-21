@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/Hoper-J/ccwrap/internal/model"
 )
@@ -52,4 +53,35 @@ func RequestFailureBrief(rec model.RequestRecord, n int) string {
 		return rec.Failure.Message
 	}
 	return string(r[:n]) + "…"
+}
+
+// DisplayPath is a request path for activity rows: Claude Code tags every
+// API call with ?beta=true, which says nothing per row, so that parameter is
+// dropped; any other query is kept. Kept in sync with displayPath in the
+// web template.
+func DisplayPath(path string) string {
+	base, query, ok := strings.Cut(path, "?")
+	if !ok {
+		return path
+	}
+	kept := make([]string, 0, 2)
+	for _, p := range strings.Split(query, "&") {
+		if p != "" && p != "beta=true" {
+			kept = append(kept, p)
+		}
+	}
+	if len(kept) == 0 {
+		return base
+	}
+	return base + "?" + strings.Join(kept, "&")
+}
+
+// ErrorSeverityLabel names an error-list entry's kind for activity rows:
+// "warning" for warn severity (e.g. an error status the upstream returned),
+// "error" otherwise. Kept in sync with the web template's error rows.
+func ErrorSeverityLabel(rec model.ErrorRecord) string {
+	if rec.Severity == "warn" {
+		return "warning"
+	}
+	return "error"
 }

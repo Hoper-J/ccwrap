@@ -34,7 +34,8 @@ func TestRequestRowFirstPaintShowsModelAndFailure(t *testing.T) {
 		t.Fatalf("rows = %d", len(rows))
 	}
 	row := rows[0]
-	if row.Main != "POST /v1/messages?beta=true · claude-fable-5-1 (no alias)" {
+	// ?beta=true is dropped from the displayed path.
+	if row.Main != "POST /v1/messages · claude-fable-5-1 (no alias)" {
 		t.Fatalf("Main = %q", row.Main)
 	}
 	if row.Right != "404 model not found: claude-fable-5-1 · 12 ms · http · gw.example" {
@@ -77,25 +78,27 @@ func TestRequestLabelsLiveParity(t *testing.T) {
 		{Method: "GET", Path: "/v1/messages", StatusCode: 500},
 		{Method: "POST", Path: "/v1/messages", StatusCode: 404, Synthetic: true},
 	}
+	recs = append(recs, model.RequestRecord{Method: "GET", Path: "/v1/models?beta=true&limit=20", StatusCode: 200})
 	type labels struct {
 		Model  string `json:"model"`
 		Head   string `json:"head"`
 		Brief  string `json:"brief"`
 		Failed bool   `json:"failed"`
+		Path   string `json:"path"`
 	}
 	want := make([]labels, len(recs))
 	for i, r := range recs {
-		want[i] = labels{ui.RequestModelLabel(r), ui.RequestFailureHead(r), ui.RequestFailureBrief(r, failureBriefMax), r.FailedModelRequest()}
+		want[i] = labels{ui.RequestModelLabel(r), ui.RequestFailureHead(r), ui.RequestFailureBrief(r, failureBriefMax), r.FailedModelRequest(), ui.DisplayPath(r.Path)}
 	}
 	wire, err := json.Marshal(recs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	js := liftScriptFns(t, renderedInlineScript(t), "requestModelLabel", "failureHead", "failureBrief", "isFailedModelRequest")
+	js := liftScriptFns(t, renderedInlineScript(t), "requestModelLabel", "failureHead", "failureBrief", "isFailedModelRequest", "displayPath")
 	driver := js + `
 var recs = ` + string(wire) + `;
 process.stdout.write(JSON.stringify(recs.map(function(r){
-  return {model: requestModelLabel(r), head: failureHead(r), brief: failureBrief(r, ` + "60" + `), failed: isFailedModelRequest(r)};
+  return {model: requestModelLabel(r), head: failureHead(r), brief: failureBrief(r, ` + "60" + `), failed: isFailedModelRequest(r), path: displayPath(r.path)};
 })));`
 	cmd := exec.Command("node", "-")
 	cmd.Stdin = strings.NewReader(driver)

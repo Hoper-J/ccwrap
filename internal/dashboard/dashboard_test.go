@@ -170,6 +170,11 @@ func TestRequestRowsShowModelAndFailure(t *testing.T) {
 	if len(rows) != 3 {
 		t.Fatalf("want 2 request lines + 1 failure line, got %d:\n%s", len(rows), joined)
 	}
+	if strings.Contains(joined, "beta=true") {
+		t.Fatalf("?beta=true must be dropped from displayed paths:\n%s", joined)
+	}
+	activity := strings.Join(renderActivityRows(pal, nil, []model.ErrorRecord{{Severity: "warn", Summary: "upstream 404"}, {Summary: "dial failed"}}, nil, 6), "\n")
+	mustContainLines(t, activity, "warning  upstream 404", "error    dial failed")
 	errs := strings.Join(renderErrorRows(pal, []model.ErrorRecord{{ErrorClass: "upstream_http_404", Summary: "fable 404", Count: 3}}, 6), "\n")
 	mustContainLines(t, errs, "fable 404 ×3")
 	summary := strings.Join(renderSummaryLines(pal, &model.Session{RecentRequestCount: 5, RecentFailedCount: 2}), "\n")

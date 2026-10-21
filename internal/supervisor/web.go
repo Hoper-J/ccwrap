@@ -20,7 +20,7 @@ import (
 type pageBootstrap struct {
 	EventsURL    string              `json:"events_url"`
 	LastActivity string              `json:"last_activity,omitempty"`
-	Session      *model.Session      `json:"session,omitempty"`
+	Session      *sessionForWire     `json:"session,omitempty"`
 	Requests     []classifiedRecord  `json:"requests,omitempty"`
 	Errors       []model.ErrorRecord `json:"errors,omitempty"`
 	Trace        []model.TraceRecord `json:"trace,omitempty"`
@@ -180,6 +180,9 @@ type webRow struct {
 	SwitchReason       string
 	// Failure is the drawer panel for a failed request; nil otherwise.
 	Failure *webFailure
+	// Severity is "warn" on error rows for warn-level entries (the row
+	// reads "warning" and is colored amber); "" elsewhere.
+	Severity string
 }
 
 // webFailure is a failed request's panel in the inspect drawer: what the
@@ -209,7 +212,7 @@ func webFailureFor(rec model.RequestRecord) *webFailure {
 
 // requestRowMain is a request row's summary: method, path and model.
 func requestRowMain(rec model.RequestRecord) string {
-	main := fmt.Sprintf("%s %s", rec.MethodLabel(), fallback(rec.Path, "/"))
+	main := fmt.Sprintf("%s %s", rec.MethodLabel(), fallback(ui.DisplayPath(rec.Path), "/"))
 	if label := ui.RequestModelLabel(rec); label != "" {
 		main += " · " + label
 	}
@@ -237,15 +240,25 @@ func trafficState(failed int) string {
 // failureBriefMax bounds the failure message shown on a request row.
 const failureBriefMax = 60
 
-// web.tmpl is the entire dashboard: one self-contained html/template page.
-// Its editing constraints ({{...}} parsed anywhere including JS comments,
-// node-lifted script functions, JS/Go byte-equality, no innerHTML) are
-// documented in its header comment.
+// web.tmpl is the dashboard page and web.js its live script. The script is
+// parsed as a nested template and inlined into the page, so the dashboard
+// stays one self-contained response and html/template strips the script's
+// comments as before. Editing constraints are documented in each file's
+// header comment.
 //
 //go:embed web.tmpl
 var webTplSrc string
 
-var webTpl = template.Must(template.New("page").Parse(webTplSrc))
+//go:embed web.js
+var webJSSrc string
+
+var webTpl = parseWebTemplate()
+
+func parseWebTemplate() *template.Template {
+	page := template.Must(template.New("page").Parse(webTplSrc))
+	template.Must(page.New("web.js").Parse(webJSSrc))
+	return page
+}
 
 func renderWebPage(w http.ResponseWriter, page webPageData) {
 	if page.FaviconHref == "" {
@@ -339,9 +352,10 @@ func webRibbonFromSession(sess model.Session, hasProfilesFile bool, profileCount
 	))
 	bodiesValue, bodiesDetail, bodiesState := bodiesCellPresentation(sess.CaptureBodies, sess.CaptureBodiesUnmasked, sess.CaptureTelemetry)
 	authValue, authDetail, authState := authCellPresentation(sess)
+	routeValue, routeDetail := routeCellPresentation(sess)
 	egressValue, egressDetail, egressMono := egressCellPresentation(sess)
 	cells := []webKV{
-		{Label: "Route", Value: ui.HumanRouteClass(sess.RouteClass), Detail: strings.ToLower(ui.HumanRouteSource(sess.RouteSource))},
+		{Label: "Route", Value: routeValue, Detail: routeDetail},
 		{Label: "Auth", Value: authValue, Detail: authDetail, DataState: authState},
 		{Label: "Models", Value: models, DataState: modelsState},
 		{Label: trafficLabel, Value: fmt.Sprintf("%d req", sess.RecentRequestCount), Detail: fmt.Sprintf("%d failed", sess.RecentFailedCount), DataState: trafficState(sess.RecentFailedCount), Mono: true},
@@ -418,14 +432,45 @@ func egressCellPresentation(sess model.Session) (value, detail string, mono bool
 	return value, detail, mono
 }
 
+// routeCellPresentation is the Route ribbon cell's value and detail.
+func routeCellPresentation(sess model.Session) (value, detail string) {
+	return ui.HumanRouteClass(sess.RouteClass), strings.ToLower(ui.HumanRouteSource(sess.RouteSource))
+}
+
+// sessionForWire is a session as the dashboard script receives it (page
+// bootstrap and SSE): the model plus the server-rendered Route and Auth cell
+// text, so a live update shows exactly what the first paint did.
+type sessionForWire struct {
+	model.Session
+	Display sessionDisplay `json:"display"`
+}
+
+type sessionDisplay struct {
+	RouteValue  string `json:"route_value"`
+	RouteDetail string `json:"route_detail"`
+	AuthValue   string `json:"auth_value"`
+	AuthDetail  string `json:"auth_detail"`
+	AuthState   string `json:"auth_state"`
+	// HeroSentence is the posture line under the hero state word.
+	HeroSentence string `json:"hero_sentence"`
+}
+
+func sessionWithDisplay(sess model.Session) sessionForWire {
+	w := sessionForWire{Session: sess}
+	w.Display.RouteValue, w.Display.RouteDetail = routeCellPresentation(sess)
+	w.Display.AuthValue, w.Display.AuthDetail, w.Display.AuthState = authCellPresentation(sess)
+	w.Display.HeroSentence = ui.SessionPosture(&sess)
+	return w
+}
+
 // authCellPresentation derives the Auth ribbon cell's (value, detail, state)
 // tuple. When AuthBootstrap==Missing the cell flips to a
 // "auth-missing" danger state with a Case-A or Case-B detail message; in
 // all other cases the historical Value=HumanAuthPolicy / Detail=
 // HumanAuthBootstrap rendering is preserved verbatim (no behavior change
-// for healthy sessions). The single Go helper is the truth source for
-// both the server first paint (this function) and the JS live patch
-// (updateAuthCell in the inline script) — keeps drift to zero.
+// for healthy sessions). This Go helper renders the cell for both the
+// first paint and live updates: the session on the wire carries its output
+// (sessionForWire.display), which updateAuthCell applies as-is.
 //
 // State machine:
 //
@@ -570,15 +615,6 @@ func webHeroVariant(sess model.Session) (state, variant string) {
 	default: // ok or empty
 		return "Active", "active"
 	}
-}
-
-// lastWebError returns the newest error for the degraded hero "Last:"
-// tail (slice is oldest-first, so the last element is newest).
-func lastWebError(e []model.ErrorRecord) *model.ErrorRecord {
-	if len(e) == 0 {
-		return nil
-	}
-	return &e[len(e)-1]
 }
 
 // recordClass is THE single source of the request-class rule.
@@ -840,14 +876,18 @@ func unifiedActivityRows(requests []model.RequestRecord, errors []model.ErrorRec
 		if includeSession && rec.SessionID != "" {
 			right = joinParts(right, "sess "+shortSessionID(rec.SessionID))
 		}
-		rows = append(rows, timedRow{when: rec.Timestamp, row: webRow{
+		row := webRow{
 			Time:  webClock(rec.Timestamp),
-			Label: "error",
+			Label: ui.ErrorSeverityLabel(rec),
 			Main:  errorRowMain(rec),
 			Right: fallback(right, "check ccwrap doctor"),
 			Kind:  "error",
 			Class: "error",
-		}})
+		}
+		if rec.Severity == "warn" {
+			row.Severity = "warn"
+		}
+		rows = append(rows, timedRow{when: rec.Timestamp, row: row})
 	}
 	for _, rec := range trace {
 		right := joinParts(fallback(rec.Category, "trace"), fallback(rec.Detail, "—"))

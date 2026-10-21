@@ -1517,7 +1517,7 @@ func printLaunchSummary(sessionID, proxyURL, upstream string, routeSource model.
 		AuthPolicy:        authPolicy,
 		ModelAliasCount:   alias.Count(),
 		State:             model.StateActive,
-	}, nil) // launch summary has no traffic/errors yet
+	}) // launch summary has no traffic/errors yet
 
 	var state string
 	if routeClass == model.RouteClassThirdPartyCompatible || authPolicy == model.AuthPolicyUnsafePassthrough {
@@ -1708,7 +1708,7 @@ func printStatus(discovered []model.DiscoveredSession, sessions []*model.Session
 			head += "   " + pal.Dim(fmt.Sprintf("claude pid %d", sess.ClaudePID))
 		}
 		fmt.Println(head)
-		if p := ui.SessionPosture(sess, nil); p != "" { // status has no error list in scope
+		if p := ui.SessionPosture(sess); p != "" {
 			fmt.Println("  " + p)
 		}
 		fmt.Println()

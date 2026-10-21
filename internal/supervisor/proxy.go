@@ -298,6 +298,7 @@ func (sp *sessionProxy) handleInfoRequest(w http.ResponseWriter, r *http.Request
 
 func (sp *sessionProxy) handleInfoPage(w http.ResponseWriter, r *http.Request) {
 	sess := sp.session.snapshot()
+	wireSess := sessionWithDisplay(sess)
 	requests := sp.supervisor.listRequests(sess.ID)
 	errors := sp.supervisor.listErrors(sess.ID)
 	trace := sp.supervisor.listTrace(sess.ID)
@@ -390,7 +391,7 @@ func (sp *sessionProxy) handleInfoPage(w http.ResponseWriter, r *http.Request) {
 		HeroState:         heroState,
 		HeroVariant:       heroVariant,
 		HeroMeta:          heroMeta,
-		HeroSentence:      ui.SessionPosture(&sess, lastWebError(errors)),
+		HeroSentence:      ui.SessionPosture(&sess),
 		Ribbon:            webRibbonFromSession(sess, hasProfilesFile, profileCount),
 		Summary:           webSummaryFromSession(sess),
 		Links: []webLink{
@@ -410,7 +411,7 @@ func (sp *sessionProxy) handleInfoPage(w http.ResponseWriter, r *http.Request) {
 		BootstrapB64: bootstrapB64(pageBootstrap{
 			EventsURL:    "/events",
 			LastActivity: activityRFC3339(lastActivity),
-			Session:      &sess,
+			Session:      &wireSess,
 			Requests:     bootRequests,
 			// Full retention rings (not a truncated 8/10): the JS mirror counts
 			// state-array lengths for the filter pills, so a short bootstrap

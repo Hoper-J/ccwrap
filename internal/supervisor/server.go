@@ -544,10 +544,13 @@ func (s *Supervisor) handleEvents(w http.ResponseWriter, r *http.Request) {
 // "request" event is rewrapped; all other events pass through unchanged.
 // model.RequestRecord and the broadcast/recordRequest path are untouched.
 func eventForWire(ev model.Event) model.Event {
-	if ev.Type == "request" {
-		if rec, ok := ev.Data.(model.RequestRecord); ok {
-			ev.Data = classifiedRecord{Class: recordClass(rec), RequestRecord: rec}
+	switch data := ev.Data.(type) {
+	case model.RequestRecord:
+		if ev.Type == "request" {
+			ev.Data = classifiedRecord{Class: recordClass(data), RequestRecord: data}
 		}
+	case model.Session:
+		ev.Data = sessionWithDisplay(data)
 	}
 	return ev
 }
@@ -1060,7 +1063,7 @@ func (s *Supervisor) recordRequest(id string, record model.RequestRecord) {
 	// raw value therefore never reaches /recent, the page bootstrap, the SSE
 	// stream, a HAR export, or any future emit site: masking is
 	// correct-by-construction here, not a property each consumer must remember.
-	// Render-time redaction (ui.RenderHeaderGroupsWithRedaction + the web.go JS
+	// Render-time redaction (ui.RenderHeaderGroupsWithRedaction + its web.js
 	// twin) is now defense in depth on top of this. Bypassed only under the
 	// explicit CCWRAP_UNMASK_CREDENTIALS=1 launch opt-in — the same flag that
 	// already gates body redaction — so the wire stays consistent across header
@@ -1167,6 +1170,8 @@ func (s *Supervisor) recordError(id string, record model.ErrorRecord) {
 	sess.mu.Unlock()
 	s.touch()
 	s.broadcast("proxy_error", id, record)
+	// The error changed the session's issue count and health.
+	s.broadcast("session_updated", id, sess.snapshot())
 }
 
 func sameError(a, b model.ErrorRecord) bool {

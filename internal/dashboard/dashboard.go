@@ -437,7 +437,7 @@ func buildFrameFromSnapshot(runtimeDir string, snap snapshot, pal ui.Palette, vi
 	}
 
 	lines = append(lines, renderSessionHeader(pal, snap.session, ui.LatestClaudeSessionID(snap.requests))...)
-	if p := ui.SessionPosture(snap.session, lastError(snap.errors)); p != "" {
+	if p := ui.SessionPosture(snap.session); p != "" {
 		lines = append(lines, "", "  "+p)
 	}
 	lines = append(lines, ui.Divider("─", dividerWidth))
@@ -468,13 +468,6 @@ func buildFrameFromSnapshot(runtimeDir string, snap snapshot, pal ui.Palette, vi
 
 // lastError returns the newest error for the degraded hero "Last:"
 // tail (slice is oldest-first, matching the row renderers).
-func lastError(e []model.ErrorRecord) *model.ErrorRecord {
-	if len(e) == 0 {
-		return nil
-	}
-	return &e[len(e)-1]
-}
-
 func formatOtherIDs(ids []string, max int) string {
 	if len(ids) == 0 {
 		return ""
@@ -761,7 +754,7 @@ func renderRequestRows(pal ui.Palette, reqs []model.RequestRecord, n int) []stri
 		line := fmt.Sprintf("%-8s %-9s %-28s %-34s %s  %6d ms  %-10s  %s",
 			rec.Timestamp.Format("15:04:05"),
 			trimDisplay(ui.ShortMethodLabel(rec), 9),
-			trimDisplay(rec.Path, 28),
+			trimDisplay(ui.DisplayPath(rec.Path), 28),
 			trimDisplay(fallbackText(ui.RequestModelLabel(rec), "—"), 34),
 			statusStr,
 			rec.LatencyMS,
@@ -817,7 +810,8 @@ func renderErrorRows(pal ui.Palette, errs []model.ErrorRecord, n int) []string {
 			summary = strings.TrimSpace(summary) + " · " + rec.SuggestedAction
 		}
 		// Pad before colorizing — ANSI escapes count into %-20s width.
-		cls := pal.Red(fmt.Sprintf("%-20s", trimDisplay(rec.ErrorClass, 20)))
+		// Warn-level entries (upstream error statuses) read amber.
+		cls := severityColor(pal, rec)(fmt.Sprintf("%-20s", trimDisplay(rec.ErrorClass, 20)))
 		lines = append(lines, fmt.Sprintf("%-8s %s %-24s %s",
 			rec.Timestamp.Format("15:04:05"),
 			cls,
@@ -826,6 +820,15 @@ func renderErrorRows(pal ui.Palette, errs []model.ErrorRecord, n int) []string {
 		))
 	}
 	return lines
+}
+
+// severityColor colors an error-list entry: amber for warn level, red
+// otherwise (the web rows' twin).
+func severityColor(pal ui.Palette, rec model.ErrorRecord) func(string) string {
+	if rec.Severity == "warn" {
+		return pal.Yellow
+	}
+	return pal.Red
 }
 
 func renderTraceRows(trace []model.TraceRecord, n int) []string {
@@ -862,7 +865,7 @@ func renderActivityRows(pal ui.Palette, reqs []model.RequestRecord, errs []model
 	rows := make([]activityRow, 0, len(reqs)+len(errs)+len(trace))
 	for _, rec := range reqs {
 		// Short "SYNTH GET" label; synthetic rows dim.
-		main := strings.TrimSpace(ui.ShortMethodLabel(rec) + " " + fallbackText(rec.Path, "/"))
+		main := strings.TrimSpace(ui.ShortMethodLabel(rec) + " " + fallbackText(ui.DisplayPath(rec.Path), "/"))
 		if label := ui.RequestModelLabel(rec); label != "" {
 			main += " · " + label
 		}
@@ -891,7 +894,7 @@ func renderActivityRows(pal ui.Palette, reqs []model.RequestRecord, errs []model
 			when: rec.Timestamp,
 			line: fmt.Sprintf("%-8s %s %-44s %s",
 				rec.Timestamp.Format("15:04:05"),
-				pal.Red(fmt.Sprintf("%-8s", "error")),
+				severityColor(pal, rec)(fmt.Sprintf("%-8s", ui.ErrorSeverityLabel(rec))),
 				trimDisplay(summary, 44),
 				trimDisplay(joinParts(rec.ErrorClass, right), 68),
 			),

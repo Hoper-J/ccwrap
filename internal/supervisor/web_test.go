@@ -359,29 +359,41 @@ func TestSP3InlineScript_HeaderRedaction_UnmaskBranch(t *testing.T) {
 	}
 }
 
-// TestSP3InlineScript_AuthCell_HandlesMissing locks the JS-side handler
-// for the auth-missing wire signal: updateAuthCell must read
-// session.auth_bootstrap === 'missing' and route to data-state=auth-missing
-// with the right detail branching on missing_auth_env emptiness.
-func TestSP3InlineScript_AuthCell_HandlesMissing(t *testing.T) {
-	var buf bytes.Buffer
-	renderWebPage(noopResponseWriter{header: http.Header{}, b: &buf}, webPageData{
-		Title: "x", LiveEnabled: true,
-		BootstrapB64: bootstrapB64(pageBootstrap{EventsURL: "/events"}),
-	})
-	m := regexp.MustCompile(`(?s)<script>(.*)</script>`).FindStringSubmatch(buf.String())
-	if len(m) != 2 {
-		t.Fatalf("inline script not found")
+// A live session update paints the Route and Auth cells with the
+// server-rendered text the session carries (sessionForWire.display): the
+// same Go functions as the first paint, auth-missing state included.
+func TestLiveRouteAndAuthCellsUseServerText(t *testing.T) {
+	sess := model.Session{
+		RouteClass: model.RouteClassThirdPartyHidden, RouteSource: model.RouteSourceExplicit,
+		AuthPolicy: model.AuthPolicyCCWRAPOverrideFailClosed, AuthBootstrap: model.AuthBootstrapMissing,
+		ActiveProfileName: "gw", MissingAuthEnv: "GW_KEY",
 	}
-	js := m[1]
-	if !strings.Contains(js, "missing_auth_env") {
-		t.Errorf("inline JS must read session.missing_auth_env")
+	wire := sessionWithDisplay(sess)
+	if wire.Display.AuthValue != "⚠ MISSING" || wire.Display.AuthDetail != `profile "gw" needs $GW_KEY` || wire.Display.AuthState != "auth-missing" {
+		t.Fatalf("auth display = %+v", wire.Display)
 	}
-	if !strings.Contains(js, "auth-missing") {
-		t.Errorf("inline JS must set the auth-missing dataset.state branch")
+	if wire.Display.RouteValue != "Gateway" || wire.Display.RouteDetail != "explicit" {
+		t.Fatalf("route display = %+v", wire.Display)
 	}
-	if !regexp.MustCompile(`auth_bootstrap\s*===\s*['"]missing['"]`).MatchString(js) {
-		t.Errorf("inline JS must compare session.auth_bootstrap === 'missing'")
+	data, err := json.Marshal(wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := liftScriptFns(t, renderedInlineScript(t), "updateRouteCell", "updateAuthCell")
+	driver := `
+function el(){ return {textContent: 'stale'}; }
+var cells = {};
+['Route','Auth'].forEach(function(k){ var v = el(), d = el(); cells[k] = {v: v, d: d, dataset: {}, querySelector: function(sel){ return sel === '.d' ? d : v; }}; });
+function ribbonCellEl(label){ return cells[label]; }
+function ribbonValueEl(label){ return cells[label] && cells[label].v; }
+var state = {session: ` + string(data) + `};
+` + js + `
+updateRouteCell(); updateAuthCell();
+process.stdout.write(JSON.stringify([cells.Route.v.textContent, cells.Route.d.textContent, cells.Auth.v.textContent, cells.Auth.d.textContent, cells.Auth.dataset.state]));`
+	out := runNode(t, driver)
+	want, _ := json.Marshal([]string{"Gateway", "explicit", "⚠ MISSING", `profile "gw" needs $GW_KEY`, "auth-missing"})
+	if string(out) != string(want) {
+		t.Fatalf("live cells = %s, want %s", out, want)
 	}
 }
 
@@ -1265,7 +1277,7 @@ func TestActivityKindLabelFirstPaintLiveParity(t *testing.T) {
 	// Sanity: the error/trace class-consistent literals are still present
 	// (only the request-family literal is single-sourced; the JS error/
 	// trace branches already matched Go and stay byte-identical).
-	mustContainAllWeb(t, fn, "label: 'error'", "label: 'trace'")
+	mustContainAllWeb(t, fn, "label: rec.severity === 'warn' ? 'warning' : 'error'", "label: 'trace'")
 
 	// (C) Extracted inline script still parses under node --check (same
 	// mechanism + same node-absent skip as the canonical script tests).
@@ -5373,11 +5385,12 @@ func TestP3PolishContracts(t *testing.T) {
 		"return 70 + (((h % 260) + 260) % 260)",
 		webActivityEmptyLive,
 	)
-	// (d) auth-missing warn tone; (e) 8-cell ribbon early collapse;
+	// (d) auth-missing warn tone; (e) the 8-cell ribbon is a 4×2 card grid
+	// at every width (one row of 8 left ~155px cells that wrapped);
 	// (h) editor type floor.
 	mustContainAllWeb(t, live,
 		`.ribbon-cell[data-ribbon="Auth"][data-state="auth-missing"] .v{color:var(--warn)`,
-		`@media (max-width:1280px){.ribbon:has(.ribbon-cell[data-ribbon="NATIVE TLS"]){grid-template-columns:repeat(4,1fr)`,
+		`.ribbon:has(.ribbon-cell[data-ribbon="NATIVE TLS"]){grid-template-columns:repeat(4,1fr)`,
 		`.sp3-pop-edit-field label{color:var(--text-muted);font-size:11px}`,
 		`.sp3-pop-edit-field input::placeholder{color:#808080}`,
 	)
