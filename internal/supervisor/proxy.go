@@ -58,6 +58,7 @@ func newSessionProxy(supervisor *Supervisor, session *sessionState) (*sessionPro
 	if err != nil {
 		return nil, fmt.Errorf("listen session proxy: %w", err)
 	}
+	ln = newLocalPeerListener(ln, supervisor.logger)
 	sp := &sessionProxy{
 		supervisor:       supervisor,
 		session:          session,

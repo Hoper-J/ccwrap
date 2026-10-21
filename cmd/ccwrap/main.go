@@ -30,6 +30,7 @@ import (
 	"github.com/Hoper-J/ccwrap/internal/discovery"
 	"github.com/Hoper-J/ccwrap/internal/egress"
 	"github.com/Hoper-J/ccwrap/internal/envpolicy"
+	"github.com/Hoper-J/ccwrap/internal/localpeer"
 	"github.com/Hoper-J/ccwrap/internal/manifest"
 	"github.com/Hoper-J/ccwrap/internal/model"
 	"github.com/Hoper-J/ccwrap/internal/modelalias"
@@ -751,6 +752,7 @@ func doctorCommand(paths app.Paths, args []string) error {
 		_ = ln.Close()
 		add("session_listener", "pass", "session proxy port can bind", "")
 	}
+	addLocalAccessCheck(add, os.Getenv, localpeer.SelfTest)
 	// Update awareness: cache-only read — doctor never hits the network
 	// for this row; `ccwrap version --check` / `ccwrap upgrade` are the
 	// explicit network probes.

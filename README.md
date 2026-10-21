@@ -540,6 +540,7 @@ ccwrap **解析并重新注入**模型偏好 env（`ANTHROPIC_MODEL`、`ANTHROPI
 | `CCWRAP_NATIVE_TLS=0` | ⚠ 原生 TLS 指纹镜像的 kill switch。stderr 会打危险提示 |
 | `CCWRAP_NATIVE_TLS_HELLO` | 指向一份 `clienthello.bin`，用它钉死镜像指纹（取代实时捕获）。启动时 fail-fast 校验 |
 | `CCWRAP_WEB_ALLOWED_HOSTS` | 逗号分隔的额外 `Host` 值，放行到仪表盘/info endpoint。默认只允许 loopback（DNS-rebinding 防护）；经隧道/反代访问仪表盘时需要设置 |
+| `CCWRAP_LOCAL_PEER_CHECK=0` | ⚠ 关掉会话端口的本机用户检查（默认只接受与 ccwrap 同 uid 的进程和 root）。只有隧道/反代以其他非 root 用户运行时才需要 |
 | `CCWRAP_QUIET=1` | 把启动横幅收成一行（同 `--quiet`）。默认关 |
 | `CCWRAP_KEEP_CLAUDE_METADATA=1` | 关闭非 claude-* 上游的 Claude Code 系统提示词裁剪，以及对话中途提醒的关闭 |
 | `CCWRAP_UNMASK_CREDENTIALS=1` | ⚠ 关闭检查器里 header + body 凭据打码。ccwrap 会往 stderr 打警告 |
@@ -603,6 +604,7 @@ State：
 - 向 Anthropic host 的上游拨号带的是 Claude Code 自己的 TLS 指纹（原生 TLS 镜像，**fail-closed**：镜像失败会阻断该次拨号，而不是暴露 Go 指纹）；请求头也保持 Claude Code 原本的顺序和大小写
 - 仪表盘/info 监听拒绝 `Host` header 非 loopback 形态的请求（DNS-rebinding 防护，HTTP 421）。隧道/反代主机名需用 `CCWRAP_WEB_ALLOWED_HOSTS` 显式放行
 - **经隧道访问 = 无鉴权仪表盘。** 一旦用 `CCWRAP_WEB_ALLOWED_HOSTS` 放行隧道/反代访问，**任何拿到该 URL 的人**都能读 `/recent`（请求元数据 + 脱敏 body）、抓取页面里的 CSRF token 并驱动 mutation（切 profile、改 alias、开关抓取）。凭据已脱敏，但 prompt / response body、profile 名、上游 host 都是明文——只在受信网络 / 受信隧道上开放，别把该 URL 贴到公开处
+- 会话端口只接受本机同一用户的连接：每个连接进来时，ccwrap 会向内核查对端 socket 的属主 uid（Linux 读 `/proc/net/tcp`，macOS 读 `net.inet.tcp.pcblist_n`），只放行与 ccwrap 同 uid 的进程和 root，其他用户的连接直接断开并记进 supervisor 日志——同机其他账号既借不了会话代理去用你的网关 key，也读不到仪表盘里抓到的对话。查不到属主时放行；`ccwrap doctor` 的 `local_access` 一行会显示是否生效。隧道/反代如果以其他非 root 用户运行也会被拒，这时用 `CCWRAP_LOCAL_PEER_CHECK=0` 关掉检查
 - Linux 上 `XDG_RUNTIME_DIR` 未设时，runtime 目录 fallback 到 `/tmp/ccwrap-<uid>`，其中的请求/响应 body 是**明文落盘**（文件 `0600`、目录 `0700`，同机他人读不到，会话结束即清）；裸 SSH / `su` 等场景建议设 `XDG_RUNTIME_DIR`
 - ccwrap 拥有上游凭据时会注入 `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1`，此时 Claude-protected env key（proxy、CA）不会被 Claude 自己的设置源覆盖；例外是"企业 proxy / CA 注意事项"里列的那几类不受保护。一方透传时不注入该 flag（当前版本的 Claude Code 会因它彻底拒读本地登录凭据）；路由/auth 的 env 通路仍由 ccwrap 自己的 spawn 清洗和生成 settings 剥离兜住
 - 会话监听只服务 `/`、`/healthz`、`/recent`、`/recent/body`、`/events`、`/native-tls`、`/native-tls/clienthello.bin`，加上 `/profile/*` 下的 profile API endpoint 和抓取开关 `/capture/bodies`、`/capture/telemetry`。其他路径返回 404

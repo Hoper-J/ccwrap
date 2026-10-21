@@ -300,6 +300,7 @@ func TestDoctorGroupForCheck(t *testing.T) {
 		"paths":                "Runtime",
 		"ca":                   "Runtime",
 		"session_listener":     "Runtime",
+		"local_access":         "Runtime",
 		"effective_upstream":   "Provider + Auth",
 		"hidden_auth_contract": "Provider + Auth",
 		"settings_inspection":  "Settings inspection",
@@ -316,7 +317,7 @@ func TestDoctorGroupForCheck(t *testing.T) {
 		}
 	}
 	all := []string{
-		"paths", "ca", "session_listener", "inherited_upstream", "provider_selection", "unsupported_env",
+		"paths", "ca", "session_listener", "local_access", "inherited_upstream", "provider_selection", "unsupported_env",
 		"parent_env_auth_sources", "egress_proxy", "active_setting_sources",
 		"effective_upstream", "auth_sources", "upstream_inputs", "hidden_auth_contract", "anthropic_profile",
 		"settings_unsupported_env", "settings_malformed_env", "settings_overridden_network_env",
