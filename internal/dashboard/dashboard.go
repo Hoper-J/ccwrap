@@ -685,7 +685,7 @@ func renderSummaryLines(pal ui.Palette, sess *model.Session) []string {
 		}
 		lines = append(lines, "  "+pal.Dim("capture")+"   "+val)
 	}
-	lines = append(lines, "  "+pal.Dim("traffic")+"   "+fmt.Sprintf("%d req · %d err", sess.RecentRequestCount, sess.RecentErrorCount))
+	lines = append(lines, "  "+pal.Dim("traffic")+"   "+fmt.Sprintf("%d req · %d failed", sess.RecentRequestCount, sess.RecentFailedCount))
 	return lines
 }
 
@@ -758,10 +758,11 @@ func renderRequestRows(pal ui.Palette, reqs []model.RequestRecord, n int) []stri
 				statusStr = pal.Yellow(statusStr)
 			}
 		}
-		line := fmt.Sprintf("%-8s %-9s %-44s %s  %6d ms  %-10s  %s",
+		line := fmt.Sprintf("%-8s %-9s %-28s %-34s %s  %6d ms  %-10s  %s",
 			rec.Timestamp.Format("15:04:05"),
 			trimDisplay(ui.ShortMethodLabel(rec), 9),
-			trimDisplay(rec.Path, 44),
+			trimDisplay(rec.Path, 28),
+			trimDisplay(fallbackText(ui.RequestModelLabel(rec), "—"), 34),
 			statusStr,
 			rec.LatencyMS,
 			trimDisplay(string(rec.StreamState), 10),
@@ -771,8 +772,31 @@ func renderRequestRows(pal ui.Palette, reqs []model.RequestRecord, n int) []stri
 			line = pal.Dim(line)
 		}
 		lines = append(lines, line)
+		// A failed request gets its reason and ccwrap's hint underneath
+		// (the renderer clips the line to the terminal width).
+		if why := requestFailureLine(rec); why != "" {
+			lines = append(lines, pal.Dim(fmt.Sprintf("%-8s %s", "", trimDisplay("↳ "+why, 240))))
+		}
 	}
 	return lines
+}
+
+// requestFailureLine is a failed request's reason, short, then ccwrap's hint.
+// The status code is already on the row.
+func requestFailureLine(rec model.RequestRecord) string {
+	f := rec.Failure
+	if f == nil {
+		return ""
+	}
+	lead := f.Type
+	if f.Source == "ccwrap" {
+		lead = "no upstream response"
+	}
+	reason := lead
+	if brief := ui.RequestFailureBrief(rec, 60); brief != "" {
+		reason = strings.TrimPrefix(lead+": "+brief, ": ")
+	}
+	return joinParts(reason, f.Hint)
 }
 
 func renderErrorRows(pal ui.Palette, errs []model.ErrorRecord, n int) []string {
@@ -786,6 +810,9 @@ func renderErrorRows(pal ui.Palette, errs []model.ErrorRecord, n int) []string {
 		// The suggested action follows the
 		// summary on the same line, trimmed to width.
 		summary := rec.Summary
+		if rec.Count > 1 {
+			summary += fmt.Sprintf(" ×%d", rec.Count)
+		}
 		if rec.SuggestedAction != "" {
 			summary = strings.TrimSpace(summary) + " · " + rec.SuggestedAction
 		}
@@ -835,11 +862,19 @@ func renderActivityRows(pal ui.Palette, reqs []model.RequestRecord, errs []model
 	rows := make([]activityRow, 0, len(reqs)+len(errs)+len(trace))
 	for _, rec := range reqs {
 		// Short "SYNTH GET" label; synthetic rows dim.
+		main := strings.TrimSpace(ui.ShortMethodLabel(rec) + " " + fallbackText(rec.Path, "/"))
+		if label := ui.RequestModelLabel(rec); label != "" {
+			main += " · " + label
+		}
+		status := fmt.Sprintf("%d", rec.StatusCode)
+		if brief := ui.RequestFailureBrief(rec, 40); brief != "" {
+			status += " " + brief
+		}
 		line := fmt.Sprintf("%-8s %-8s %-44s %s",
 			rec.Timestamp.Format("15:04:05"),
 			"request",
-			trimDisplay(strings.TrimSpace(ui.ShortMethodLabel(rec)+" "+fallbackText(rec.Path, "/")), 44),
-			trimDisplay(fmt.Sprintf("%d · %d ms · %s · %s", rec.StatusCode, rec.LatencyMS, rec.StreamState, fallbackText(rec.ActualUpstreamHost, rec.LogicalTargetHost)), 68),
+			trimDisplay(main, 44),
+			trimDisplay(fmt.Sprintf("%s · %d ms · %s · %s", status, rec.LatencyMS, rec.StreamState, fallbackText(rec.ActualUpstreamHost, rec.LogicalTargetHost)), 68),
 		)
 		if rec.Synthetic {
 			line = pal.Dim(line)
@@ -848,12 +883,16 @@ func renderActivityRows(pal ui.Palette, reqs []model.RequestRecord, errs []model
 	}
 	for _, rec := range errs {
 		right := fallbackText(rec.UpstreamHost, rec.SuggestedAction)
+		summary := rec.Summary
+		if rec.Count > 1 {
+			summary += fmt.Sprintf(" ×%d", rec.Count)
+		}
 		rows = append(rows, activityRow{
 			when: rec.Timestamp,
 			line: fmt.Sprintf("%-8s %s %-44s %s",
 				rec.Timestamp.Format("15:04:05"),
 				pal.Red(fmt.Sprintf("%-8s", "error")),
-				trimDisplay(rec.Summary, 44),
+				trimDisplay(summary, 44),
 				trimDisplay(joinParts(rec.ErrorClass, right), 68),
 			),
 		})

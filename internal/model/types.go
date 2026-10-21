@@ -2,6 +2,7 @@ package model
 
 import (
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -201,8 +202,11 @@ type Session struct {
 	FailPolicy                         FailPolicy        `json:"fail_policy"`
 	RecentErrorCount                   int               `json:"recent_error_count"`
 	RecentRequestCount                 int               `json:"recent_request_count"`
-	ActiveProfileName                  string            `json:"active_profile_name,omitempty"`
-	ActiveProfileProvider              string            `json:"active_profile_provider,omitempty"`
+	// RecentFailedCount counts the model requests (POST /v1/messages) among
+	// the recent ones that ended with an error status.
+	RecentFailedCount     int    `json:"recent_failed_count"`
+	ActiveProfileName     string `json:"active_profile_name,omitempty"`
+	ActiveProfileProvider string `json:"active_profile_provider,omitempty"`
 	// CaptureBodies mirrors the per-session captureBodies routing flag so the
 	// inspect-web ribbon can render a "Bodies: on/off" cell and the runtime
 	// /capture/bodies toggle has a state to report. Launch-time initial value
@@ -380,6 +384,35 @@ type RequestRecord struct {
 	// this request's upstream connection mirrored. Empty when native TLS did
 	// not apply or the session-default hello was used.
 	ClientHelloKey string `json:"client_hello_key,omitempty"`
+	// Model is the model Claude Code asked for and UpstreamModel the one the
+	// upstream received; they differ only under a model alias. Empty when
+	// the request names no model.
+	Model         string `json:"model,omitempty"`
+	UpstreamModel string `json:"upstream_model,omitempty"`
+	// ModelUnmapped marks a Claude model sent as-is to a third-party route
+	// whose aliases map other models but not this one.
+	ModelUnmapped bool `json:"model_unmapped,omitempty"`
+	// Failure explains a request that ended with an error status. Recorded
+	// whether or not body capture is on.
+	Failure *RequestFailure `json:"failure,omitempty"`
+}
+
+// RequestFailure is what went wrong with one request, as far as ccwrap can
+// tell: the error the upstream returned, or ccwrap's own reason when no
+// upstream response arrived.
+type RequestFailure struct {
+	// Source is "upstream" (it answered with an error status) or "ccwrap"
+	// (no upstream response, e.g. unreachable).
+	Source string `json:"source"`
+	// Type and Message come from the error body when it has a known shape.
+	Type    string `json:"type,omitempty"`
+	Message string `json:"message,omitempty"`
+	// Body is the raw error body, credential-masked and capped; Truncated
+	// marks a cut-off body.
+	Body      string `json:"body,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
+	// Hint is ccwrap's suggestion for the user.
+	Hint string `json:"hint,omitempty"`
 }
 
 // RequestBodyRef is the in-ring reference to a request body spilled to a
@@ -409,6 +442,18 @@ func (r RequestRecord) MethodLabel() string {
 	return r.Method
 }
 
+// FailedModelRequest reports a model request (POST /v1/messages) that ended
+// with an error status — what Session.RecentFailedCount counts. Other API
+// calls can fail harmlessly (a gateway without count_tokens, say), so they
+// show their status but are not counted.
+func (r RequestRecord) FailedModelRequest() bool {
+	if r.Synthetic || r.StatusCode < 400 || !strings.EqualFold(r.Method, http.MethodPost) {
+		return false
+	}
+	path, _, _ := strings.Cut(r.Path, "?")
+	return strings.TrimRight(path, "/") == "/v1/messages"
+}
+
 type ErrorRecord struct {
 	Timestamp       time.Time `json:"timestamp"`
 	SessionID       string    `json:"session_id"`
@@ -418,6 +463,9 @@ type ErrorRecord struct {
 	UpstreamHost    string    `json:"upstream_host,omitempty"`
 	RetryState      string    `json:"retry_state,omitempty"`
 	SuggestedAction string    `json:"suggested_action,omitempty"`
+	// Count is how many times this same error repeated in a row (Claude
+	// Code retries failed requests); 0 or 1 means once.
+	Count int `json:"count,omitempty"`
 }
 
 type TraceRecord struct {

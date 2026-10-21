@@ -41,9 +41,15 @@ type Context struct {
 	Enabled           bool
 	Rewritten         bool
 	NormalizeResponse bool
-	LogicalModel      string
-	UpstreamModel     string
-	Reverse           map[string]string
+	// LogicalModel is the model the request asked for and UpstreamModel the
+	// one sent upstream; both are set whenever the body was read, rewritten
+	// or not.
+	LogicalModel  string
+	UpstreamModel string
+	// Unmapped: the request named a Claude model that no alias (or default)
+	// covers, while the route does map other models.
+	Unmapped bool
+	Reverse  map[string]string
 }
 
 type ResolveOptions struct {
@@ -432,7 +438,11 @@ func RewriteRequest(r *http.Request, cfg Config) (*Context, error) {
 	if r != nil && r.URL != nil {
 		ctx = newContextForRequest(r.Method, r.URL.Path, cfg)
 	}
-	if (!cfg.Enabled() && !cfg.Strict) || r == nil || r.URL == nil || !isRewriteEndpoint(r.Method, r.URL.Path) {
+	if r == nil || r.URL == nil || !isRewriteEndpoint(r.Method, r.URL.Path) {
+		return ctx, nil
+	}
+	if !cfg.Enabled() && !cfg.Strict {
+		noteRequestModel(r, ctx)
 		return ctx, nil
 	}
 	if enc := strings.TrimSpace(r.Header.Get("Content-Encoding")); enc != "" && !strings.EqualFold(enc, "identity") {
@@ -454,6 +464,34 @@ func RewriteRequest(r *http.Request, cfg Config) (*Context, error) {
 		r.Header.Set("Content-Type", "application/json")
 	}
 	return rewriteCtx, nil
+}
+
+// noteRequestModel records the request's model on a route with nothing to
+// rewrite, so the inspector can still show it. Best effort: a body ccwrap
+// cannot read as plain JSON is left alone and the model stays unknown.
+func noteRequestModel(r *http.Request, ctx *Context) {
+	if r.Body == nil || r.Body == http.NoBody {
+		return
+	}
+	if enc := strings.TrimSpace(r.Header.Get("Content-Encoding")); enc != "" && !strings.EqualFold(enc, "identity") {
+		return
+	}
+	if ct := strings.TrimSpace(r.Header.Get("Content-Type")); ct != "" && !isJSONContentType(ct) {
+		return
+	}
+	body, err := io.ReadAll(r.Body)
+	_ = r.Body.Close()
+	replaceRequestBody(r, body)
+	if err != nil || int64(len(body)) > MaxRewriteBytes {
+		return
+	}
+	var head struct {
+		Model string `json:"model"`
+	}
+	if json.Unmarshal(body, &head) == nil {
+		ctx.LogicalModel = head.Model
+		ctx.UpstreamModel = head.Model
+	}
 }
 
 // claudeBillingHeaderPrefix is the leading text of Claude Code's attribution
@@ -588,7 +626,10 @@ func RewriteJSONRequestBody(path string, body []byte, cfg Config) ([]byte, *Cont
 	if err != nil {
 		return nil, nil, err
 	}
+	ctx.LogicalModel = logical
+	ctx.UpstreamModel = provider
 	if !changed {
+		ctx.Unmapped = cfg.Enabled() && isClaudeModel(logical)
 		return body, ctx, nil
 	}
 	// Strip Claude Code identity envelope when forwarding to non-claude-* upstream.
@@ -604,8 +645,6 @@ func RewriteJSONRequestBody(path string, body []byte, cfg Config) ([]byte, *Cont
 	}
 	ctx.Rewritten = true
 	ctx.NormalizeResponse = true
-	ctx.LogicalModel = logical
-	ctx.UpstreamModel = provider
 	// This request's own mapping wins when normalizing its response: the
 	// default can share a target with an explicit alias.
 	ctx.Reverse = withReverse(ctx.Reverse, provider, logical)
@@ -685,7 +724,8 @@ func rewriteRequestObjectModel(obj map[string]json.RawMessage, cfg Config) (chan
 	if cfg.Strict && LooksProviderSpecific(modelID) {
 		return false, "", "", fmt.Errorf("provider-specific model %q reached Claude request path; use a Claude logical model plus CCWRAP modelAliases", modelID)
 	}
-	return false, "", "", nil
+	// Unchanged: report the model as both views.
+	return false, modelID, modelID, nil
 }
 
 func RewriteResponse(resp *http.Response, ctx *Context) error {

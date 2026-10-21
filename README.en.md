@@ -194,6 +194,8 @@ Ctrl+click the local URL after `inspect` in the launch banner to open the dashbo
 
    ![image-20260620115343451](assets/image-20260620115343451.png)
 
+   You can see why a request failed even without body capture: every request shows its model mapping (`claude-opus-4-8 → gpt-5.5`, or `(no alias)` when unmapped), and a failed one keeps the error the upstream returned plus ccwrap's suggested fix — expand the row to read them. The line under the Traffic cell counts failed model requests, and when Claude Code retries, the same error folds into one Errors entry with a repeat count. `ccwrap dashboard` in the terminal shows the same.
+
 Note: using this tool may trigger some first-party features (e.g. sending `cache_control: { scope: "global" }`, or adding `eager_input_streaming: true` to tool schemas to avoid hangs on large tool inputs), but if the upstream server doesn't handle those requests, unexpected behavior may occur.
 
 Also, ccwrap can't get around capabilities that depend on the server side: Fast Mode needs to pass an `orgStatus` check, `max` effort requires upstream model capability, Web Search depends on Anthropic's backend search service, the Advisor tool needs its beta header. What ccwrap does is make Claude Code's emitted request body match what it sends when the upstream is `api.anthropic.com` — so whether it works depends on whether the gateway itself handles those requests.

@@ -117,9 +117,9 @@ func TestWebRibbonHasDetailSublines(t *testing.T) {
 		RouteClass: model.RouteClassThirdPartyHidden, RouteSource: model.RouteSourceInheritedEnv,
 		AuthPolicy:    model.AuthPolicyCCWRAPOverrideFailClosed,
 		AuthBootstrap: model.AuthBootstrapPlaceholderActive, AuthBootstrapKind: model.AuthBootstrapKindBearer,
-		ModelAliasCount: 1, RecentRequestCount: 9, RecentErrorCount: 0,
+		ModelAliasCount: 1, RecentRequestCount: 9, RecentErrorCount: 0, RecentFailedCount: 2,
 	}
-	rib := webRibbonFromSession(sess, "just now", false, 0)
+	rib := webRibbonFromSession(sess, false, 0)
 	if len(rib) != 7 {
 		t.Fatalf("ribbon must be 7 cells (Route/Auth/Models/Traffic/Profile + Bodies + Egress), got %d", len(rib))
 	}
@@ -133,7 +133,9 @@ func TestWebRibbonHasDetailSublines(t *testing.T) {
 	if byLabel["Auth"].Value != "CCWRAP-owned · fail-closed" || byLabel["Auth"].Detail != "placeholder injected" {
 		t.Fatalf("Auth cell = %+v", byLabel["Auth"])
 	}
-	if byLabel["Traffic"].Value != "9 · 0" || byLabel["Traffic"].Detail != "just now" {
+	// Traffic counts requests; its detail line counts failed model requests
+	// (not error-list entries) and is marked when there are any.
+	if byLabel["Traffic"].Value != "9 req" || byLabel["Traffic"].Detail != "2 failed" || byLabel["Traffic"].DataState != "failed" {
 		t.Fatalf("Traffic cell = %+v", byLabel["Traffic"])
 	}
 	// Models detail stays empty — data gap (no forward map).
@@ -143,12 +145,12 @@ func TestWebRibbonHasDetailSublines(t *testing.T) {
 	// And the detail line actually renders in the HTML.
 	var buf bytes.Buffer
 	renderWebPage(noopResponseWriter{header: http.Header{}, b: &buf}, webPageData{Title: "x", Ribbon: rib})
-	mustContainAllWeb(t, buf.String(), `class="d"`, "from environment", "placeholder injected", "just now")
+	mustContainAllWeb(t, buf.String(), `class="d"`, "from environment", "placeholder injected", "2 failed")
 }
 
 func TestWebRibbon_ProfileCell_Active(t *testing.T) {
 	sess := model.Session{ActiveProfileName: "alpha", ActiveProfileProvider: "Anthropic", ModelAliasCount: 2}
-	ribbon := webRibbonFromSession(sess, "just now", true, 3)
+	ribbon := webRibbonFromSession(sess, true, 3)
 	if len(ribbon) != 7 {
 		t.Fatalf("ribbon len = %d, want 7 (Route/Auth/Models/Traffic/Profile + Bodies + Egress)", len(ribbon))
 	}
@@ -171,8 +173,8 @@ func TestWebRibbon_ProfileCell_Active(t *testing.T) {
 }
 
 func TestWebRibbon_ProfileCell_InheritStatic(t *testing.T) {
-	sess := model.Session{}                            // no active profile
-	ribbon := webRibbonFromSession(sess, "", false, 0) // no profiles.json
+	sess := model.Session{}                        // no active profile
+	ribbon := webRibbonFromSession(sess, false, 0) // no profiles.json
 	last := ribbon[4]
 	if last.DataState != "inherit-env-static" {
 		t.Fatalf("DataState = %q, want inherit-env-static", last.DataState)
@@ -186,8 +188,8 @@ func TestWebRibbon_ProfileCell_InheritStatic(t *testing.T) {
 }
 
 func TestWebRibbon_ProfileCell_InheritClickable(t *testing.T) {
-	sess := model.Session{}                           // no active
-	ribbon := webRibbonFromSession(sess, "", true, 5) // profiles.json with 5 profiles
+	sess := model.Session{}                       // no active
+	ribbon := webRibbonFromSession(sess, true, 5) // profiles.json with 5 profiles
 	last := ribbon[4]
 	if last.DataState != "inherit-env-clickable" {
 		t.Fatalf("DataState = %q, want inherit-env-clickable", last.DataState)
@@ -208,7 +210,7 @@ func TestWebRibbon_AuthCell_Healthy(t *testing.T) {
 		AuthBootstrap:     model.AuthBootstrapPlaceholderActive,
 		AuthBootstrapKind: model.AuthBootstrapKindBearer,
 	}
-	ribbon := webRibbonFromSession(sess, "", true, 0)
+	ribbon := webRibbonFromSession(sess, true, 0)
 	auth := ribbon[1] // Route, Auth, Models, Traffic, Profile, Bodies
 	if auth.Label != "Auth" {
 		t.Fatalf("ribbon[1] not Auth: %+v", auth)
@@ -229,7 +231,7 @@ func TestWebRibbon_AuthCell_MissingCaseA(t *testing.T) {
 		AuthBootstrap:     model.AuthBootstrapMissing,
 		MissingAuthEnv:    "ANTHROPIC_AUTH_TOKEN",
 	}
-	ribbon := webRibbonFromSession(sess, "", true, 0)
+	ribbon := webRibbonFromSession(sess, true, 0)
 	auth := ribbon[1]
 	if auth.DataState != "auth-missing" {
 		t.Errorf("DataState = %q, want auth-missing", auth.DataState)
@@ -253,7 +255,7 @@ func TestWebRibbon_AuthCell_MissingCaseB(t *testing.T) {
 		AuthBootstrap:     model.AuthBootstrapMissing,
 		MissingAuthEnv:    "", // Case B
 	}
-	ribbon := webRibbonFromSession(sess, "", true, 0)
+	ribbon := webRibbonFromSession(sess, true, 0)
 	auth := ribbon[1]
 	if auth.DataState != "auth-missing" {
 		t.Errorf("DataState = %q, want auth-missing", auth.DataState)
@@ -274,7 +276,7 @@ func TestWebRibbon_AuthCell_MissingRenderedHTML(t *testing.T) {
 		AuthBootstrap:     model.AuthBootstrapMissing,
 		MissingAuthEnv:    "ANTHROPIC_AUTH_TOKEN",
 	}
-	rib := webRibbonFromSession(sess, "", true, 0)
+	rib := webRibbonFromSession(sess, true, 0)
 	var buf bytes.Buffer
 	renderWebPage(noopResponseWriter{header: http.Header{}, b: &buf}, webPageData{Title: "x", Ribbon: rib})
 	html := buf.String()
@@ -389,7 +391,7 @@ func TestSP3InlineScript_AuthCell_HandlesMissing(t *testing.T) {
 // to flip.
 func TestWebRibbon_BodiesCell_Off(t *testing.T) {
 	sess := model.Session{CaptureBodies: false}
-	ribbon := webRibbonFromSession(sess, "", true, 0)
+	ribbon := webRibbonFromSession(sess, true, 0)
 	if len(ribbon) != 7 {
 		t.Fatalf("ribbon len = %d, want 7", len(ribbon))
 	}
@@ -410,7 +412,7 @@ func TestWebRibbon_BodiesCell_Off(t *testing.T) {
 
 func TestWebRibbon_BodiesCell_On(t *testing.T) {
 	sess := model.Session{CaptureBodies: true}
-	ribbon := webRibbonFromSession(sess, "", true, 0)
+	ribbon := webRibbonFromSession(sess, true, 0)
 	bodies := ribbon[5]
 	// With only request capture on, the summary value is the "request" part.
 	if bodies.Value != "request" {
@@ -433,7 +435,7 @@ func TestWebRibbon_BodiesCell_On(t *testing.T) {
 func TestWebRibbon_BodiesCell_Unmasked(t *testing.T) {
 	t.Run("unmask without capture is off", func(t *testing.T) {
 		sess := model.Session{CaptureBodies: false, CaptureBodiesUnmasked: true}
-		ribbon := webRibbonFromSession(sess, "", true, 0)
+		ribbon := webRibbonFromSession(sess, true, 0)
 		bodies := ribbon[5]
 		if bodies.DataState != "bodies-off" {
 			t.Errorf("unmask=true without capture must show off; got %q", bodies.DataState)
@@ -441,7 +443,7 @@ func TestWebRibbon_BodiesCell_Unmasked(t *testing.T) {
 	})
 	t.Run("capture without unmask is on", func(t *testing.T) {
 		sess := model.Session{CaptureBodies: true, CaptureBodiesUnmasked: false}
-		ribbon := webRibbonFromSession(sess, "", true, 0)
+		ribbon := webRibbonFromSession(sess, true, 0)
 		bodies := ribbon[5]
 		if bodies.DataState != "bodies-on" {
 			t.Errorf("capture+masked = bodies-on; got %q", bodies.DataState)
@@ -452,7 +454,7 @@ func TestWebRibbon_BodiesCell_Unmasked(t *testing.T) {
 	})
 	t.Run("capture + unmask = danger state", func(t *testing.T) {
 		sess := model.Session{CaptureBodies: true, CaptureBodiesUnmasked: true}
-		ribbon := webRibbonFromSession(sess, "", true, 0)
+		ribbon := webRibbonFromSession(sess, true, 0)
 		bodies := ribbon[5]
 		if bodies.DataState != "bodies-unmasked" {
 			t.Errorf("DataState = %q, want bodies-unmasked", bodies.DataState)
@@ -549,7 +551,7 @@ func TestBodiesCellPresentation_Matrix(t *testing.T) {
 func TestWebRibbon_BodiesCell_Telemetry(t *testing.T) {
 	t.Run("telemetry only", func(t *testing.T) {
 		sess := model.Session{CaptureTelemetry: true}
-		bodies := webRibbonFromSession(sess, "", true, 0)[5]
+		bodies := webRibbonFromSession(sess, true, 0)[5]
 		if bodies.Value != "telemetry" {
 			t.Errorf("Value = %q, want telemetry", bodies.Value)
 		}
@@ -559,7 +561,7 @@ func TestWebRibbon_BodiesCell_Telemetry(t *testing.T) {
 	})
 	t.Run("request + telemetry", func(t *testing.T) {
 		sess := model.Session{CaptureBodies: true, CaptureTelemetry: true}
-		bodies := webRibbonFromSession(sess, "", true, 0)[5]
+		bodies := webRibbonFromSession(sess, true, 0)[5]
 		if bodies.Value != "request + telemetry" {
 			t.Errorf("Value = %q, want 'request + telemetry'", bodies.Value)
 		}
@@ -570,7 +572,7 @@ func TestWebRibbon_BodiesCell_Telemetry(t *testing.T) {
 // data-state token reaches the rendered HTML so the CSS rule binds.
 func TestWebRibbon_BodiesCell_UnmaskedRenderedHTML(t *testing.T) {
 	sess := model.Session{CaptureBodies: true, CaptureBodiesUnmasked: true}
-	rib := webRibbonFromSession(sess, "", true, 0)
+	rib := webRibbonFromSession(sess, true, 0)
 	var buf bytes.Buffer
 	renderWebPage(noopResponseWriter{header: http.Header{}, b: &buf}, webPageData{Title: "x", Ribbon: rib})
 	html := buf.String()
@@ -588,7 +590,7 @@ func TestWebRibbon_BodiesCell_UnmaskedRenderedHTML(t *testing.T) {
 func TestWebRibbon_BodiesCell_RenderedHTML(t *testing.T) {
 	for _, on := range []bool{false, true} {
 		sess := model.Session{CaptureBodies: on}
-		rib := webRibbonFromSession(sess, "", true, 0)
+		rib := webRibbonFromSession(sess, true, 0)
 		var buf bytes.Buffer
 		renderWebPage(noopResponseWriter{header: http.Header{}, b: &buf}, webPageData{Title: "x", Ribbon: rib})
 		html := buf.String()
@@ -644,7 +646,7 @@ func TestNativeTLSCellPresentation_Matrix(t *testing.T) {
 // the session carries any non-empty native_tls state.
 func TestWebRibbon_NativeTLSCell_Visibility(t *testing.T) {
 	// Not opted in: no NATIVE TLS cell, ribbon stays at 7.
-	off := webRibbonFromSession(model.Session{}, "", true, 0)
+	off := webRibbonFromSession(model.Session{}, true, 0)
 	if len(off) != 7 {
 		t.Fatalf("NativeTLS empty: ribbon len = %d, want 7 (cell hidden)", len(off))
 	}
@@ -654,7 +656,7 @@ func TestWebRibbon_NativeTLSCell_Visibility(t *testing.T) {
 		}
 	}
 	// Active: cell appended as an 8th cell after Egress.
-	on := webRibbonFromSession(model.Session{NativeTLS: "active"}, "", true, 0)
+	on := webRibbonFromSession(model.Session{NativeTLS: "active"}, true, 0)
 	if len(on) != 8 {
 		t.Fatalf("NativeTLS active: ribbon len = %d, want 8", len(on))
 	}
@@ -667,12 +669,12 @@ func TestWebRibbon_NativeTLSCell_Visibility(t *testing.T) {
 	}
 	// Active with prior block episodes: the count is threaded into the detail so
 	// a healed transient block leaves a visible trace.
-	healed := webRibbonFromSession(model.Session{NativeTLS: "active", NativeTLSFallbacks: 2}, "", true, 0)
+	healed := webRibbonFromSession(model.Session{NativeTLS: "active", NativeTLSFallbacks: 2}, true, 0)
 	if d := healed[7].Detail; d != "mirroring · 2 prior block(s)" {
 		t.Errorf("active-with-blocks detail = %q, want the prior-block trace", d)
 	}
 	// Blocked is an error condition.
-	fb := webRibbonFromSession(model.Session{NativeTLS: "blocked: boom"}, "", true, 0)
+	fb := webRibbonFromSession(model.Session{NativeTLS: "blocked: boom"}, true, 0)
 	if fb[7].DataState != "native-blocked" || fb[7].Value != "blocked" {
 		t.Errorf("blocked cell = (%q,%q), want (blocked,native-blocked)", fb[7].Value, fb[7].DataState)
 	}
@@ -685,7 +687,7 @@ func TestWebRibbon_NativeTLSCell_Visibility(t *testing.T) {
 // the data-ribbon="NATIVE TLS" cell with its data-state — the JS live updater
 // queries by [data-ribbon="NATIVE TLS"] so this DOM hook must exist.
 func TestWebRibbon_NativeTLSCell_RenderedHTML(t *testing.T) {
-	rib := webRibbonFromSession(model.Session{NativeTLS: "blocked: boom"}, "", true, 0)
+	rib := webRibbonFromSession(model.Session{NativeTLS: "blocked: boom"}, true, 0)
 	var buf bytes.Buffer
 	renderWebPage(noopResponseWriter{header: http.Header{}, b: &buf}, webPageData{Title: "x", Ribbon: rib})
 	html := buf.String()
@@ -887,7 +889,7 @@ func TestNativeTLSPopover_Contracts(t *testing.T) {
 func TestWebRibbon_ProfileNameHTMLEscaped(t *testing.T) {
 	// Profile name with HTML metacharacters must be escaped in ValueHTML.
 	sess := model.Session{ActiveProfileName: `evil<script>"alert"</script>`, ActiveProfileProvider: "X"}
-	ribbon := webRibbonFromSession(sess, "", true, 1)
+	ribbon := webRibbonFromSession(sess, true, 1)
 	html := string(ribbon[4].ValueHTML)
 	if strings.Contains(html, "<script>") {
 		t.Fatalf("profile name MUST be escaped: %q", html)
@@ -4113,7 +4115,7 @@ func TestProfileRibbon_EmptyClickable_RendersNoProfilesConfigured(t *testing.T) 
 	// "file exists, profiles map is empty" → HasProfilesFile=true, profileCount=0.
 	// profileDetail must return "no profiles configured" (web.go).
 	sess := model.Session{} // no active profile
-	ribbon := webRibbonFromSession(sess, "", true, 0)
+	ribbon := webRibbonFromSession(sess, true, 0)
 	last := ribbon[4]
 	if last.DataState != "inherit-env-clickable" {
 		t.Fatalf("DataState = %q, want inherit-env-clickable", last.DataState)

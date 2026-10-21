@@ -391,7 +391,7 @@ func (sp *sessionProxy) handleInfoPage(w http.ResponseWriter, r *http.Request) {
 		HeroVariant:       heroVariant,
 		HeroMeta:          heroMeta,
 		HeroSentence:      ui.SessionPosture(&sess, lastWebError(errors)),
-		Ribbon:            webRibbonFromSession(sess, activityAgeLabel(lastActivity), hasProfilesFile, profileCount),
+		Ribbon:            webRibbonFromSession(sess, hasProfilesFile, profileCount),
 		Summary:           webSummaryFromSession(sess),
 		Links: []webLink{
 			{Label: "Health JSON", Href: "/healthz", Icon: "i-activity"},
@@ -935,6 +935,7 @@ func (sp *sessionProxy) handleForwardProxyRequest(w http.ResponseWriter, r *http
 			upstreamBodyRefForThisRequest = st.put(newBodyID(), spillBytes)
 		}
 	}
+	tap := newFailureTap(ap, aliasCtx, sp.supervisor.unmaskCredentials)
 	proxy := &httputil.ReverseProxy{
 		Transport:     sp.upstreamTransportFor(logicalHost, ap.r.egress, ap.l.nativeTLS),
 		FlushInterval: -1,
@@ -959,10 +960,15 @@ func (sp *sessionProxy) handleForwardProxyRequest(w http.ResponseWriter, r *http
 			}
 		},
 		ModifyResponse: func(resp *http.Response) error {
-			return modelalias.RewriteResponse(resp, aliasCtx)
+			if err := modelalias.RewriteResponse(resp, aliasCtx); err != nil {
+				return err
+			}
+			tap.observe(resp)
+			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			cls := classifyUpstreamError(err, errClass)
+			tap.noUpstream(err.Error(), routeSuggestion(cls))
 			sp.supervisor.recordError(sp.session.public.ID, model.ErrorRecord{
 				Timestamp:       time.Now(),
 				SessionID:       sp.session.public.ID,
@@ -985,7 +991,7 @@ func (sp *sessionProxy) handleForwardProxyRequest(w http.ResponseWriter, r *http
 	rw := newCaptureResponseWriter(w)
 	proxy.ServeHTTP(rw, r)
 	latency := time.Since(start)
-	sp.supervisor.recordRequest(sp.session.public.ID, model.RequestRecord{
+	record := model.RequestRecord{
 		Timestamp:          start,
 		SessionID:          sp.session.public.ID,
 		Method:             r.Method,
@@ -1008,7 +1014,9 @@ func (sp *sessionProxy) handleForwardProxyRequest(w http.ResponseWriter, r *http
 		// latest posture.
 		ActiveProfileName:     ap.r.profileName,
 		ActiveProfileProvider: ap.r.profileProvider,
-	})
+	}
+	tap.stamp(&record)
+	sp.supervisor.recordRequest(sp.session.public.ID, record)
 }
 
 func pathForRecord(u *url.URL, isAnthropicUpstream bool) string {
@@ -1752,6 +1760,7 @@ func (sp *sessionProxy) mitmHandler(logicalHost string) http.Handler {
 		// SSE streaming). Set from the tee's Close, read by recordRequest below
 		// — Close runs before ServeHTTP returns, so the ref is visible there.
 		var responseBodyRefForThisRequest *model.RequestBodyRef
+		tap := newFailureTap(ap, aliasCtx, sp.supervisor.unmaskCredentials)
 		proxy := &httputil.ReverseProxy{
 			Transport:     upstreamTr,
 			FlushInterval: -1,
@@ -1810,11 +1819,13 @@ func (sp *sessionProxy) mitmHandler(logicalHost string) http.Handler {
 						})
 					}
 				}
+				tap.observe(resp)
 				return nil
 			},
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 				summary := err.Error()
 				errClass := classifyUpstreamError(err, "upstream_unreachable")
+				tap.noUpstream(summary, routeSuggestion(errClass))
 				sp.supervisor.recordError(sp.session.public.ID, model.ErrorRecord{
 					Timestamp:       time.Now(),
 					SessionID:       sp.session.public.ID,
@@ -1842,7 +1853,7 @@ func (sp *sessionProxy) mitmHandler(logicalHost string) http.Handler {
 		if hello != nil {
 			helloKey = hello.key
 		}
-		sp.supervisor.recordRequest(sp.session.public.ID, model.RequestRecord{
+		record := model.RequestRecord{
 			Timestamp:          start,
 			SessionID:          sp.session.public.ID,
 			Method:             r.Method,
@@ -1868,6 +1879,8 @@ func (sp *sessionProxy) mitmHandler(logicalHost string) http.Handler {
 			// RewriteRequest ran under).
 			ActiveProfileName:     ap.r.profileName,
 			ActiveProfileProvider: ap.r.profileProvider,
-		})
+		}
+		tap.stamp(&record)
+		sp.supervisor.recordRequest(sp.session.public.ID, record)
 	})
 }

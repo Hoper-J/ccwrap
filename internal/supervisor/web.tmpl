@@ -36,6 +36,7 @@
 .ribbon-cell[data-ribbon="Models"][data-state="aliases-active"]{cursor:pointer}
 .ribbon-cell[data-ribbon="Models"][data-state="aliases-active"]:hover{background:var(--surface-2)}
 .ribbon-cell[data-ribbon="Models"][data-state="aliases-active"] .v::after{content:" ▾";color:var(--text-muted);font-size:11px}
+.ribbon-cell[data-ribbon="Traffic"][data-state="failed"] .d,.ribbon-cell[data-ribbon="Total"][data-state="failed"] .d{color:var(--warn)}
 .sp3-models-pop{position:absolute;top:calc(100% + 8px);left:0;right:auto;min-width:280px;max-width:420px;z-index:6;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 30px rgba(0,0,0,.6);padding:10px 12px;font-size:11px}
 .sp3-models-pop::before{content:"";position:absolute;top:-6px;left:18px;width:10px;height:10px;background:var(--surface);border-left:1px solid var(--border);border-top:1px solid var(--border);transform:rotate(45deg)}
 .sp3-models-pop .head{color:var(--text-muted);font-size:10px;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px}
@@ -216,6 +217,7 @@
 .hdr-drawer{margin:2px 0 6px 92px}.hdr-drawer>summary{cursor:pointer;color:var(--text-muted);font-size:12px}.hdr-panel{padding:6px 0}.hdr-group-name{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);margin:14px 0 5px}.hdr-group:first-of-type .hdr-group-name{margin-top:4px}.hdr-row{display:grid;grid-template-columns:230px 1fr;gap:12px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;padding:2px 0}.hdr-k{color:var(--text-secondary)}.hdr-v{color:var(--text);overflow-wrap:anywhere}.hdr-v.redv{color:var(--text-muted)}.hdr-note{margin:2px 0 6px 92px;color:var(--text-muted);font-size:12px}
 .body-drawer{margin:2px 0 6px 92px}.body-drawer>summary{cursor:pointer;color:var(--text-muted);font-size:12px}.body-panel{padding:6px 0;font-size:12px}.body-view-toggle{display:flex;gap:6px;margin-bottom:9px;align-items:center}.body-view-btn{padding:3px 11px;font-size:11px;border:1px solid var(--border);background:var(--surface-2);color:var(--text-secondary);border-radius:99px;cursor:pointer;font-family:inherit;font-weight:500}.body-view-btn.on{background:#0a2e1f;color:var(--accent);border-color:#1d3a30}.body-view-btn:hover:not(.on){background:var(--surface)}.body-view-hint{color:var(--text-muted);font-size:11px;margin-left:auto}.body-view-pane{display:none}.body-view-pane.on{display:block}.body-anatomy{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 12px}.body-anatomy span{background:var(--surface-2);border:1px solid var(--line);border-radius:5px;padding:3px 8px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;color:var(--text-secondary)}.body-anatomy span b{color:var(--accent);font-weight:600}.body-panel pre{margin:5px 0 0;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10.5px;color:var(--text-secondary);max-height:240px;overflow:auto;background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:8px}
 details.row{display:block;padding:0}details.row>summary{list-style:none;display:grid;grid-template-columns:16px 92px 112px minmax(260px,1.8fr) minmax(220px,1.4fr);gap:10px;align-items:start;padding:10px 12px;cursor:pointer;position:relative}details.row>summary::-webkit-details-marker{display:none}details.row>summary .rowchev{color:var(--text-muted);text-align:center}details.row>summary .rowchev::after{content:"\25B8"}details.row[open]>summary .rowchev::after{content:"\25BE"}details.row[open]>summary{background:var(--surface-2)}details.row>summary:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}.reqinspect{padding:8px 14px 12px 38px;background:var(--surface)}
+.req-fail{margin:2px 0 8px;padding:8px 11px;border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:6px;background:var(--surface-2);font-size:12px}.req-fail[data-source="ccwrap"]{border-left-color:var(--danger)}.rf-head{color:var(--text);font-weight:600}.rf-msg{margin-top:4px;color:var(--text);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}.rf-hint{margin-top:4px;color:var(--text-secondary)}.rf-raw{margin:8px 0 0}.rf-pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto;font-size:11px;color:var(--text-secondary)}
 .rows .row-head{grid-template-columns:16px 92px 112px minmax(260px,1.8fr) minmax(220px,1.4fr)}.row.nf{grid-template-columns:16px 92px 112px minmax(260px,1.8fr) minmax(220px,1.4fr)}.row.nf .rowchev{visibility:hidden}.nf-note{grid-column:1/-1;color:var(--text-muted);font-size:12px;font-style:italic}
 details.req-sub{border:1px solid var(--line);border-radius:6px;margin:6px 0;background:var(--surface-2);overflow:hidden}details.req-sub>summary{list-style:none;cursor:pointer;font-size:12px;color:var(--text);padding:7px 11px}details.req-sub>summary::-webkit-details-marker{display:none}details.req-sub>summary::before{content:"\25B8  ";color:var(--text-muted)}details.req-sub[open]>summary::before{content:"\25BE  "}.req-sub .sub-body{padding:7px 11px;border-top:1px solid var(--line)}
 .hdr-sum{display:flex;gap:7px;flex-wrap:wrap;margin:4px 0 12px}.hdr-sum span{background:var(--surface);border:1px solid var(--line);border-radius:5px;padding:3px 8px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;color:var(--text-secondary)}.hdr-sum span b{color:var(--accent)}.hdr-sum span.red b{color:var(--text-muted)}.hdr-redpill{display:inline-block;font-size:9px;text-transform:uppercase;letter-spacing:.03em;color:var(--text-muted);border:1px solid var(--border);background:var(--surface);border-radius:99px;padding:0 6px;margin-left:8px}
@@ -337,7 +339,7 @@ details.req-sub{border:1px solid var(--line);border-radius:6px;margin:6px 0;back
       {{if .ActivityRows}}
       <div class="rows" role="list">
         <div class="row-head" aria-hidden="true"><div></div><div>Time</div><div>Kind</div><div>Summary</div><div>Details</div></div>
-        {{range .ActivityRows}}{{if .HeaderGroups}}<details class="row" role="listitem" data-forwarded="{{.Forwarded}}" data-kind="{{.Kind}}" data-class="{{.Class}}"{{if .StatusTier}} data-st="{{.StatusTier}}"{{end}}{{if .Category}} data-category="{{.Category}}"{{end}}{{if .ProfileName}} data-profile-name="{{.ProfileName}}" data-profile-provider="{{.ProfileProvider}}"{{end}}{{if .SwitchFrom}} data-switch-from="{{.SwitchFrom}}"{{end}}{{if .SwitchFromProvider}} data-switch-from-provider="{{.SwitchFromProvider}}"{{end}}{{if .SwitchTo}} data-switch-to="{{.SwitchTo}}"{{end}}{{if .SwitchToProvider}} data-switch-to-provider="{{.SwitchToProvider}}"{{end}}{{if .SwitchClass}} data-switch-class="{{.SwitchClass}}"{{end}}{{if .SwitchRequested}} data-switch-requested="{{.SwitchRequested}}"{{end}}{{if .SwitchReason}} data-switch-reason="{{.SwitchReason}}"{{end}}><summary><span class="rowchev" aria-hidden="true"></span><span class="cell-time">{{.Time}}</span><span class="cell-label" title="{{.Label}}">{{.Label}}</span><span class="cell-main {{if .Mono}}mono{{end}}">{{.Main}}</span><span class="cell-right">{{.Right}}</span></summary><div class="reqinspect"><details class="req-sub"><summary>request headers</summary><div class="sub-body">{{.HeaderSummary}}{{range .HeaderGroups}}<div class="hdr-group"><div class="hdr-group-name">{{.Name}}</div>{{range .Rows}}<div class="hdr-row"><span class="hdr-k mono">{{.Name}}</span><span class="hdr-v mono{{if .Redacted}} redv{{end}}">{{.Value}}{{if .Redacted}} <span class="hdr-redpill">redacted</span>{{end}}</span></div>{{end}}</div>{{end}}</div></details>{{if .BodyRefID}}{{if $.LiveEnabled}}<details class="req-sub body-drawer" data-reqid="{{.BodyRefID}}"{{if .UpstreamBodyRefID}} data-upstream-reqid="{{.UpstreamBodyRefID}}"{{end}}><summary>request body</summary><div class="sub-body body-panel">full request body — loading…</div></details>{{else}}<div class="bv-links"><a class="bv-dl" href="/recent/body?id={{.BodyRefID}}" target="_blank" rel="noopener">request body (raw JSON)</a>{{if .UpstreamBodyRefID}}<a class="bv-dl" href="/recent/body?id={{.UpstreamBodyRefID}}" target="_blank" rel="noopener">forwarded body (raw JSON)</a>{{end}}</div>{{end}}{{end}}{{if .ResponseBodyRefID}}{{if $.LiveEnabled}}<details class="req-sub body-drawer resp-drawer" data-reqid="{{.ResponseBodyRefID}}"><summary>response body</summary><div class="sub-body body-panel">response body — loading…</div></details>{{else}}<div class="bv-links"><a class="bv-dl" href="/recent/body?id={{.ResponseBodyRefID}}" target="_blank" rel="noopener">response body (raw)</a></div>{{end}}{{end}}</div></details>{{else if .TelemetryDrawer}}<details class="row" role="listitem" data-forwarded="false" data-kind="{{.Kind}}" data-class="{{.Class}}"{{if .StatusTier}} data-st="{{.StatusTier}}"{{end}}><summary><span class="rowchev" aria-hidden="true"></span><span class="cell-time">{{.Time}}</span><span class="cell-label" title="{{.Label}}">{{.Label}}</span><span class="cell-main {{if .Mono}}mono{{end}}">{{.Main}}</span><span class="cell-right">{{.Right}}</span></summary><div class="reqinspect">{{if .BodyRefID}}{{if $.LiveEnabled}}<details class="req-sub body-drawer tele-drawer" data-reqid="{{.BodyRefID}}"><summary>request body</summary><div class="sub-body body-panel">request body — loading…</div></details>{{else}}<div class="bv-links"><a class="bv-dl" href="/recent/body?id={{.BodyRefID}}" target="_blank" rel="noopener">request body (raw)</a></div>{{end}}{{end}}{{if .ResponseBodyRefID}}{{if $.LiveEnabled}}<details class="req-sub body-drawer tele-drawer" data-reqid="{{.ResponseBodyRefID}}"><summary>response body</summary><div class="sub-body body-panel">response body — loading…</div></details>{{else}}<div class="bv-links"><a class="bv-dl" href="/recent/body?id={{.ResponseBodyRefID}}" target="_blank" rel="noopener">response body (raw)</a></div>{{end}}{{end}}</div></details>{{else}}<div class="row nf" role="listitem" data-forwarded="{{.Forwarded}}" data-kind="{{.Kind}}" data-class="{{.Class}}"{{if .StatusTier}} data-st="{{.StatusTier}}"{{end}}{{if .Category}} data-category="{{.Category}}"{{end}}{{if .ProfileName}} data-profile-name="{{.ProfileName}}" data-profile-provider="{{.ProfileProvider}}"{{end}}{{if .SwitchFrom}} data-switch-from="{{.SwitchFrom}}"{{end}}{{if .SwitchFromProvider}} data-switch-from-provider="{{.SwitchFromProvider}}"{{end}}{{if .SwitchTo}} data-switch-to="{{.SwitchTo}}"{{end}}{{if .SwitchToProvider}} data-switch-to-provider="{{.SwitchToProvider}}"{{end}}{{if .SwitchClass}} data-switch-class="{{.SwitchClass}}"{{end}}{{if .SwitchRequested}} data-switch-requested="{{.SwitchRequested}}"{{end}}{{if .SwitchReason}} data-switch-reason="{{.SwitchReason}}"{{end}}><span class="rowchev" aria-hidden="true"></span><div class="cell-time">{{.Time}}</div><div class="cell-label" title="{{.Label}}">{{.Label}}</div><div class="cell-main {{if .Mono}}mono{{end}}">{{.Main}}</div><div class="cell-right">{{.Right}}</div>{{if .HeaderNote}}<div class="nf-note">{{.HeaderNote}}</div>{{end}}</div>{{end}}{{end}}
+        {{range .ActivityRows}}{{if .HeaderGroups}}<details class="row" role="listitem" data-forwarded="{{.Forwarded}}" data-kind="{{.Kind}}" data-class="{{.Class}}"{{if .StatusTier}} data-st="{{.StatusTier}}"{{end}}{{if .Category}} data-category="{{.Category}}"{{end}}{{if .ProfileName}} data-profile-name="{{.ProfileName}}" data-profile-provider="{{.ProfileProvider}}"{{end}}{{if .SwitchFrom}} data-switch-from="{{.SwitchFrom}}"{{end}}{{if .SwitchFromProvider}} data-switch-from-provider="{{.SwitchFromProvider}}"{{end}}{{if .SwitchTo}} data-switch-to="{{.SwitchTo}}"{{end}}{{if .SwitchToProvider}} data-switch-to-provider="{{.SwitchToProvider}}"{{end}}{{if .SwitchClass}} data-switch-class="{{.SwitchClass}}"{{end}}{{if .SwitchRequested}} data-switch-requested="{{.SwitchRequested}}"{{end}}{{if .SwitchReason}} data-switch-reason="{{.SwitchReason}}"{{end}}><summary><span class="rowchev" aria-hidden="true"></span><span class="cell-time">{{.Time}}</span><span class="cell-label" title="{{.Label}}">{{.Label}}</span><span class="cell-main {{if .Mono}}mono{{end}}">{{.Main}}</span><span class="cell-right">{{.Right}}</span></summary><div class="reqinspect">{{with .Failure}}<div class="req-fail" data-source="{{.Source}}"><div class="rf-head">{{.Head}}</div>{{if .Message}}<div class="rf-msg">{{.Message}}</div>{{end}}{{if .Hint}}<div class="rf-hint">{{.Hint}}</div>{{end}}{{if .Body}}<details class="req-sub rf-raw"><summary>error body{{if .Truncated}} (truncated){{end}}</summary><div class="sub-body"><pre class="rf-pre">{{.Body}}</pre></div></details>{{end}}</div>{{end}}<details class="req-sub"><summary>request headers</summary><div class="sub-body">{{.HeaderSummary}}{{range .HeaderGroups}}<div class="hdr-group"><div class="hdr-group-name">{{.Name}}</div>{{range .Rows}}<div class="hdr-row"><span class="hdr-k mono">{{.Name}}</span><span class="hdr-v mono{{if .Redacted}} redv{{end}}">{{.Value}}{{if .Redacted}} <span class="hdr-redpill">redacted</span>{{end}}</span></div>{{end}}</div>{{end}}</div></details>{{if .BodyRefID}}{{if $.LiveEnabled}}<details class="req-sub body-drawer" data-reqid="{{.BodyRefID}}"{{if .UpstreamBodyRefID}} data-upstream-reqid="{{.UpstreamBodyRefID}}"{{end}}><summary>request body</summary><div class="sub-body body-panel">full request body — loading…</div></details>{{else}}<div class="bv-links"><a class="bv-dl" href="/recent/body?id={{.BodyRefID}}" target="_blank" rel="noopener">request body (raw JSON)</a>{{if .UpstreamBodyRefID}}<a class="bv-dl" href="/recent/body?id={{.UpstreamBodyRefID}}" target="_blank" rel="noopener">forwarded body (raw JSON)</a>{{end}}</div>{{end}}{{end}}{{if .ResponseBodyRefID}}{{if $.LiveEnabled}}<details class="req-sub body-drawer resp-drawer" data-reqid="{{.ResponseBodyRefID}}"><summary>response body</summary><div class="sub-body body-panel">response body — loading…</div></details>{{else}}<div class="bv-links"><a class="bv-dl" href="/recent/body?id={{.ResponseBodyRefID}}" target="_blank" rel="noopener">response body (raw)</a></div>{{end}}{{end}}</div></details>{{else if .TelemetryDrawer}}<details class="row" role="listitem" data-forwarded="false" data-kind="{{.Kind}}" data-class="{{.Class}}"{{if .StatusTier}} data-st="{{.StatusTier}}"{{end}}><summary><span class="rowchev" aria-hidden="true"></span><span class="cell-time">{{.Time}}</span><span class="cell-label" title="{{.Label}}">{{.Label}}</span><span class="cell-main {{if .Mono}}mono{{end}}">{{.Main}}</span><span class="cell-right">{{.Right}}</span></summary><div class="reqinspect">{{if .BodyRefID}}{{if $.LiveEnabled}}<details class="req-sub body-drawer tele-drawer" data-reqid="{{.BodyRefID}}"><summary>request body</summary><div class="sub-body body-panel">request body — loading…</div></details>{{else}}<div class="bv-links"><a class="bv-dl" href="/recent/body?id={{.BodyRefID}}" target="_blank" rel="noopener">request body (raw)</a></div>{{end}}{{end}}{{if .ResponseBodyRefID}}{{if $.LiveEnabled}}<details class="req-sub body-drawer tele-drawer" data-reqid="{{.ResponseBodyRefID}}"><summary>response body</summary><div class="sub-body body-panel">response body — loading…</div></details>{{else}}<div class="bv-links"><a class="bv-dl" href="/recent/body?id={{.ResponseBodyRefID}}" target="_blank" rel="noopener">response body (raw)</a></div>{{end}}{{end}}</div></details>{{else}}<div class="row nf" role="listitem" data-forwarded="{{.Forwarded}}" data-kind="{{.Kind}}" data-class="{{.Class}}"{{if .StatusTier}} data-st="{{.StatusTier}}"{{end}}{{if .Category}} data-category="{{.Category}}"{{end}}{{if .ProfileName}} data-profile-name="{{.ProfileName}}" data-profile-provider="{{.ProfileProvider}}"{{end}}{{if .SwitchFrom}} data-switch-from="{{.SwitchFrom}}"{{end}}{{if .SwitchFromProvider}} data-switch-from-provider="{{.SwitchFromProvider}}"{{end}}{{if .SwitchTo}} data-switch-to="{{.SwitchTo}}"{{end}}{{if .SwitchToProvider}} data-switch-to-provider="{{.SwitchToProvider}}"{{end}}{{if .SwitchClass}} data-switch-class="{{.SwitchClass}}"{{end}}{{if .SwitchRequested}} data-switch-requested="{{.SwitchRequested}}"{{end}}{{if .SwitchReason}} data-switch-reason="{{.SwitchReason}}"{{end}}><span class="rowchev" aria-hidden="true"></span><div class="cell-time">{{.Time}}</div><div class="cell-label" title="{{.Label}}">{{.Label}}</div><div class="cell-main {{if .Mono}}mono{{end}}">{{.Main}}</div><div class="cell-right">{{.Right}}</div>{{if .HeaderNote}}<div class="nf-note">{{.HeaderNote}}</div>{{end}}</div>{{end}}{{end}}
       </div>
       <div class="show-more" id="activity-more" hidden><button>show more</button></div>
       {{else}}
@@ -717,6 +719,33 @@ details.req-sub{border:1px solid var(--line);border-radius:6px;margin:6px 0;back
     if (rec.synthetic) return 'SYNTHETIC';
     return rec.method || 'REQUEST';
   }
+  // requestModelLabel, failureHead and failureBrief mirror the Go
+  // ui.RequestModelLabel / RequestFailureHead / RequestFailureBrief.
+  function requestModelLabel(rec){
+    if (!rec.model) return '';
+    if (rec.upstream_model && rec.upstream_model !== rec.model) return rec.model + ' → ' + rec.upstream_model;
+    if (rec.model_unmapped) return rec.model + ' (no alias)';
+    return rec.model;
+  }
+  function failureHead(rec){
+    var f = rec.failure;
+    if (!f) return '';
+    if (f.source === 'ccwrap') return 'no upstream response';
+    return 'upstream returned ' + (rec.status_code || 0) + (f.type ? ' · ' + f.type : '');
+  }
+  function failureBrief(rec, n){
+    var m = rec.failure && rec.failure.message;
+    if (!m) return '';
+    var r = Array.from(m);
+    return r.length <= n ? m : r.slice(0, n).join('') + '…';
+  }
+  // isFailedModelRequest mirrors model.RequestRecord.FailedModelRequest:
+  // the failures the traffic cell counts and Health reacts to.
+  function isFailedModelRequest(rec){
+    if (!rec || rec.synthetic || (rec.status_code || 0) < 400) return false;
+    if (String(rec.method || '').toUpperCase() !== 'POST') return false;
+    return String(rec.path || '').split('?')[0].replace(/\/+$/, '') === '/v1/messages';
+  }
   // headerAnnotate mirrors Go headerAnnotation (expandability
   // rule) for the live activity feed. classifyHdr (used by
   // headerGroupsFor) is single-sourced from the bootstrap deny-list.
@@ -740,7 +769,7 @@ details.req-sub{border:1px solid var(--line);border-radius:6px;margin:6px 0;back
         ts: rec.timestamp,
         time: formatClock(rec.timestamp),
         label: 'error',
-        main: rec.summary || 'proxy error',
+        main: (rec.summary || 'proxy error') + (rec.count > 1 ? ' ×' + rec.count : ''),
         right: joinParts([rec.error_class || rec.severity, rec.upstream_host || rec.suggested_action || 'check ccwrap doctor']),
         kind: 'error',
         class: 'error',
@@ -771,12 +800,14 @@ details.req-sub{border:1px solid var(--line);border-radius:6px;margin:6px 0;back
       }
       return td;
     }
+    var modelLabel = requestModelLabel(rec);
+    var brief = failureBrief(rec, 60);
     var d = {
       ts: rec.timestamp,
       time: formatClock(rec.timestamp),
       label: cls,
-      main: methodLabel(rec) + ' ' + (rec.path || '/'),
-      right: joinParts([String(rec.status_code ?? ''), (rec.latency_ms || 0) + ' ms', rec.stream_state, rec.actual_upstream_host || rec.logical_target_host]),
+      main: methodLabel(rec) + ' ' + (rec.path || '/') + (modelLabel ? ' · ' + modelLabel : ''),
+      right: joinParts([String(rec.status_code ?? '') + (brief ? ' ' + brief : ''), (rec.latency_ms || 0) + ' ms', rec.stream_state, rec.actual_upstream_host || rec.logical_target_host]),
       st: statusTier(rec.status_code),
       mono: true,
       forwarded: cls === 'forwarded-api',
@@ -799,6 +830,9 @@ details.req-sub{border:1px solid var(--line);border-radius:6px;margin:6px 0;back
       // decorateProfileAnnotation can paint the hash-hued chip.
       d.profileName = String(rec.active_profile_name || '');
       d.profileProvider = String(rec.active_profile_provider || '');
+      if (rec.failure) {
+        d.failure = { source: rec.failure.source || 'upstream', head: failureHead(rec), message: rec.failure.message || '', hint: rec.failure.hint || '', body: rec.failure.body || '', truncated: !!rec.failure.truncated };
+      }
     }
     // Telemetry CONNECTs carry no headers but DO carry captured request +
     // response bodies; copy ONLY the ids, mirroring the server template's
@@ -856,6 +890,23 @@ details.req-sub{border:1px solid var(--line);border-radius:6px;margin:6px 0;back
     if (code >= 400 && code < 500) return 'warn';
     return '';
   }
+  // failurePanelEl is the JS twin of the Go template's .req-fail panel.
+  function failurePanelEl(row){
+    var f = row.failure;
+    if (!f) return null;
+    var box=document.createElement('div'); box.className='req-fail'; box.setAttribute('data-source', f.source);
+    var h=document.createElement('div'); h.className='rf-head'; h.textContent=f.head; box.appendChild(h);
+    if (f.message){ var m=document.createElement('div'); m.className='rf-msg'; m.textContent=f.message; box.appendChild(m); }
+    if (f.hint){ var hi=document.createElement('div'); hi.className='rf-hint'; hi.textContent=f.hint; box.appendChild(hi); }
+    if (f.body){
+      var raw=document.createElement('details'); raw.className='req-sub rf-raw';
+      var rs=document.createElement('summary'); rs.textContent='error body'+(f.truncated?' (truncated)':''); raw.appendChild(rs);
+      var rb=document.createElement('div'); rb.className='sub-body';
+      var pre=document.createElement('pre'); pre.className='rf-pre'; pre.textContent=f.body; rb.appendChild(pre);
+      raw.appendChild(rb); box.appendChild(raw);
+    }
+    return box;
+  }
   function makeRowEl(row){
     if (row.headerGroups){
       var d=document.createElement('details'); d.className='row'; d.setAttribute('role','listitem');
@@ -867,6 +918,7 @@ details.req-sub{border:1px solid var(--line);border-radius:6px;margin:6px 0;back
       var sm=document.createElement('summary');
       rowCells(row,'span').forEach(function(c){ sm.appendChild(c); }); d.appendChild(sm);
       var insp=document.createElement('div'); insp.className='reqinspect';
+      var fp=failurePanelEl(row); if (fp) insp.appendChild(fp);
       var hp=headerPanelEl(row); if (hp) insp.appendChild(hp);
       var bd=bodyDrawerEl(row); if (bd) insp.appendChild(bd);
       var rbd=respBodyDrawerEl(row); if (rbd) insp.appendChild(rbd);
@@ -994,13 +1046,30 @@ details.req-sub{border:1px solid var(--line);border-radius:6px;margin:6px 0;back
     var shown = document.querySelectorAll('#activity-body .rows > .row').length;
     moreWrap.hidden = !(total > shown);
   }
+  function errorHealth(rec){
+    var sev = rec && rec.severity;
+    return (sev === 'warn' || (!sev && rec && rec.error_class === 'ccwrap_auth_missing')) ? 'warn' : 'error';
+  }
+  function sameErrorRec(a, b){
+    return !!(a && b) && a.error_class === b.error_class && a.summary === b.summary && a.upstream_host === b.upstream_host && a.suggested_action === b.suggested_action;
+  }
   function patchActivity(rec, cls){
+    // The server folds a repeated error into the previous entry (count > 1):
+    // replace that entry in place instead of adding a row (recordError twin).
+    if (cls === 'error' && rec && rec.count > 1 && sameErrorRec(state.errors[0], rec)) {
+      state.errors[0] = rec;
+      rebuildActivityFromState();
+      if (state.session) { state.session.session_health = errorHealth(rec); updateHeroState(state.session); }
+      syncMore();
+      return;
+    }
     // Mirror the server retention ring: unshift then trim to RETAIN so the
     // state arrays stay bounded (no unbounded growth on a long session) and
     // refreshCounts keeps matching the server-rendered counts.
+    var failedReq = cls !== 'error' && cls !== 'trace' && isFailedModelRequest(rec);
     if (cls === 'error') { state.errors.unshift(rec); if (state.errors.length > RETAIN.errors) state.errors.length = RETAIN.errors; }
     else if (cls === 'trace') { state.trace.unshift(rec); if (state.trace.length > RETAIN.trace) state.trace.length = RETAIN.trace; }
-    else { state.requests.unshift(rec); if (state.requests.length > RETAIN.requests) state.requests.length = RETAIN.requests; if (state.session) state.session.recent_request_count = (state.session.recent_request_count||0)+1; }
+    else { state.requests.unshift(rec); if (state.requests.length > RETAIN.requests) state.requests.length = RETAIN.requests; if (state.session) { state.session.recent_request_count = (state.session.recent_request_count||0)+1; if (failedReq) state.session.recent_failed_count = (state.session.recent_failed_count||0)+1; } }
     // A newly-arrived row that does not match the active
     // filter is NOT shown but still counted. Insert a visible row ONLY
     // when it matches (or filter is 'all'); the homogeneous active-
@@ -1020,17 +1089,16 @@ details.req-sub{border:1px solid var(--line);border-radius:6px;margin:6px 0;back
       // completed over a still-pooled good conn must NOT heal away the block
       // before a fresh mirror dial resumes, or the hero would show Active while
       // new connections are being fail-closed. state.session.native_tls ===
-      // 'blocked' is the JS twin of sess.nativeTLSBlocked.
-      if (state.session && state.session.native_tls !== 'blocked') {
+      // 'blocked' is the JS twin of sess.nativeTLSBlocked. A failed model
+      // request keeps the Health its error entry set.
+      if (state.session && state.session.native_tls !== 'blocked' && !failedReq) {
         state.session.session_health = 'ok';
         updateHeroState(state.session);
       }
     } else if (cls === 'error' && state.session) {
       state.session.recent_error_count = (state.session.recent_error_count||0)+1;
       updateTrafficCell();
-      var sev = rec && rec.severity;
-      var h = (sev === 'warn' || (!sev && rec && rec.error_class === 'ccwrap_auth_missing')) ? 'warn' : 'error';
-      state.session.session_health = h;
+      state.session.session_health = errorHealth(rec);
       updateHeroState(state.session);
     }
     syncMore();
@@ -1330,8 +1398,14 @@ details.req-sub{border:1px solid var(--line);border-radius:6px;margin:6px 0;back
     if (!state.session) return;
     const v = ribbonTrafficValue();
     if (!v) return;
-    const text = (state.session.recent_request_count || 0) + ' · ' + (state.session.recent_error_count || 0);
+    const text = (state.session.recent_request_count || 0) + ' req';
     if (v.textContent !== text) v.textContent = text;
+    // The detail line carries the failed count (trafficState twin).
+    const failed = state.session.recent_failed_count || 0;
+    const cell = v.parentNode;
+    const d = cell && cell.querySelector('.d');
+    if (d && d.textContent !== failed + ' failed') d.textContent = failed + ' failed';
+    if (cell) { if (failed > 0) cell.setAttribute('data-state', 'failed'); else cell.removeAttribute('data-state'); }
   }
 
   // --- SSE wiring ---

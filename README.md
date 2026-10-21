@@ -194,6 +194,8 @@ Ctrl + 点击启动横幅里 `inspect` 后面那个本地 URL 打开 dashboard�
 
    ![image-20260620115343451](assets/image-20260620115343451.png)
 
+   不开 body 抓取也能看出请求为什么失败：每条请求都会显示模型映射（`claude-opus-4-8 → gpt-5.5`，没映射的标 `(no alias)`），失败的请求会记下上游返回的错误内容和 ccwrap 给的修复建议，展开那一行就能看到。Traffic 格子下面那行是失败的模型请求数；Claude Code 自动重试时，同样的错误会在 Errors 里合并成一条，带上重复次数。终端里的 `ccwrap dashboard` 也一样。
+
 注意：使用当前工具有可能会触发一些官方特性（比如发送 `cache_control: { scope: "global" }`，tool schema 里加 `eager_input_streaming: true`，避免大 tool input 卡死），但如果上游服务器并没有处理这方面的请求，可能会出现预期外的情况。
 
 另外，ccwrap 绕不开一些依赖于服务端的额外能力：Fast Mode 需要通过 `orgStatus` 检查、`max` effort 对上游模型能力有要求、Web Search 依赖 Anthropic 后端的搜索服务、Advisor tool 的 beta header。ccwrap 本身做的是让 Claude Code 发出去的请求体和上游是 `api.anthropic.com` 时发的一致，所以能否工作取决于网关本身是否处理了这些请求。

@@ -50,8 +50,11 @@ func TestDefaultAliasMapsOtherClaudeModels(t *testing.T) {
 		if got := requestModel(t, out); got != tc.upstream {
 			t.Errorf("%s: upstream model = %q, want %q", tc.model, got, tc.upstream)
 		}
-		if ctx.Rewritten != tc.rewritten || (tc.rewritten && (ctx.LogicalModel != tc.model || ctx.UpstreamModel != tc.upstream)) {
+		if ctx.Rewritten != tc.rewritten || ctx.LogicalModel != tc.model || ctx.UpstreamModel != tc.upstream {
 			t.Errorf("%s: ctx = %+v", tc.model, ctx)
+		}
+		if ctx.Unmapped {
+			t.Errorf("%s: unmapped with a default configured", tc.model)
 		}
 	}
 }
@@ -76,6 +79,20 @@ func TestDefaultAliasResponseRestoresTheRequestedModel(t *testing.T) {
 	out, _ := io.ReadAll(resp.Body)
 	if got := requestModel(t, out); got != "claude-fable-5-1" {
 		t.Fatalf("response model = %q, want claude-fable-5-1", got)
+	}
+}
+
+func TestUnmappedClaudeModelIsReported(t *testing.T) {
+	cfg := mustNew(t, map[string]string{"claude-opus-5-5": "gpt-6"})
+	out, ctx, err := RewriteJSONRequestBody("/v1/messages", []byte(`{"model":"claude-fable-5-1","messages":[]}`), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := requestModel(t, out); got != "claude-fable-5-1" {
+		t.Fatalf("unmapped model must pass through unchanged, got %q", got)
+	}
+	if !ctx.Unmapped || ctx.Rewritten || ctx.LogicalModel != "claude-fable-5-1" || ctx.UpstreamModel != "claude-fable-5-1" {
+		t.Fatalf("ctx = %+v", ctx)
 	}
 }
 
@@ -116,5 +133,24 @@ func TestCovers(t *testing.T) {
 		if got := tc.cfg.Covers(tc.model); got != tc.want {
 			t.Errorf("Covers(%q) with %v = %v, want %v", tc.model, tc.cfg.Forward, got, tc.want)
 		}
+	}
+}
+
+// Routes without aliases still report the request's model for the inspector,
+// and leave the body intact.
+func TestRewriteRequestNotesModelWithoutAliases(t *testing.T) {
+	body := `{"model":"claude-opus-5-5","messages":[]}`
+	req, _ := http.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", bytes.NewReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+	ctx, err := RewriteRequest(req, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ctx.LogicalModel != "claude-opus-5-5" || ctx.UpstreamModel != "claude-opus-5-5" || ctx.Rewritten || ctx.Unmapped {
+		t.Fatalf("ctx = %+v", ctx)
+	}
+	got, _ := io.ReadAll(req.Body)
+	if string(got) != body {
+		t.Fatalf("body changed: %s", got)
 	}
 }

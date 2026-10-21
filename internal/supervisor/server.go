@@ -91,9 +91,11 @@ type sessionState struct {
 	mu       sync.RWMutex
 	public   model.Session
 	requests []model.RequestRecord
-	errors   []model.ErrorRecord
-	trace    []model.TraceRecord
-	proxy    *sessionProxy
+	// failedRequests counts the FailedModelRequest records in requests.
+	failedRequests int
+	errors         []model.ErrorRecord
+	trace          []model.TraceRecord
+	proxy          *sessionProxy
 	// bodies spills captured request bodies to <RuntimeDir>/bodies
 	// when capture is enabled; the 250-ring holds only
 	// model.RequestBodyRef. Single-session supervisor ⇒ s.paths.RuntimeDir
@@ -1066,6 +1068,13 @@ func (s *Supervisor) recordRequest(id string, record model.RequestRecord) {
 	if !s.unmaskCredentials && len(record.RequestHeaders) > 0 {
 		record.RequestHeaders = ui.MaskCredentialHeaders(record.RequestHeaders)
 	}
+	failed := record.FailedModelRequest()
+	// An upstream error on a model request also goes to the error list, as a
+	// warning: it is the upstream's failure, with ccwrap's hint attached.
+	// ccwrap's own failures were already recorded where they happened.
+	if failed && record.Failure != nil && record.Failure.Source == "upstream" {
+		s.recordError(id, failureErrorRecord(record))
+	}
 	sess.mu.Lock()
 	// Ring-eviction hook: appendCapped is a generic trimmer that
 	// silently drops the oldest element(s) without telling us which —
@@ -1081,13 +1090,21 @@ func (s *Supervisor) recordRequest(id string, record model.RequestRecord) {
 	store := sess.bodies
 	sess.requests = appendCapped(sess.requests, record, maxSessionRequests)
 	sess.public.RecentRequestCount = len(sess.requests)
+	if failed {
+		sess.failedRequests++
+	}
+	if hasEvicted && evicted.FailedModelRequest() {
+		sess.failedRequests--
+	}
+	sess.public.RecentFailedCount = sess.failedRequests
 	// A successful request heals Health to ok — EXCEPT while native-TLS is
 	// blocked. While blocked, new dials fail-closed; a request that completes over
 	// a still-pooled good conn must NOT heal away the error before a mirror dial
 	// resumes, or the user never sees that new connections are being blocked.
 	// nativeTLSBlocked (set under this same sess.mu by recordNativeTLS) holds the
 	// error until a mirror dial resumes.
-	if sess.public.State != model.StateEnded && !sess.nativeTLSBlocked {
+	// A failed model request leaves Health where its error put it.
+	if sess.public.State != model.StateEnded && !sess.nativeTLSBlocked && !failed {
 		sess.public.Health = model.HealthOK
 	}
 	sess.public.UpdatedAt = time.Now()
@@ -1132,7 +1149,14 @@ func (s *Supervisor) recordError(id string, record model.ErrorRecord) {
 		record.Severity = sev
 	}
 	sess.mu.Lock()
-	sess.errors = appendCapped(sess.errors, record, maxSessionErrors)
+	// Claude Code retries a failed request several times; the same error
+	// back to back folds into one entry with a count.
+	if n := len(sess.errors); n > 0 && sameError(sess.errors[n-1], record) {
+		record.Count = max(sess.errors[n-1].Count, 1) + 1
+		sess.errors[n-1] = record
+	} else {
+		sess.errors = appendCapped(sess.errors, record, maxSessionErrors)
+	}
 	sess.public.RecentErrorCount = len(sess.errors)
 	// Health reflects the most-recent activity result; lifecycle State is
 	// untouched (the two dimensions are orthogonal). Ended is terminal.
@@ -1143,6 +1167,10 @@ func (s *Supervisor) recordError(id string, record model.ErrorRecord) {
 	sess.mu.Unlock()
 	s.touch()
 	s.broadcast("proxy_error", id, record)
+}
+
+func sameError(a, b model.ErrorRecord) bool {
+	return a.ErrorClass == b.ErrorClass && a.Summary == b.Summary && a.UpstreamHost == b.UpstreamHost && a.SuggestedAction == b.SuggestedAction
 }
 
 func (s *Supervisor) recordTrace(id string, record model.TraceRecord) {

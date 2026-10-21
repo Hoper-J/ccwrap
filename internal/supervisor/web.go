@@ -178,7 +178,64 @@ type webRow struct {
 	SwitchClass        string
 	SwitchRequested    string
 	SwitchReason       string
+	// Failure is the drawer panel for a failed request; nil otherwise.
+	Failure *webFailure
 }
+
+// webFailure is a failed request's panel in the inspect drawer: what the
+// upstream (or ccwrap) said and what to do.
+type webFailure struct {
+	Source    string // "upstream" | "ccwrap"
+	Head      string
+	Message   string
+	Hint      string
+	Body      string
+	Truncated bool
+}
+
+func webFailureFor(rec model.RequestRecord) *webFailure {
+	if rec.Failure == nil {
+		return nil
+	}
+	return &webFailure{
+		Source:    rec.Failure.Source,
+		Head:      ui.RequestFailureHead(rec),
+		Message:   rec.Failure.Message,
+		Hint:      rec.Failure.Hint,
+		Body:      rec.Failure.Body,
+		Truncated: rec.Failure.Truncated,
+	}
+}
+
+// requestRowMain is a request row's summary: method, path and model.
+func requestRowMain(rec model.RequestRecord) string {
+	main := fmt.Sprintf("%s %s", rec.MethodLabel(), fallback(rec.Path, "/"))
+	if label := ui.RequestModelLabel(rec); label != "" {
+		main += " · " + label
+	}
+	return main
+}
+
+// errorRowMain is an error row's summary, with the repeat count.
+func errorRowMain(rec model.ErrorRecord) string {
+	main := fallback(rec.Summary, "proxy error")
+	if rec.Count > 1 {
+		main += fmt.Sprintf(" ×%d", rec.Count)
+	}
+	return main
+}
+
+// trafficState marks the Traffic cell when model requests failed, so the
+// "N failed" line stands out.
+func trafficState(failed int) string {
+	if failed > 0 {
+		return "failed"
+	}
+	return ""
+}
+
+// failureBriefMax bounds the failure message shown on a request row.
+const failureBriefMax = 60
 
 // web.tmpl is the entire dashboard: one self-contained html/template page.
 // Its editing constraints ({{...}} parsed anywhere including JS comments,
@@ -254,7 +311,7 @@ func webSummaryFromSession(sess model.Session) []webKV {
 // reflected through sess.CaptureBodies — click → POST /capture/bodies
 // hot-swaps the route via Supervisor.SetCaptureBodies; SSE session_updated
 // patches the cell live.
-func webRibbonFromSession(sess model.Session, lastActivityLabel string, hasProfilesFile bool, profileCount int) []webKV {
+func webRibbonFromSession(sess model.Session, hasProfilesFile bool, profileCount int) []webKV {
 	// Models cell. The zero-alias state
 	// renders "default" instead of empty/em-dash so the cell signals
 	// "claude-code's own model names pass through unchanged" rather
@@ -287,7 +344,7 @@ func webRibbonFromSession(sess model.Session, lastActivityLabel string, hasProfi
 		{Label: "Route", Value: ui.HumanRouteClass(sess.RouteClass), Detail: strings.ToLower(ui.HumanRouteSource(sess.RouteSource))},
 		{Label: "Auth", Value: authValue, Detail: authDetail, DataState: authState},
 		{Label: "Models", Value: models, DataState: modelsState},
-		{Label: trafficLabel, Value: fmt.Sprintf("%d · %d", sess.RecentRequestCount, sess.RecentErrorCount), Detail: lastActivityLabel, Mono: true},
+		{Label: trafficLabel, Value: fmt.Sprintf("%d req", sess.RecentRequestCount), Detail: fmt.Sprintf("%d failed", sess.RecentFailedCount), DataState: trafficState(sess.RecentFailedCount), Mono: true},
 		{Label: "Profile", ValueHTML: chip, Detail: profileDetail(sess, hasProfilesFile, profileCount), DataState: profileCellDataState(sess, hasProfilesFile)},
 		{Label: "Bodies", Value: bodiesValue, Detail: bodiesDetail, DataState: bodiesState},
 		{Label: "Egress", Value: egressValue, Detail: egressDetail, Mono: egressMono},
@@ -701,7 +758,7 @@ func unifiedActivityRows(requests []model.RequestRecord, errors []model.ErrorRec
 		row := webRow{
 			Time:       webClock(rec.Timestamp),
 			Label:      cls,
-			Main:       fmt.Sprintf("%s %s", rec.MethodLabel(), fallback(rec.Path, "/")),
+			Main:       requestRowMain(rec),
 			Right:      formatRequestDetail(rec, includeSession),
 			Mono:       true,
 			Forwarded:  cls == "forwarded-api",
@@ -757,6 +814,7 @@ func unifiedActivityRows(requests []model.RequestRecord, errors []model.ErrorRec
 			if rec.ResponseBodyRef != nil {
 				row.ResponseBodyRefID = rec.ResponseBodyRef.ID
 			}
+			row.Failure = webFailureFor(rec)
 		}
 		// Telemetry-MITM CONNECTs (allowlisted Datadog hosts) capture the
 		// request + response bodies even though there are no headers. A
@@ -785,7 +843,7 @@ func unifiedActivityRows(requests []model.RequestRecord, errors []model.ErrorRec
 		rows = append(rows, timedRow{when: rec.Timestamp, row: webRow{
 			Time:  webClock(rec.Timestamp),
 			Label: "error",
-			Main:  fallback(rec.Summary, "proxy error"),
+			Main:  errorRowMain(rec),
 			Right: fallback(right, "check ccwrap doctor"),
 			Kind:  "error",
 			Class: "error",
@@ -923,8 +981,12 @@ func webClock(ts time.Time) string {
 }
 
 func formatRequestDetail(rec model.RequestRecord, includeSession bool) string {
+	status := fmt.Sprintf("%d", rec.StatusCode)
+	if brief := ui.RequestFailureBrief(rec, failureBriefMax); brief != "" {
+		status += " " + brief
+	}
 	right := joinParts(
-		fmt.Sprintf("%d", rec.StatusCode),
+		status,
 		fmt.Sprintf("%d ms", rec.LatencyMS),
 		string(rec.StreamState),
 		fallback(rec.ActualUpstreamHost, rec.LogicalTargetHost),

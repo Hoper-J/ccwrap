@@ -799,7 +799,7 @@ func TestPrintStatusStructure(t *testing.T) {
 		"CCWRAP holds your gateway credentials", // posture
 		"proxy", "route", "Gateway", "auth", "CCWRAP-owned · fail-closed",
 		"models", "1 alias", // count-only for status
-		"traffic", "9 req", "0 err",
+		"traffic", "9 req", "0 failed",
 	)
 	mustNotContain(t, out, "74c5fcaf812ff6d5")
 	mustNotContain(t, out, "ccwrap_override_fail_closed")

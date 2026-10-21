@@ -155,6 +155,27 @@ func TestErrorRowsSurfaceSuggestedAction(t *testing.T) {
 	}
 }
 
+// Request rows show the model mapping; a failed request carries its reason
+// and ccwrap's hint on the next line; repeated errors show their count.
+func TestRequestRowsShowModelAndFailure(t *testing.T) {
+	pal := ui.New(false)
+	rows := renderRequestRows(pal, []model.RequestRecord{
+		{Method: "POST", Path: "/v1/messages?beta=true", StatusCode: 200, Model: "claude-opus-5-5", UpstreamModel: "gpt-6"},
+		{Method: "POST", Path: "/v1/messages?beta=true", StatusCode: 404, Model: "claude-fable-5-1", UpstreamModel: "claude-fable-5-1", ModelUnmapped: true,
+			Failure: &model.RequestFailure{Source: "upstream", Type: "not_found_error", Message: "model not found", Hint: "add an alias"}},
+	}, 6)
+	joined := strings.Join(rows, "\n")
+	mustContainLines(t, joined, "claude-opus-5-5 → gpt-6", "claude-fable-5-1 (no alias)",
+		"↳ not_found_error: model not found · add an alias")
+	if len(rows) != 3 {
+		t.Fatalf("want 2 request lines + 1 failure line, got %d:\n%s", len(rows), joined)
+	}
+	errs := strings.Join(renderErrorRows(pal, []model.ErrorRecord{{ErrorClass: "upstream_http_404", Summary: "fable 404", Count: 3}}, 6), "\n")
+	mustContainLines(t, errs, "fable 404 ×3")
+	summary := strings.Join(renderSummaryLines(pal, &model.Session{RecentRequestCount: 5, RecentFailedCount: 2}), "\n")
+	mustContainLines(t, summary, "5 req · 2 failed")
+}
+
 func TestChooseDiscoveredEmpty(t *testing.T) {
 	if chooseDiscovered(nil, "") != nil {
 		t.Fatal("expected nil for empty sessions")

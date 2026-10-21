@@ -1720,7 +1720,7 @@ func printStatus(discovered []model.DiscoveredSession, sessions []*model.Session
 		if eg := ui.HumanEgress(sess.EgressMode, sess.EgressSource, sess.EgressSummary); eg != "Direct" {
 			fmt.Println("  " + pal.Dim("egress") + "    " + eg)
 		}
-		fmt.Println("  " + pal.Dim("traffic") + "   " + fmt.Sprintf("%d req · %d err", sess.RecentRequestCount, sess.RecentErrorCount))
+		fmt.Println("  " + pal.Dim("traffic") + "   " + fmt.Sprintf("%d req · %d failed", sess.RecentRequestCount, sess.RecentFailedCount))
 		fmt.Println()
 	}
 }
