@@ -938,6 +938,9 @@ func (sp *sessionProxy) handleForwardProxyRequest(w http.ResponseWriter, r *http
 	proxy := &httputil.ReverseProxy{
 		Transport:     sp.upstreamTransportFor(logicalHost, ap.r.egress, ap.l.nativeTLS),
 		FlushInterval: -1,
+		// httputil logs mid-stream copy errors; the launcher's stderr is Claude
+		// Code's terminal, so they go to the session log instead.
+		ErrorLog: sp.supervisor.logger,
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.Out.URL = cloneURL(target)
 			pr.Out.Host = target.Host
@@ -1268,6 +1271,7 @@ func (sp *sessionProxy) telemetryMITMHandler(host string) http.Handler {
 		proxy := &httputil.ReverseProxy{
 			Transport:     sp.upstreamTransport(ap.r.egress),
 			FlushInterval: -1,
+			ErrorLog:      sp.supervisor.logger,
 			Rewrite: func(pr *httputil.ProxyRequest) {
 				// Transparent: target the telemetry host (or test override),
 				// keep path/query, strip hop-by-hop proxy headers. NO auth, NO
@@ -1751,6 +1755,7 @@ func (sp *sessionProxy) mitmHandler(logicalHost string) http.Handler {
 		proxy := &httputil.ReverseProxy{
 			Transport:     upstreamTr,
 			FlushInterval: -1,
+			ErrorLog:      sp.supervisor.logger,
 			Rewrite: func(pr *httputil.ProxyRequest) {
 				target := joinTargetURL(baseForRequest, pr.In.URL)
 				pr.Out.URL = target
