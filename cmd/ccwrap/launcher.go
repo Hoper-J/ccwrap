@@ -7,15 +7,18 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Hoper-J/ccwrap/internal/app"
 	"github.com/Hoper-J/ccwrap/internal/certs"
 	"github.com/Hoper-J/ccwrap/internal/control"
 	"github.com/Hoper-J/ccwrap/internal/egress"
+	"github.com/Hoper-J/ccwrap/internal/manifest"
 	"github.com/Hoper-J/ccwrap/internal/model"
 	"github.com/Hoper-J/ccwrap/internal/preflight"
 	"github.com/Hoper-J/ccwrap/internal/procmeta"
@@ -481,4 +484,94 @@ func (l *sessionLauncher) Wait() (int, error) {
 		}
 		return 0, fmt.Errorf("supervisor exited before Claude (proxy no longer available)")
 	}
+}
+
+func writeManifest(sessionDir, controlSocket string, sess *model.Session, eg model.EgressConfig) error {
+	if sess == nil {
+		return fmt.Errorf("nil session")
+	}
+	startToken, err := procmeta.CurrentStartToken()
+	if err != nil {
+		return fmt.Errorf("resolve supervisor start token: %w", err)
+	}
+	m := model.SessionManifest{
+		SessionID:                          sess.ID,
+		CreatedAt:                          sess.CreatedAt,
+		UpdatedAt:                          time.Now(),
+		State:                              sess.State,
+		SupervisorPID:                      os.Getpid(),
+		SupervisorStartToken:               startToken,
+		ClaudePID:                          sess.ClaudePID,
+		Name:                               sess.Name,
+		ControlSocket:                      controlSocket,
+		ProxyListenAddr:                    sess.ProxyListenAddr,
+		ProxyInfoURL:                       proxyInfoURL(sess.ProxyListenAddr),
+		RouteClass:                         sess.RouteClass,
+		RouteSource:                        sess.RouteSource,
+		RouteConfigSource:                  sess.RouteConfigSource,
+		ExactUpstreamBase:                  sess.ExactUpstreamBase,
+		AuthMode:                           sess.AuthMode,
+		AuthSource:                         sess.AuthSource,
+		AuthConfigSource:                   sess.AuthConfigSource,
+		AuthPolicy:                         sess.AuthPolicy,
+		AuthBootstrap:                      sess.AuthBootstrap,
+		AuthBootstrapKind:                  sess.AuthBootstrapKind,
+		EgressMode:                         eg.Mode,
+		EgressSource:                       eg.Source,
+		EgressSummary:                      egress.Summary(eg),
+		ModelAliasMode:                     sess.ModelAliasMode,
+		ModelAliasSource:                   sess.ModelAliasSource,
+		ModelAliasCount:                    sess.ModelAliasCount,
+		ModelAliasProviderModelPassthrough: sess.ModelAliasProviderModelPassthrough,
+		ModelAliasFingerprint:              sess.ModelAliasFingerprint,
+	}
+	return manifest.Write(manifest.Path(sessionDir), m)
+}
+
+func waitForControl(ctx context.Context, client *control.Client) error {
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		if _, err := client.Status(ctx); err == nil {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("session supervisor did not become ready on %s", client.SocketPath())
+}
+
+func forwardSignalsToChild(cancel context.CancelFunc, p *os.Process) func() {
+	sigCh := make(chan os.Signal, 8)
+	stopCh := make(chan struct{})
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
+	go func() {
+		for {
+			select {
+			case sig := <-sigCh:
+				if p != nil {
+					_ = p.Signal(sig)
+				}
+				if cancel != nil {
+					cancel()
+				}
+			case <-stopCh:
+				return
+			}
+		}
+	}()
+	return func() {
+		signal.Stop(sigCh)
+		close(stopCh)
+	}
+}
+
+func nilSafeSettings(parsed *settings.ParsedFlagSettings) map[string]any {
+	if parsed == nil || parsed.Settings == nil {
+		return nil
+	}
+	return parsed.Settings
 }
