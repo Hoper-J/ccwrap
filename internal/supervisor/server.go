@@ -68,8 +68,11 @@ type LaunchContext struct {
 }
 
 // lookupEnv returns the value for key in a []string of "KEY=VALUE" entries
-// (os.Environ() shape). Returns "" when key is absent.
+// (os.Environ() shape). Returns "" when key is empty or absent.
 func lookupEnv(env []string, key string) string {
+	if key == "" {
+		return ""
+	}
 	prefix := key + "="
 	for _, kv := range env {
 		if strings.HasPrefix(kv, prefix) {
@@ -1123,8 +1126,8 @@ func (s *Supervisor) recordRequest(id string, record model.RequestRecord) {
 // record. A captured record can spill THREE files: BodyRef (the client-view
 // body), UpstreamBodyRef (the post-modelalias-rewrite body, present only when
 // the rewrite mutated the body), and ResponseBodyRef (the captured upstream
-// RESPONSE body, present only on the telemetry-MITM path). All must be deleted
-// on eviction or the spilled file orphans on disk for the rest of the session.
+// RESPONSE body). All must be deleted on eviction or the spilled file orphans
+// on disk for the rest of the session.
 // bodyStore.delete is async and own-locked; the caller must NOT
 // hold sess.mu.
 func evictBodyFiles(store *bodyStore, evicted model.RequestRecord) {

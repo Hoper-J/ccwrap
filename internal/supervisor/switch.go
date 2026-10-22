@@ -102,7 +102,7 @@ func sanitizeSwitchError(err error, in *preflight.ProfileInput, envSnapshot []st
 	// 3. in.Auth.KeyEnv name + its resolved value:
 	if in != nil && in.Auth != nil && strings.TrimSpace(in.Auth.KeyEnv) != "" {
 		envName := in.Auth.KeyEnv
-		envValue := lookupEnvSnapshot(envSnapshot, envName)
+		envValue := lookupEnv(envSnapshot, envName)
 		// Scrub value FIRST (longer string, more specific), then name.
 		if envValue != "" {
 			msg = strings.ReplaceAll(msg, envValue, "<redacted-key-env-value>")
@@ -142,22 +142,6 @@ func scrubURLUserinfo(s string) string {
 		}
 		return m[:schemeEnd+3] + "<redacted>@" + m[schemeEnd+3+atIdx+1:]
 	})
-}
-
-// lookupEnvSnapshot finds the value for name in an os.Environ()-shape
-// ["KEY=VALUE", ...] slice. Returns "" if not found or unset. Used SOLELY for
-// scrub purposes — never logged.
-func lookupEnvSnapshot(envSnapshot []string, name string) string {
-	if name == "" {
-		return ""
-	}
-	prefix := name + "="
-	for _, kv := range envSnapshot {
-		if strings.HasPrefix(kv, prefix) {
-			return kv[len(prefix):]
-		}
-	}
-	return ""
 }
 
 // classifySwitchErrorReason returns a stable, non-secret reason code based on

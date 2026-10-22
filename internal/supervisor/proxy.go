@@ -19,11 +19,9 @@ import (
 
 	"github.com/Hoper-J/ccwrap/internal/egress"
 	"github.com/Hoper-J/ccwrap/internal/model"
-	"github.com/Hoper-J/ccwrap/internal/modelalias"
 	"github.com/Hoper-J/ccwrap/internal/profiles"
 	"github.com/Hoper-J/ccwrap/internal/tlsfp"
 	"github.com/Hoper-J/ccwrap/internal/ui"
-	"github.com/Hoper-J/ccwrap/internal/upstreamheaders"
 )
 
 type sessionProxy struct {
@@ -793,12 +791,12 @@ func (sp *sessionProxy) handleForwardProxyRequest(w http.ResponseWriter, r *http
 	start := time.Now()
 	// Per-request capture: snapshot the immutable posture at handler
 	// entry, BEFORE any routing read. Every routing decision in this request
-	// (third-party blocker, resolveForwardTarget, transport, upstream headers,
-	// auth override, capture-bodies gate, record stamping) closes over this
-	// `ap` — a mid-request Store(B) cannot tear the in-flight request.
-	// createSession installs a safe-zero *posture, so ap is never nil
-	// here; the defensive nil-coerce is belt-and-suspenders against any future
-	// regression. The seam fires once per ServeHTTP entry; nil in production.
+	// (third-party blocker, resolveForwardTarget, and everything in
+	// forwardToUpstream) closes over this `ap` — a mid-request Store(B)
+	// cannot tear the in-flight request. createSession installs a safe-zero
+	// *posture, so ap is never nil here; the defensive nil-coerce is
+	// belt-and-suspenders against any future regression. The seam fires once
+	// per ServeHTTP entry; nil in production.
 	ap := sp.session.active.Load()
 	if ap == nil {
 		ap = &posture{}
@@ -811,16 +809,7 @@ func (sp *sessionProxy) handleForwardProxyRequest(w http.ResponseWriter, r *http
 	}
 	target, logicalHost, actualUpstreamHost, applyAuth, errClass, err := sp.resolveForwardTarget(r, ap)
 	if err != nil {
-		sp.supervisor.recordError(sp.session.public.ID, model.ErrorRecord{
-			Timestamp:       time.Now(),
-			SessionID:       sp.session.public.ID,
-			Severity:        "error",
-			ErrorClass:      errClass,
-			Summary:         err.Error(),
-			UpstreamHost:    logicalHost,
-			SuggestedAction: routeSuggestion(errClass),
-		})
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		sp.refuseUnroutable(w, logicalHost, errClass, err)
 		return
 	}
 	// Request-time fail-closed. Forwarding to an Anthropic API host without a
@@ -837,187 +826,12 @@ func (sp *sessionProxy) handleForwardProxyRequest(w http.ResponseWriter, r *http
 		Summary:   "forwarding plain HTTP request",
 		Detail:    fmt.Sprintf("%s %s -> %s", r.Method, redactedForwardProxyURL(r.URL), target.Host),
 	})
-	// Capture tap, before ServeHTTP forwards/consumes the body.
-	// Synthetic/blocked requests returned earlier via
-	// handleThirdPartySyntheticOrBlock and never reach here. This tee MUST
-	// precede any r.Body-consuming step — both modelalias.RewriteRequest (next)
-	// and proxy.ServeHTTP (below).
-	var bodyRefForThisRequest *model.RequestBodyRef
-	if ap.l.captureBodies && r.Body != nil {
-		b, rerr := io.ReadAll(r.Body)
-		_ = r.Body.Close()
-		r.Body = io.NopCloser(bytes.NewReader(b))
-		r.ContentLength = int64(len(b))
-		// Best-effort, faithfulness-first: only record a BodyRef when the
-		// full inbound body was read. On a read error the (partial) body is
-		// still forwarded unchanged, but it is NOT spilled — the inspector
-		// must never show a silently-truncated body as complete. Disk-write
-		// failure is handled separately (endpoint 404).
-		if st := sp.session.bodies; st != nil && rerr == nil && len(b) > 0 {
-			// OAuth-host bodies: redact JSON-field credentials
-			// (refresh_token, access_token, ...) before spilling. The
-			// original `b` already went to r.Body above, so the upstream
-			// still receives the unmodified body — redaction affects only
-			// the ccwrap-internal observability surface (drawer + spill file).
-			spillBytes := b
-			if shouldRedactBody(logicalHost, r.URL.Path) {
-				spillBytes = redactJSONBody(b, sp.supervisor.unmaskCredentials)
-			}
-			bodyRefForThisRequest = st.put(newBodyID(), spillBytes)
-		}
-	}
-	// Model alias rewrite. Mirrors the mitmHandler hook so HTTP forward
-	// and CONNECT/MITM paths apply aliasing identically — without this,
-	// a third-party gateway profile configured with mode=http base_url
-	// would have logical model IDs (e.g. "claude-haiku-4-5") leak to the
-	// upstream when the client used plain-HTTP proxy semantics. Same
-	// applyAuth gate as the MITM path (isAnthropicAPIHost on logical),
-	// same error class, same fail-closed BadGateway disposition.
-	var aliasCtx *modelalias.Context
-	if applyAuth {
-		var rewriteErr error
-		aliasCtx, rewriteErr = modelalias.RewriteRequest(r, ap.r.modelAlias)
-		if rewriteErr != nil {
-			sp.supervisor.recordError(sp.session.public.ID, model.ErrorRecord{
-				Timestamp:       time.Now(),
-				SessionID:       sp.session.public.ID,
-				Severity:        "error",
-				ErrorClass:      "model_alias_rewrite_failed",
-				Summary:         rewriteErr.Error(),
-				UpstreamHost:    logicalHost,
-				SuggestedAction: "use Claude logical model IDs and configure CCWRAP modelAliases for provider-specific upstream IDs",
-			})
-			// Anchor the spilled inbound body to a partial RequestRecord
-			// so the inspect drawer can still surface what was attempted.
-			// Without this, captureBodies=on + rewrite-rejected requests
-			// leave orphan body files on disk (bounded by bodystore LRU,
-			// but unreachable through /recent). Mirrors the same pattern
-			// in mitmHandler.
-			sp.supervisor.recordRequest(sp.session.public.ID, model.RequestRecord{
-				// Timestamp is the request boundary (handler entry), matching
-				// the success path below. Latency runs from start to the
-				// rewrite-rejection point. Stamping time.Now() (the failure
-				// moment) here would order the record after a sibling success
-				// that entered the handler later.
-				Timestamp:             start,
-				SessionID:             sp.session.public.ID,
-				Method:                r.Method,
-				LogicalTargetHost:     logicalHost,
-				ActualUpstreamHost:    actualUpstreamHost,
-				Path:                  pathForRecord(r.URL, isAnthropicHost(logicalHost)),
-				StatusCode:            http.StatusBadGateway,
-				LatencyMS:             time.Since(start).Milliseconds(),
-				StreamState:           model.StreamStateUnknown,
-				RequestHeaders:        r.Header.Clone(),
-				BodyRef:               bodyRefForThisRequest,
-				ActiveProfileName:     ap.r.profileName,
-				ActiveProfileProvider: ap.r.profileProvider,
-			})
-			http.Error(w, rewriteErr.Error(), http.StatusBadGateway)
-			return
-		}
-	}
-	// Upstream-view tap: same rationale as in mitmHandler. Captures the
-	// post-rewrite body so the inspect drawer can show what actually
-	// reached the upstream. Skip when modelalias did not rewrite — the
-	// drawer's "upstream body" is identical to the inbound capture and
-	// a duplicate spill wastes disk.
-	var upstreamBodyRefForThisRequest *model.RequestBodyRef
-	if ap.l.captureBodies && aliasCtx != nil && aliasCtx.Rewritten && r.Body != nil {
-		b, rerr := io.ReadAll(r.Body)
-		_ = r.Body.Close()
-		r.Body = io.NopCloser(bytes.NewReader(b))
-		r.ContentLength = int64(len(b))
-		if st := sp.session.bodies; st != nil && rerr == nil && len(b) > 0 {
-			spillBytes := b
-			if shouldRedactBody(logicalHost, r.URL.Path) {
-				spillBytes = redactJSONBody(b, sp.supervisor.unmaskCredentials)
-			}
-			upstreamBodyRefForThisRequest = st.put(newBodyID(), spillBytes)
-		}
-	}
-	tap := newFailureTap(ap, aliasCtx, sp.supervisor.unmaskCredentials)
-	proxy := &httputil.ReverseProxy{
-		Transport:     sp.upstreamTransportFor(logicalHost, ap.r.egress, ap.l.nativeTLS),
-		FlushInterval: -1,
-		// httputil logs mid-stream copy errors; the launcher's stderr is Claude
-		// Code's terminal, so they go to the session log instead.
-		ErrorLog: sp.supervisor.logger,
-		Rewrite: func(pr *httputil.ProxyRequest) {
-			pr.Out.URL = cloneURL(target)
-			pr.Out.Host = target.Host
-			pr.Out.RequestURI = ""
-			pr.Out.Header.Del("Proxy-Connection")
-			pr.Out.Header.Del("Proxy-Authorization")
-			// When modelalias normalizes the response body, we must see
-			// an uncompressed upstream stream (RewriteResponse re-encodes
-			// the logical-name mapping). Mirrors mitmHandler.
-			if aliasCtx != nil && aliasCtx.NormalizeResponse {
-				pr.Out.Header.Set("Accept-Encoding", "identity")
-			}
-			if applyAuth {
-				upstreamheaders.Apply(pr.Out.Header, copyUpstreamHeaders(ap.r.upstreamHeaders.Headers))
-				applyAuthOverride(pr.Out.Header, ap.r.overrideAuth)
-			}
-		},
-		ModifyResponse: func(resp *http.Response) error {
-			if err := modelalias.RewriteResponse(resp, aliasCtx); err != nil {
-				return err
-			}
-			tap.observe(resp)
-			return nil
-		},
-		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			cls := classifyUpstreamError(err, errClass)
-			tap.noUpstream(err.Error(), routeSuggestion(cls))
-			sp.supervisor.recordError(sp.session.public.ID, model.ErrorRecord{
-				Timestamp:       time.Now(),
-				SessionID:       sp.session.public.ID,
-				Severity:        "error",
-				ErrorClass:      cls,
-				Summary:         err.Error(),
-				UpstreamHost:    actualUpstreamHost,
-				SuggestedAction: routeSuggestion(cls),
-			})
-			sp.supervisor.recordTrace(sp.session.public.ID, model.TraceRecord{
-				Timestamp: time.Now(),
-				SessionID: sp.session.public.ID,
-				Category:  "upstream",
-				Summary:   "forward proxy request failed",
-				Detail:    err.Error(),
-			})
-			http.Error(w, err.Error(), http.StatusBadGateway)
-		},
-	}
-	rw := newCaptureResponseWriter(w)
-	proxy.ServeHTTP(rw, r)
-	latency := time.Since(start)
-	record := model.RequestRecord{
-		Timestamp:          start,
-		SessionID:          sp.session.public.ID,
-		Method:             r.Method,
-		LogicalTargetHost:  logicalHost,
-		ActualUpstreamHost: actualUpstreamHost,
-		Path:               pathForRecord(r.URL, isAnthropicHost(logicalHost)),
-		StatusCode:         rw.StatusCode(),
-		LatencyMS:          latency.Milliseconds(),
-		StreamState:        detectStreamState(r, rw.HeaderSnapshot()),
-		// Inbound headers, cloned (the record outlives the request in a
-		// 250-deep ring; do not alias r.Header).
-		RequestHeaders: r.Header.Clone(),
-		// File-backed body ref (nil unless capture on).
-		BodyRef: bodyRefForThisRequest,
-		// Post-rewrite body — nil unless modelalias actually changed it.
-		UpstreamBodyRef: upstreamBodyRefForThisRequest,
-		// Stamp identity from the captured *posture — the same
-		// posture the request was routed under, so a post-switch request
-		// in flight is recorded against the posture-it-ran-on, not the
-		// latest posture.
-		ActiveProfileName:     ap.r.profileName,
-		ActiveProfileProvider: ap.r.profileProvider,
-	}
-	tap.stamp(&record)
-	sp.supervisor.recordRequest(sp.session.public.ID, record)
+	sp.forwardToUpstream(w, r, ap, start, forwardTarget{
+		logicalHost:  logicalHost,
+		upstreamHost: actualUpstreamHost,
+		applyAuth:    applyAuth,
+		url:          func(*url.URL) *url.URL { return cloneURL(target) },
+	})
 }
 
 func pathForRecord(u *url.URL, isAnthropicUpstream bool) string {
@@ -1597,8 +1411,7 @@ func (sp *sessionProxy) mitmHandler(logicalHost string) http.Handler {
 		clientOrder := popWireOrder(r)
 		// Per-request capture: snapshot the immutable posture at handler
 		// entry, BEFORE any routing read. Every routing decision (third-party
-		// blocker, resolveUpstream, capture-bodies gate, model alias rewrite,
-		// transport selection, upstream headers + auth override in the closure)
+		// blocker, resolveUpstream, and everything in forwardToUpstream)
 		// closes over `ap` — a mid-request Store(B) cannot tear the in-flight
 		// request. createSession installs a safe-zero *posture; the
 		// defensive nil-coerce is belt-and-suspenders. The hook fires once per
@@ -1610,32 +1423,12 @@ func (sp *sessionProxy) mitmHandler(logicalHost string) http.Handler {
 		if testHookAfterApCapture != nil {
 			testHookAfterApCapture()
 		}
-		// Declared here so it is in scope at the recordRequest call
-		// below; set only by the pre-rewrite tee. Synthetic/blocked
-		// requests return before the tee ⇒ stays nil.
-		var bodyRefForThisRequest *model.RequestBodyRef
 		if sp.handleThirdPartySyntheticOrBlock(w, r, logicalHost, start, ap) {
 			return
 		}
 		base, upstreamHost, errClass, err := sp.resolveUpstream(logicalHost, ap)
 		if err != nil {
-			sp.supervisor.recordError(sp.session.public.ID, model.ErrorRecord{
-				Timestamp:       time.Now(),
-				SessionID:       sp.session.public.ID,
-				Severity:        "error",
-				ErrorClass:      errClass,
-				Summary:         err.Error(),
-				UpstreamHost:    logicalHost,
-				SuggestedAction: routeSuggestion(errClass),
-			})
-			sp.supervisor.recordTrace(sp.session.public.ID, model.TraceRecord{
-				Timestamp: time.Now(),
-				SessionID: sp.session.public.ID,
-				Category:  "route",
-				Summary:   "route resolution failed",
-				Detail:    err.Error(),
-			})
-			http.Error(w, err.Error(), http.StatusBadGateway)
+			sp.refuseUnroutable(w, logicalHost, errClass, err)
 			return
 		}
 		sp.supervisor.recordTrace(sp.session.public.ID, model.TraceRecord{
@@ -1649,8 +1442,6 @@ func (sp *sessionProxy) mitmHandler(logicalHost string) http.Handler {
 			// — logicalHost is a host label.
 			Detail: fmt.Sprintf("%s -> %s", logicalHost, stripUserinfoString(base.String())),
 		})
-		baseForRequest := cloneURL(base)
-		upstreamHostForRequest := upstreamHost
 		applyAuth := isAnthropicAPIHost(logicalHost)
 		// Request-time fail-closed at the MITM boundary. Mirrors the gate in
 		// handleForwardProxyRequest — same invariant applied at both
@@ -1658,230 +1449,18 @@ func (sp *sessionProxy) mitmHandler(logicalHost string) http.Handler {
 		if sp.maybeRefuseAuthMissing(w, r, ap, applyAuth, logicalHost, start) {
 			return
 		}
-		// Capture tap. MUST be BEFORE modelalias.RewriteRequest below: the
-		// rewrite consumes/replaces r.Body, so a post-rewrite tap sees nothing
-		// (empirically established). Tee once, restore r.Body for the forward,
-		// hand the buffer to the async writer.
-		if ap.l.captureBodies && r.Body != nil {
-			b, rerr := io.ReadAll(r.Body)
-			_ = r.Body.Close()
-			r.Body = io.NopCloser(bytes.NewReader(b))
-			r.ContentLength = int64(len(b))
-			// Best-effort, faithfulness-first: only record a BodyRef when the
-			// full inbound body was read. On a read error the (partial) body is
-			// still forwarded unchanged, but it is NOT spilled — the inspector
-			// must never show a silently-truncated body as complete. Disk-write
-			// failure is handled separately (endpoint 404).
-			if st := sp.session.bodies; st != nil && rerr == nil && len(b) > 0 {
-				// OAuth-host bodies: redact JSON-field credentials
-				// (refresh_token, access_token, ...) before spilling. The
-				// original `b` already went to r.Body above, so the upstream
-				// still receives the unmodified body — redaction affects only
-				// the ccwrap-internal observability surface (drawer + spill file).
-				spillBytes := b
-				if shouldRedactBody(logicalHost, r.URL.Path) {
-					spillBytes = redactJSONBody(b, sp.supervisor.unmaskCredentials)
-				}
-				bodyRefForThisRequest = st.put(newBodyID(), spillBytes)
-			}
-		}
-		var aliasCtx *modelalias.Context
-		if applyAuth {
-			aliasCtx, err = modelalias.RewriteRequest(r, ap.r.modelAlias)
-			if err != nil {
-				sp.supervisor.recordError(sp.session.public.ID, model.ErrorRecord{
-					Timestamp:       time.Now(),
-					SessionID:       sp.session.public.ID,
-					Severity:        "error",
-					ErrorClass:      "model_alias_rewrite_failed",
-					Summary:         err.Error(),
-					UpstreamHost:    logicalHost,
-					SuggestedAction: "use Claude logical model IDs and configure CCWRAP modelAliases for provider-specific upstream IDs",
-				})
-				// Anchor the spilled inbound body to a partial RequestRecord
-				// so the inspect drawer surfaces what was attempted. Without
-				// this, captureBodies=on + rewrite-rejected requests leave
-				// orphan body files on disk (bounded by bodystore LRU but
-				// unreachable through /recent).
-				sp.supervisor.recordRequest(sp.session.public.ID, model.RequestRecord{
-					// Timestamp is the request boundary (handler entry), matching
-					// the success path below.
-					Timestamp:             start,
-					SessionID:             sp.session.public.ID,
-					Method:                r.Method,
-					LogicalTargetHost:     logicalHost,
-					ActualUpstreamHost:    upstreamHostForRequest,
-					Path:                  pathAndQuery(r.URL),
-					StatusCode:            http.StatusBadGateway,
-					LatencyMS:             time.Since(start).Milliseconds(),
-					StreamState:           model.StreamStateUnknown,
-					RequestHeaders:        r.Header.Clone(),
-					BodyRef:               bodyRefForThisRequest,
-					ActiveProfileName:     ap.r.profileName,
-					ActiveProfileProvider: ap.r.profileProvider,
-				})
-				http.Error(w, err.Error(), http.StatusBadGateway)
-				return
-			}
-		}
-		// Upstream-view tap. ALL in-supervisor body mutators MUST run BEFORE
-		// this point — today that is modelalias.RewriteRequest only (model
-		// field rewrite + Claude-Code system-block stripping). The
-		// ReverseProxy.Rewrite hook downstream only edits URL/headers, never
-		// body; if a future feature mutates pr.Out.Body we must move the tap.
-		// Skip when modelalias did not actually change the body (Rewritten=false)
-		// — there's no second view to capture and disk would carry a duplicate.
-		var upstreamBodyRefForThisRequest *model.RequestBodyRef
-		if ap.l.captureBodies && aliasCtx != nil && aliasCtx.Rewritten && r.Body != nil {
-			b, rerr := io.ReadAll(r.Body)
-			_ = r.Body.Close()
-			r.Body = io.NopCloser(bytes.NewReader(b))
-			r.ContentLength = int64(len(b))
-			if st := sp.session.bodies; st != nil && rerr == nil && len(b) > 0 {
-				spillBytes := b
-				if shouldRedactBody(logicalHost, r.URL.Path) {
-					spillBytes = redactJSONBody(b, sp.supervisor.unmaskCredentials)
-				}
-				upstreamBodyRefForThisRequest = st.put(newBodyID(), spillBytes)
-			}
-		}
-		// Native-TLS uses a SEPARATE upstream transport (its own cache) so the
-		// egress-aware utls handshake never touches the shared plain transport
-		// that telemetry/forward reuse. upstreamTransportFor selects it for EVERY
-		// Anthropic host when nativeTLS is on (so no *.anthropic.com dial leaks a
-		// Go fingerprint); default nativeTLS=false keeps the plain path.
-		// Requests mirror their own connection's ClientHello shape upstream.
 		hello := helloStackFrom(r.Context())
 		if !ap.l.nativeTLS {
 			hello = nil
 		}
-		upstreamTr := sp.upstreamTransportForStack(logicalHost, ap.r.egress, ap.l.nativeTLS, hello)
-		// Response-body tap: when capture is on, the ModifyResponse hook below
-		// tees the streamed response into a spill WITHOUT buffering (preserves
-		// SSE streaming). Set from the tee's Close, read by recordRequest below
-		// — Close runs before ServeHTTP returns, so the ref is visible there.
-		var responseBodyRefForThisRequest *model.RequestBodyRef
-		tap := newFailureTap(ap, aliasCtx, sp.supervisor.unmaskCredentials)
-		proxy := &httputil.ReverseProxy{
-			Transport:     upstreamTr,
-			FlushInterval: -1,
-			ErrorLog:      sp.supervisor.logger,
-			Rewrite: func(pr *httputil.ProxyRequest) {
-				target := joinTargetURL(baseForRequest, pr.In.URL)
-				pr.Out.URL = target
-				pr.Out.Host = target.Host
-				pr.Out.RequestURI = ""
-				pr.Out.Header.Del("Proxy-Connection")
-				pr.Out.Header.Del("Proxy-Authorization")
-				// Force identity ONLY for model-alias response normalization,
-				// which must rewrite an uncompressed body. Capture does NOT
-				// force identity: it preserves Claude's real Accept-Encoding
-				// (full upstream request fidelity) and decodes the captured
-				// copy ccwrap-side instead (see decodeCapturedBody).
-				if aliasCtx != nil && aliasCtx.NormalizeResponse {
-					pr.Out.Header.Set("Accept-Encoding", "identity")
-				}
-				if applyAuth {
-					upstreamheaders.Apply(pr.Out.Header, copyUpstreamHeaders(ap.r.upstreamHeaders.Headers))
-					applyAuthOverride(pr.Out.Header, ap.r.overrideAuth)
-				}
-			},
-			ModifyResponse: func(resp *http.Response) error {
-				if err := modelalias.RewriteResponse(resp, aliasCtx); err != nil {
-					return err
-				}
-				// Tee the (post-rewrite) response stream into a spill. The tee
-				// copies each chunk as ReverseProxy reads+flushes it, so the
-				// client keeps streaming the ORIGINAL (possibly compressed)
-				// bytes; the full captured copy lands on Close, where it is
-				// decoded per Content-Encoding and (for OAuth credential paths)
-				// redacted. Non-decodable bodies are withheld, never spilled raw.
-				if ap.l.captureBodies && resp.Body != nil {
-					if st := sp.session.bodies; st != nil {
-						redact := shouldRedactBody(logicalHost, r.URL.Path)
-						enc := resp.Header.Get("Content-Encoding")
-						resp.Body = newResponseBodyTee(resp.Body, responseBodyCapBytes, func(buf []byte, truncated bool) {
-							decoded, decTrunc, ok := decodeCapturedBody(buf, enc, responseBodyCapBytes)
-							if !ok {
-								ref := st.put(newBodyID(), bodyDecodeFailedSentinel)
-								ref.Truncated = true
-								responseBodyRefForThisRequest = ref
-								return
-							}
-							spill := decoded
-							if redact {
-								spill = redactJSONBody(decoded, sp.supervisor.unmaskCredentials)
-							}
-							ref := st.put(newBodyID(), spill)
-							if truncated || decTrunc {
-								ref.Truncated = true
-							}
-							responseBodyRefForThisRequest = ref
-						})
-					}
-				}
-				tap.observe(resp)
-				return nil
-			},
-			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-				summary := err.Error()
-				errClass := classifyUpstreamError(err, "upstream_unreachable")
-				tap.noUpstream(summary, routeSuggestion(errClass))
-				sp.supervisor.recordError(sp.session.public.ID, model.ErrorRecord{
-					Timestamp:       time.Now(),
-					SessionID:       sp.session.public.ID,
-					Severity:        "error",
-					ErrorClass:      errClass,
-					Summary:         summary,
-					UpstreamHost:    upstreamHostForRequest,
-					SuggestedAction: routeSuggestion(errClass),
-				})
-				sp.supervisor.recordTrace(sp.session.public.ID, model.TraceRecord{
-					Timestamp: time.Now(),
-					SessionID: sp.session.public.ID,
-					Category:  "upstream",
-					Summary:   "upstream request failed",
-					Detail:    summary,
-				})
-				http.Error(w, summary, http.StatusBadGateway)
-			},
-		}
-		rw := newCaptureResponseWriter(w)
-		proxy.ServeHTTP(rw, withWireOrder(r, clientOrder))
-		latency := time.Since(start)
-		sp.session.noteHelloUse(hello, logicalHost, r.Method, r.URL.Path)
-		var helloKey string
-		if hello != nil {
-			helloKey = hello.key
-		}
-		record := model.RequestRecord{
-			Timestamp:          start,
-			SessionID:          sp.session.public.ID,
-			Method:             r.Method,
-			ClientHelloKey:     helloKey,
-			LogicalTargetHost:  logicalHost,
-			ActualUpstreamHost: upstreamHostForRequest,
-			Path:               pathAndQuery(r.URL),
-			StatusCode:         rw.StatusCode(),
-			LatencyMS:          latency.Milliseconds(),
-			StreamState:        detectStreamState(r, rw.HeaderSnapshot()),
-			// Inbound headers, cloned (record outlives the request in a
-			// 250-deep ring; do not alias r.Header).
-			RequestHeaders: r.Header.Clone(),
-			// File-backed body ref (nil unless capture on).
-			BodyRef: bodyRefForThisRequest,
-			// Post-rewrite body — nil unless the request actually went
-			// through modelalias body mutation.
-			UpstreamBodyRef: upstreamBodyRefForThisRequest,
-			// Captured upstream response body (nil unless capture on).
-			ResponseBodyRef: responseBodyRefForThisRequest,
-			// Stamp identity from the captured *posture (mitm handler
-			// closes over the captured ap — same posture resolveUpstream /
-			// RewriteRequest ran under).
-			ActiveProfileName:     ap.r.profileName,
-			ActiveProfileProvider: ap.r.profileProvider,
-		}
-		tap.stamp(&record)
-		sp.supervisor.recordRequest(sp.session.public.ID, record)
+		baseForRequest := cloneURL(base)
+		sp.forwardToUpstream(w, r, ap, start, forwardTarget{
+			logicalHost:  logicalHost,
+			upstreamHost: upstreamHost,
+			applyAuth:    applyAuth,
+			url:          func(in *url.URL) *url.URL { return joinTargetURL(baseForRequest, in) },
+			hello:        hello,
+			wireOrder:    clientOrder,
+		})
 	})
 }
