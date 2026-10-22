@@ -55,23 +55,31 @@ func helloShapeKey(fp tlsfp.Result) string {
 // pinned by CCWRAP_NATIVE_TLS_HELLO nothing is peeked: every dial mirrors the
 // pinned hello. On a peek error nothing is stored and conn is returned as is,
 // so a session with no hello at all still fails closed.
-func captureClientHello(sess *sessionState, conn net.Conn) (net.Conn, *helloStack) {
+//
+// A hello that offers HTTP/2 in ALPN (curl's does; Claude Code's never) is not
+// mirrored: the upstream would pick h2, which ccwrap's upstream transport
+// cannot speak. It becomes neither a shape nor the session default, so the
+// connection's requests use the default hello; skippedH2 reports this.
+func captureClientHello(sess *sessionState, conn net.Conn) (_ net.Conn, _ *helloStack, skippedH2 bool) {
 	if sess == nil {
-		return conn, nil
+		return conn, nil, false
 	}
 	sess.mu.RLock()
 	pinned := sess.nativeTLSHelloLoaded
 	sess.mu.RUnlock()
 	if pinned {
-		return conn, nil
+		return conn, nil, false
 	}
 	raw, replay, err := peekClientHello(conn)
 	if err != nil {
-		return conn, nil
+		return conn, nil, false
+	}
+	if helloOffersHTTP2(raw) {
+		return replay, nil, true
 	}
 	cp := append([]byte(nil), raw...)
 	sess.mirroredHelloRaw.CompareAndSwap(nil, &cp)
-	return replay, sess.registerHelloStack(cp)
+	return replay, sess.registerHelloStack(cp), false
 }
 
 // registerHelloStack returns the session's stack for raw's shape, adding it if

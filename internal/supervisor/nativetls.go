@@ -66,16 +66,31 @@ func ValidateLoadedHello(raw []byte) error {
 	if err != nil {
 		return fmt.Errorf("native-tls hello: not a parseable ClientHello: %w", err)
 	}
+	if specOffersHTTP2(spec) {
+		return errors.New("native-tls hello offers HTTP/2 ALPN; ccwrap forces HTTP/1.1 — load an HTTP/1.1 client's hello, e.g. Claude Code's own (download it from the dashboard's NATIVE TLS cell)")
+	}
+	return nil
+}
+
+// helloOffersHTTP2 reports whether raw, parsed as the native-TLS dial would
+// parse it, offers HTTP/2 in ALPN. Mirroring such a hello lets the upstream
+// pick h2, which ccwrap's HTTP/1.1 upstream transport cannot speak.
+func helloOffersHTTP2(raw []byte) bool {
+	spec, err := (&utls.Fingerprinter{AllowBluntMimicry: true}).FingerprintClientHello(raw)
+	return err == nil && specOffersHTTP2(spec)
+}
+
+func specOffersHTTP2(spec *utls.ClientHelloSpec) bool {
 	for _, ext := range spec.Extensions {
 		if a, ok := ext.(*utls.ALPNExtension); ok {
 			for _, p := range a.AlpnProtocols {
 				if p == "h2" {
-					return errors.New("native-tls hello offers HTTP/2 ALPN; ccwrap forces HTTP/1.1 — load an HTTP/1.1 client's hello, e.g. Claude Code's own (download it from the dashboard's NATIVE TLS cell)")
+					return true
 				}
 			}
 		}
 	}
-	return nil
+	return false
 }
 
 // nativeUTLSDialOver mirrors CC's ClientHello (rawHello) over rawConn to host,

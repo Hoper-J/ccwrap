@@ -1329,7 +1329,17 @@ func (sp *sessionProxy) handleAnthropicMITM(w http.ResponseWriter, r *http.Reque
 	// the inner handshake is unaffected. Native TLS off => exact prior path.
 	var hello *helloStack
 	if ap := sp.session.active.Load(); ap != nil && ap.l.nativeTLS {
-		clientConn, hello = captureClientHello(sp.session, clientConn)
+		var skippedH2 bool
+		clientConn, hello, skippedH2 = captureClientHello(sp.session, clientConn)
+		if skippedH2 {
+			sp.supervisor.recordTrace(sp.session.public.ID, model.TraceRecord{
+				Timestamp: time.Now(),
+				SessionID: sp.session.public.ID,
+				Category:  "native_tls",
+				Summary:   "client offers HTTP/2, which ccwrap cannot mirror upstream; its requests use the session's default TLS fingerprint",
+				Detail:    net.JoinHostPort(logicalHost, port),
+			})
+		}
 	}
 
 	cert, err := sp.supervisor.ca.IssueServerCert(logicalHost)

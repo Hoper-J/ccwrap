@@ -135,7 +135,7 @@ func TestCaptureClientHelloKeepsTheFirstAsDefault(t *testing.T) {
 		c.ServerName, c.InsecureSkipVerify = "api.anthropic.com", true
 		go func() { _ = tls.Client(a, c).Handshake() }()
 		_ = b.SetReadDeadline(time.Now().Add(5 * time.Second))
-		_, s := captureClientHello(sess, b)
+		_, s, _ := captureClientHello(sess, b)
 		return s
 	}
 	first := capture(plainShape)
@@ -197,6 +197,7 @@ type shapeOrigin struct {
 type shapeConn struct {
 	hello []byte
 	paths []string
+	h2    bool // negotiated HTTP/2 (startShapeOriginALPN only)
 }
 
 func (o *shapeOrigin) snapshot() []shapeConn {
@@ -204,12 +205,20 @@ func (o *shapeOrigin) snapshot() []shapeConn {
 	defer o.mu.Unlock()
 	out := make([]shapeConn, len(o.conns))
 	for i, c := range o.conns {
-		out[i] = shapeConn{hello: c.hello, paths: append([]string(nil), c.paths...)}
+		out[i] = shapeConn{hello: c.hello, paths: append([]string(nil), c.paths...), h2: c.h2}
 	}
 	return out
 }
 
 func startShapeOrigin(t *testing.T) *shapeOrigin {
+	t.Helper()
+	return startShapeOriginALPN(t)
+}
+
+// startShapeOriginALPN is startShapeOrigin negotiating ALPN from protos. When
+// it negotiates h2 it answers with an HTTP/2 SETTINGS frame and closes, as a
+// real HTTP/2 server's first bytes would reach an HTTP/1.1 client.
+func startShapeOriginALPN(t *testing.T, protos ...string) *shapeOrigin {
 	t.Helper()
 	caKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	caT := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "shape CA"},
@@ -228,7 +237,7 @@ func startShapeOrigin(t *testing.T) *shapeOrigin {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := &tls.Config{Certificates: []tls.Certificate{{Certificate: [][]byte{leafDER}, PrivateKey: leafKey}}}
+	cfg := &tls.Config{Certificates: []tls.Certificate{{Certificate: [][]byte{leafDER}, PrivateKey: leafKey}}, NextProtos: protos}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -252,6 +261,16 @@ func startShapeOrigin(t *testing.T) *shapeOrigin {
 				o.conns = append(o.conns, sc)
 				o.mu.Unlock()
 				tc := tls.Server(replay, cfg)
+				if err := tc.Handshake(); err != nil {
+					return
+				}
+				if tc.ConnectionState().NegotiatedProtocol == "h2" {
+					o.mu.Lock()
+					sc.h2 = true
+					o.mu.Unlock()
+					_, _ = tc.Write([]byte{0, 0, 0, 4, 0, 0, 0, 0, 0})
+					return
+				}
 				br := bufio.NewReader(tc)
 				for {
 					req, err := http.ReadRequest(br)

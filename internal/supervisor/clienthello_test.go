@@ -61,9 +61,23 @@ func TestPeekClientHelloAssemblesAcrossRecords(t *testing.T) {
 func TestCaptureMirroredHelloStoresParseableSpec(t *testing.T) {
 	// Build a realistic Chrome ClientHello via utls. The stub conn is never
 	// written to / read from -- BuildHandshakeState only marshals the message.
+	// ALPN is cut to http/1.1, as Claude Code's is: a hello offering h2 is not
+	// mirrored (TestCaptureClientHelloSkipsHTTP2Hellos).
 	stub, _ := net.Pipe()
 	defer stub.Close()
-	uc := utls.UClient(stub, &utls.Config{ServerName: "api.anthropic.com"}, utls.HelloChrome_Auto)
+	chrome, err := utls.UTLSIdToSpec(utls.HelloChrome_Auto)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ext := range chrome.Extensions {
+		if a, ok := ext.(*utls.ALPNExtension); ok {
+			a.AlpnProtocols = []string{"http/1.1"}
+		}
+	}
+	uc := utls.UClient(stub, &utls.Config{ServerName: "api.anthropic.com"}, utls.HelloCustom)
+	if err := uc.ApplyPreset(&chrome); err != nil {
+		t.Fatal(err)
+	}
 	if err := uc.BuildHandshakeState(); err != nil {
 		t.Fatalf("BuildHandshakeState: %v", err)
 	}
@@ -83,7 +97,7 @@ func TestCaptureMirroredHelloStoresParseableSpec(t *testing.T) {
 	_ = c1.SetReadDeadline(time.Now().Add(2 * time.Second))
 
 	sess := &sessionState{}
-	replay, stack := captureClientHello(sess, c1)
+	replay, stack, _ := captureClientHello(sess, c1)
 
 	stored := sess.mirroredHelloRaw.Load()
 	if stored == nil {

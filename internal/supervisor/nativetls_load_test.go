@@ -68,7 +68,7 @@ func TestNativeTLSHelloPreseed(t *testing.T) {
 	a, b := net.Pipe()
 	defer a.Close()
 	defer b.Close()
-	if _, stack := captureClientHello(sess, a); stack != nil {
+	if _, stack, _ := captureClientHello(sess, a); stack != nil {
 		t.Error("a pinned hello must leave connections without a shape of their own")
 	}
 	if p2 := sess.mirroredHelloRaw.Load(); p2 == nil || !bytes.Equal(*p2, undici) {
