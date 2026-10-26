@@ -126,7 +126,13 @@ Ctrl + 点击启动横幅里 `inspect` 后面那个本地 URL 打开 dashboard�
    ccwrap profile edit <name> --model-alias '*=gpt-5.5'
    ```
 
-   这样像 settings 里配的 `fable` 这类没有单独映射的模型也会落到这个目标上，响应里仍然还原成各自的名字。启动时如果 Claude Code 将要用的模型（按 `--model` > `ANTHROPIC_MODEL` > settings 里的 `model`）在当前路由上没有映射，启动横幅和 `ccwrap doctor`（`model_aliases` 一项）会直接给出这条命令。
+   这样像 settings 里配的 `fable` 这类没有单独映射的模型也会落到这个目标上，响应里仍然还原成各自的名字。启动时如果 Claude Code 将要用的模型（按 `--model` > `ANTHROPIC_MODEL` > settings 里的 `model`）在当前路由上没有映射，启动横幅和 `ccwrap doctor`（`model_aliases` 一项）会直接给出这条命令。没有用这几种方式指定模型时，ccwrap 事先不知道 Claude Code 自带的默认模型是哪个，所以改看实际流量：会话里只要有 Claude 模型没有映射就发了出去，Claude Code 退出时 ccwrap 会提示，之后用这个 profile 启动也会提醒，直到补上映射为止。dashboard 的 Models 格子这时会变黄，点开就能一键选择发给哪个模型，或者保持原名，选完立即生效。
+
+   如果上游本身认 Claude 的模型名，只是另外配了几条别名，可以用 `'*=*'` 表示其余 Claude 模型保持原名发送，ccwrap 也就不再提醒：
+
+   ```bash
+   ccwrap profile edit <name> --model-alias '*=*'
+   ```
 
    **拓展：研究某个模型的请求形态**
 

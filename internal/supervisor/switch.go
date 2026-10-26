@@ -431,6 +431,8 @@ func (s *Supervisor) SwitchProfile(sessionID, requested string) SwitchOutcome {
 	np := old.withResolved(newR) // new resolved ⊕ live carried forward (preserve is structural)
 	sess.active.Store(&np)
 	sess.public.UpdatedAt = time.Now()
+	// Models unmapped on the old route say nothing about the new one.
+	sess.public.UnmappedModels = nil
 	oldKey = egressTransportKey(old.r.egress)
 	newKey = egressTransportKey(np.r.egress)
 	np.deriveInto(&sess.public, sess.currentDialStateLocked())

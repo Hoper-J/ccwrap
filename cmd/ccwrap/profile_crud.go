@@ -136,7 +136,7 @@ func parseCRUDFlags(prog, name string, args []string, requireAddSemantics bool) 
 	egressURL := fs.String("egress-url", "", "Egress proxy URL (required when egress-mode=http|socks5|socks5h; scheme must match mode)")
 	setDefault := fs.Bool("set-default", false, "Set this profile as the file's default after the change")
 	var aliasPairs repeatedFlag
-	fs.Var(&aliasPairs, "model-alias", "Model alias logical=provider (repeatable; '*=provider' maps every other Claude model)")
+	fs.Var(&aliasPairs, "model-alias", "Model alias logical=provider (repeatable; '*=provider' maps every other Claude model, '*=*' keeps their names)")
 	var headerPairs repeatedFlag
 	fs.Var(&headerPairs, "upstream-header", "Upstream header Name=Value (repeatable; CCWRAP-owned, never Claude-visible)")
 
@@ -334,7 +334,24 @@ func profileAddIO(paths app.Paths, stdin io.Reader, args []string) int {
 		return 1
 	}
 	fmt.Fprintln(stdOut(), formatProfileLine(p, opts.Name == f.Default))
+	for _, line := range defaultAliasHint(p, opts.Name) {
+		fmt.Fprintln(stdErr(), line)
+	}
 	return 0
+}
+
+// defaultAliasHint asks, when a profile is given aliases but no "*" default,
+// what should happen to the other Claude models: ccwrap cannot tell whether
+// the upstream serves Claude names, so the user chooses.
+func defaultAliasHint(p profiles.Profile, name string) []string {
+	if len(p.ModelAliases) == 0 {
+		return nil
+	}
+	if _, ok := p.ModelAliases[modelalias.DefaultKey]; ok {
+		return nil
+	}
+	return append([]string{"  Note: Claude models without their own alias reach the upstream under their Claude names."},
+		aliasFixLines(modelalias.Config{Forward: p.ModelAliases}, name)...)
 }
 
 // parseEditArgs parses `ccwrap profile edit <name> [flags]` with edit
@@ -416,6 +433,11 @@ func profileEditIO(paths app.Paths, stdin io.Reader, args []string) int {
 		return 1
 	}
 	fmt.Fprintln(stdOut(), formatProfileLine(p, opts.Name == f.Default))
+	if opts.SetFields["model-alias"] {
+		for _, line := range defaultAliasHint(p, opts.Name) {
+			fmt.Fprintln(stdErr(), line)
+		}
+	}
 	return 0
 }
 

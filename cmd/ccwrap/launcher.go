@@ -75,6 +75,9 @@ func (r *rollbackStack) run() {
 // The deferred rollback.run() at the top of runClaude makes both
 // success and error paths converge on identical cleanup ordering.
 type sessionLauncher struct {
+	// warnedModels are the unaliased models the launch banner already named;
+	// the exit notice does not repeat them.
+	warnedModels []string
 	paths        app.Paths
 	sessionPaths app.Paths
 	sessionID    string
@@ -371,6 +374,7 @@ func (l *sessionLauncher) Attach() error {
 
 // PrintSummary emits the launch banner. Called after Attach succeeds.
 func (l *sessionLauncher) PrintSummary() {
+	l.warnedModels = seenUnaliasedModels(l.pre, l.paths.StateDir)
 	if l.launch.Quiet {
 		pal := ui.New(ui.IsTerminal(os.Stderr))
 		host := l.pre.APIBaseURL.Host
@@ -391,7 +395,7 @@ func (l *sessionLauncher) PrintSummary() {
 		if l.pre.AuthBootstrap == model.AuthBootstrapMissing {
 			fmt.Fprintln(os.Stderr, "  ⚠ Requests will fail until you "+authMissingRecoverHint(l.pre.MissingAuthEnv)+".")
 		}
-		for _, line := range launchWarningLines(l.pre) {
+		for _, line := range launchWarningLines(l.pre, l.paths.StateDir) {
 			fmt.Fprintln(os.Stderr, line)
 		}
 		return
@@ -417,7 +421,7 @@ func (l *sessionLauncher) PrintSummary() {
 		l.pre.ActiveProfileProvider,
 		l.pre.MissingAuthEnv,
 	)
-	if lines := launchWarningLines(l.pre); len(lines) > 0 {
+	if lines := launchWarningLines(l.pre, l.paths.StateDir); len(lines) > 0 {
 		fmt.Fprintln(os.Stderr)
 		for _, line := range lines {
 			fmt.Fprintln(os.Stderr, line)
@@ -574,4 +578,26 @@ func nilSafeSettings(parsed *settings.ParsedFlagSettings) map[string]any {
 		return nil
 	}
 	return parsed.Settings
+}
+
+// PrintUnmappedNotice reports, after Claude Code exits, the Claude models the
+// session sent with no alias. Best effort: a supervisor that is already gone
+// prints nothing.
+func (l *sessionLauncher) PrintUnmappedNotice(w io.Writer) {
+	if l.client == nil || l.sessionID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	sess, err := l.client.GetSession(ctx, l.sessionID)
+	if err != nil {
+		return
+	}
+	var skip []string
+	if sess.ActiveProfileName == l.pre.ActiveProfileName {
+		skip = l.warnedModels
+	}
+	for _, line := range unmappedExitLines(sess, skip) {
+		fmt.Fprintln(w, line)
+	}
 }

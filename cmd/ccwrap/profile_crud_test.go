@@ -1274,3 +1274,26 @@ func TestProfileSetDefault_MixedCaseInheritEnv_Exit1(t *testing.T) {
 		t.Fatalf("Default should be unchanged; got %q", file.Default)
 	}
 }
+
+// Giving a profile aliases without a "*" default asks what the other Claude
+// models should do; setting "*" (a model or "*=*") answers it, and edits
+// that leave aliases alone stay quiet.
+func TestProfileAliasesAskForDefault(t *testing.T) {
+	paths := pathsFor(t)
+	_, errOut := withCapturedStdio(t, func() {
+		profileAdd(paths, []string{"gw", "--base-url", "https://gw.example", "--auth-mode", "ccwrap_bearer", "--auth-key", "k", "--model-alias", "claude-opus-4-8=deepseek-v4-flash"})
+	})
+	for _, want := range []string{"Claude models without their own alias reach the upstream under their Claude names", "ccwrap profile edit gw --model-alias '*=deepseek-v4-flash'", "ccwrap profile edit gw --model-alias '*=*'"} {
+		if !strings.Contains(errOut, want) {
+			t.Fatalf("add: missing %q in:\n%s", want, errOut)
+		}
+	}
+	_, errOut = withCapturedStdio(t, func() { profileEdit(paths, []string{"gw", "--base-url", "https://gw2.example"}) })
+	if strings.Contains(errOut, "Note:") {
+		t.Fatalf("an edit that leaves aliases alone must not ask:\n%s", errOut)
+	}
+	_, errOut = withCapturedStdio(t, func() { profileEdit(paths, []string{"gw", "--model-alias", "*=*"}) })
+	if strings.Contains(errOut, "Note:") {
+		t.Fatalf("'*=*' answers the question:\n%s", errOut)
+	}
+}

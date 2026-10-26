@@ -76,7 +76,7 @@ func doctorCommand(paths app.Paths, args []string) error {
 		WorkingDirectory: cwd,
 		ChildArgs:        childArgs,
 	}
-	d.launchChecks(launchOpts, profileErr, inspect, inspectErr)
+	d.launchChecks(launchOpts, profileErr, inspect, inspectErr, paths.StateDir)
 	d.sessionChecks(paths, *sessionID)
 	if *jsonOut {
 		return printJSON(d.report)
@@ -361,7 +361,7 @@ func (d *doctorChecks) settingsChecks(envMap map[string]string, routeClass model
 }
 
 // launchChecks runs the launch preflight and the checks that need its result.
-func (d *doctorChecks) launchChecks(launchOpts preflight.Options, profileErr error, inspect *settings.InspectionResult, inspectErr error) {
+func (d *doctorChecks) launchChecks(launchOpts preflight.Options, profileErr error, inspect *settings.InspectionResult, inspectErr error, stateDir string) {
 	var launchPre *preflight.Result
 	if profileErr != nil {
 		d.add("launch_contract", "fail", "current launch would be rejected: could not resolve the launch profile", profileErr.Error())
@@ -388,15 +388,19 @@ func (d *doctorChecks) launchChecks(launchOpts preflight.Options, profileErr err
 	if launchPre != nil {
 		alias := launchPre.ModelAlias
 		mainModel, mainSource := preflight.ClaudeMainModel(launchPre.RewrittenChildArgs, launchPre.ModelEnv, inspect)
+		seen := seenUnaliasedModels(launchPre, stateDir)
 		switch {
 		case launchPre.RouteClass == model.RouteClassFirstParty || !alias.Enabled():
 			d.add("model_aliases", "pass", "this route passes Claude Code's model names through unchanged", "")
 		case launchPre.UncoveredModel != nil:
 			u := launchPre.UncoveredModel
-			fix := modelCoverageLines(launchPre)
-			d.add("model_aliases", "warn", fmt.Sprintf("Claude Code's model %s (from %s) has no alias on this route", u.Model, u.Source), strings.TrimSpace(fix[len(fix)-1]))
+			d.add("model_aliases", "warn", fmt.Sprintf("Claude Code's model %s (from %s) has no alias on this route", u.Model, u.Source), trimLines(aliasFixLines(alias, launchPre.ActiveProfileName)))
+		case len(seen) > 0:
+			d.add("model_aliases", "warn", fmt.Sprintf("Claude Code sent %s with no alias on %s before", strings.Join(seen, ", "), launchPre.ActiveProfileName), trimLines(aliasFixLines(alias, launchPre.ActiveProfileName)))
 		case alias.Default() != "":
 			d.add("model_aliases", "pass", "Claude models without their own alias go to "+alias.Default(), "")
+		case alias.KeepsNames():
+			d.add("model_aliases", "pass", "Claude models without their own alias keep their Claude names on this route", "")
 		case mainModel != "":
 			d.add("model_aliases", "pass", fmt.Sprintf("Claude Code's model %s (from %s) has an alias on this route", mainModel, mainSource), "")
 		default:
@@ -573,4 +577,12 @@ func fallbackText(v, d string) string {
 		return d
 	}
 	return v
+}
+
+// trimLines joins indented output lines into a doctor detail.
+func trimLines(lines []string) string {
+	for i, l := range lines {
+		lines[i] = strings.TrimSpace(l)
+	}
+	return strings.Join(lines, "\n")
 }

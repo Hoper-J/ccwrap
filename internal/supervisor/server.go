@@ -16,6 +16,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -33,6 +34,7 @@ import (
 	"github.com/Hoper-J/ccwrap/internal/profiles"
 	"github.com/Hoper-J/ccwrap/internal/settings"
 	"github.com/Hoper-J/ccwrap/internal/ui"
+	"github.com/Hoper-J/ccwrap/internal/unmapped"
 	"github.com/Hoper-J/ccwrap/internal/upstreamheaders"
 )
 
@@ -1103,6 +1105,12 @@ func (s *Supervisor) recordRequest(id string, record model.RequestRecord) {
 		sess.failedRequests--
 	}
 	sess.public.RecentFailedCount = sess.failedRequests
+	newUnmapped := record.ModelUnmapped && record.Model != "" &&
+		!slices.Contains(sess.public.UnmappedModels, record.Model) &&
+		len(sess.public.UnmappedModels) < maxUnmappedModels
+	if newUnmapped {
+		sess.public.UnmappedModels = append(sess.public.UnmappedModels, record.Model)
+	}
 	// A successful request heals Health to ok — EXCEPT while native-TLS is
 	// blocked. While blocked, new dials fail-closed; a request that completes over
 	// a still-pooled good conn must NOT heal away the error before a mirror dial
@@ -1120,7 +1128,16 @@ func (s *Supervisor) recordRequest(id string, record model.RequestRecord) {
 	}
 	s.touch()
 	s.broadcast("request", id, record)
+	if newUnmapped {
+		s.broadcast("session_updated", id, sess.snapshot())
+		if err := unmapped.Record(s.paths.StateDir, record.ActiveProfileName, record.Model, time.Now()); err != nil {
+			s.logger.Printf("remember unmapped model %s: %v", record.Model, err)
+		}
+	}
 }
+
+// maxUnmappedModels bounds Session.UnmappedModels.
+const maxUnmappedModels = 8
 
 // evictBodyFiles reclaims the spilled body file(s) backing a ring-evicted
 // record. A captured record can spill THREE files: BodyRef (the client-view
@@ -1572,6 +1589,7 @@ func (ss *sessionState) snapshot() model.Session {
 	ss.mu.RLock()
 	defer ss.mu.RUnlock()
 	copySession := ss.public
+	copySession.UnmappedModels = append([]string(nil), ss.public.UnmappedModels...)
 	return copySession
 }
 

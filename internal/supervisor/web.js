@@ -898,28 +898,27 @@
     if (d) d.textContent = disp.auth_detail || '';
     cell.dataset.state = disp.auth_state || '';
   }
-  // updateModelsCell mirrors webRibbonFromSession's Models cell logic so
-  // SSE session_updated patches both the value text AND the
-  // aliases-active data-state (which controls click affordance for the
-  // mapping popover). Zero-count → "default" label and
-  // no data-state; non-zero → "N alias(es)" + aliases-active + caret.
+  // updateModelsCell applies the server-rendered Models cell
+  // (session.display, from modelsCellPresentation) as-is: value, an
+  // optional detail line, and the data-state that makes the cell open its
+  // popover ("aliases-active", or amber "aliases-warn" when Claude models
+  // went out with no alias).
   function updateModelsCell(){
-    if (!state.session) return;
+    var disp = state.session && state.session.display;
     var cell = ribbonCellEl('Models');
-    if (!cell) return;
+    if (!disp || !cell) return;
     var v = cell.querySelector('[data-ribbon-value]');
-    var n = state.session.model_alias_count || 0;
-    if (v) {
-      v.textContent = n === 1 ? '1 alias' : n > 1 ? n + ' aliases' : 'default';
+    if (v) v.textContent = disp.models_value || 'default';
+    var d = cell.querySelector('.d');
+    if (disp.models_detail) {
+      if (!d) { d = document.createElement('div'); d.className = 'd'; cell.appendChild(d); }
+      d.textContent = disp.models_detail;
+    } else if (d) {
+      d.remove();
     }
-    if (n > 0) {
-      cell.dataset.state = 'aliases-active';
-    } else if (cell.dataset.state === 'aliases-active') {
-      // Clear; closing any open Models popover at the same time so the
-      // user isn't staring at stale alias mappings after a clear.
-      cell.dataset.state = '';
-      if (typeof closeModelsPop === 'function') closeModelsPop();
-    }
+    cell.dataset.state = disp.models_state || '';
+    // A cleared or changed mapping leaves an open popover stale.
+    if (typeof closeModelsPop === 'function') closeModelsPop();
   }
   // updateBodiesCell mirrors the Go bodiesCellPresentation matrix EXACTLY
   // (byte-equal value/detail/state) so the SSE live patch never drifts from
@@ -2833,7 +2832,7 @@
     // serializer doesn't need to know about it.
     var aliasEmpty = document.createElement('div');
     aliasEmpty.className = 'sp3-pop-aliases-empty';
-    aliasEmpty.textContent = 'no alias overrides — Claude’s model names pass through unchanged';
+    aliasEmpty.textContent = 'no per-model aliases';
     aliasSection.appendChild(aliasEmpty);
     var aliasHidden = document.createElement('input');
     aliasHidden.type = 'hidden';
@@ -2849,10 +2848,35 @@
       appendAliasRow(aliasList, aliasHidden, '', '');
     });
     aliasSection.appendChild(aliasAddBtn);
+    var initialAliases = (item && item.model_aliases) || {};
+    // "Other Claude models" is the "*" default, kept out of the rows: not
+    // set, a model, or "*" to keep their Claude names. See
+    // aliasDefaultChoices for what it offers and preselects.
+    var defRow = document.createElement('div');
+    defRow.className = 'sp3-pop-alias-default';
+    var defLbl = document.createElement('span');
+    defLbl.className = 'alias-default-label';
+    defLbl.textContent = 'other Claude models →';
+    var defSel = document.createElement('select');
+    defSel.className = 'alias-default';
+    defSel.setAttribute('data-mode', mode === 'add' ? 'add' : 'edit');
+    defSel.setAttribute('data-initial', initialAliases['*'] || '');
+    var defCustom = document.createElement('input');
+    defCustom.className = 'alias-default-custom';
+    defCustom.placeholder = 'upstream model';
+    defCustom.style.display = 'none';
+    defSel.addEventListener('change', function(){
+      defSel.setAttribute('data-picked', '1');
+      serializeAliasHidden(aliasList, aliasHidden);
+    });
+    defCustom.addEventListener('input', function(){ serializeAliasHidden(aliasList, aliasHidden); });
+    defRow.appendChild(defLbl);
+    defRow.appendChild(defSel);
+    defRow.appendChild(defCustom);
+    aliasSection.appendChild(defRow);
     // Prefill from item.model_aliases (object or undefined). Sorted by key
     // for deterministic row order.
-    var initialAliases = (item && item.model_aliases) || {};
-    var keys = Object.keys(initialAliases).sort();
+    var keys = Object.keys(initialAliases).filter(function(k){ return k !== '*'; }).sort();
     for (var ai = 0; ai < keys.length; ai++) {
       appendAliasRow(aliasList, aliasHidden, keys[ai], initialAliases[keys[ai]]);
     }
@@ -2982,6 +3006,7 @@
   // which would leave save disabled after a row-delete (or any other
   // path that mutates the hidden field without a user input).
   function serializeAliasHidden(listEl, hiddenEl) {
+    refreshAliasDefault(listEl.parentNode);
     var pairs = [];
     var rows = listEl.querySelectorAll('.sp3-pop-alias-row');
     for (var i = 0; i < rows.length; i++) {
@@ -2990,6 +3015,8 @@
       if (from === '' && to === '') continue; // empty row, ignore
       pairs.push(from + '=' + to);
     }
+    var def = aliasDefaultValue(listEl.parentNode);
+    if (def) pairs.push('*=' + def);
     pairs.sort();
     var next = pairs.join(';');
     if (hiddenEl.value === next) return;
@@ -3009,7 +3036,62 @@
       if (from === '' && to === '') continue;
       out[from] = to;
     }
+    var def = aliasDefaultValue(form);
+    if (def) out['*'] = def;
     return out;
+  }
+
+  // aliasDefaultChoices is what the "other Claude models" select offers:
+  // not set; each model the alias rows already use; a stored model not
+  // among them; "keep their Claude names" ("*"); another model. In add mode
+  // it follows the one model every row uses until the user picks; in edit
+  // mode it keeps the stored choice and only marks that model as suggested,
+  // so saving an unrelated change never adds a default.
+  function aliasDefaultChoices(targets, current, mode, picked) {
+    var suggested = targets.length === 1 ? targets[0] : '';
+    if (mode === 'add' && !picked) current = suggested;
+    var opts = [['', 'not set']];
+    for (var i = 0; i < targets.length; i++) {
+      var hint = (mode !== 'add' && current === '' && targets[i] === suggested) ? ' (suggested)' : '';
+      opts.push([targets[i], targets[i] + hint]);
+    }
+    if (current && current !== '*' && current !== '__custom' && targets.indexOf(current) < 0) opts.push([current, current]);
+    opts.push(['*', 'keep their Claude names']);
+    opts.push(['__custom', 'other model…']);
+    return {options: opts, value: current};
+  }
+  // refreshAliasDefault rebuilds the select from the current alias rows,
+  // keeping the user's choice.
+  function refreshAliasDefault(section) {
+    var sel = section && section.querySelector('.alias-default');
+    if (!sel) return;
+    var rows = section.querySelectorAll('.sp3-pop-alias-row');
+    var targets = [];
+    for (var i = 0; i < rows.length; i++) {
+      var to = rows[i].querySelector('.alias-to').value.trim();
+      if (to && to !== '*' && targets.indexOf(to) < 0) targets.push(to);
+    }
+    targets.sort();
+    var current = sel.options.length ? sel.value : (sel.getAttribute('data-initial') || '');
+    var c = aliasDefaultChoices(targets, current, sel.getAttribute('data-mode'), sel.getAttribute('data-picked') === '1');
+    while (sel.firstChild) sel.removeChild(sel.firstChild);
+    for (var j = 0; j < c.options.length; j++) {
+      var opt = document.createElement('option');
+      opt.value = c.options[j][0];
+      opt.textContent = c.options[j][1];
+      sel.appendChild(opt);
+    }
+    sel.value = c.value;
+    var custom = section.querySelector('.alias-default-custom');
+    if (custom) custom.style.display = c.value === '__custom' ? '' : 'none';
+  }
+  // aliasDefaultValue is the "*" alias the form holds, or "".
+  function aliasDefaultValue(scope) {
+    var sel = scope && scope.querySelector('.alias-default');
+    if (!sel) return '';
+    if (sel.value !== '__custom') return sel.value;
+    var custom = scope.querySelector('.alias-default-custom');
+    return custom ? custom.value.trim() : '';
   }
 
   function appendSectionLabel(parent, text) {
@@ -3687,8 +3769,9 @@
   }
   attachProfileCellHandlers();
 
-  // Click on the Models ribbon cell (when data-state="aliases-active")
-  // opens a small popover listing the alias forward map. Closes on
+  // Click on the Models ribbon cell (when data-state is "aliases-active" or
+  // "aliases-warn") opens a small popover listing the alias forward map,
+  // led by the fix for unaliased models when there are any. Closes on
   // outside-click / Esc. Reads from state.session.model_alias_forward
   // (no fetch). Makes the aliases
   // discoverable without grepping config files.
@@ -3698,7 +3781,8 @@
     modelsCell = document.querySelector('.ribbon-cell[data-ribbon="Models"]');
     if (!modelsCell) return;
     modelsCell.addEventListener('click', function(ev){
-      if (modelsCell.dataset.state !== 'aliases-active') return;
+      var st = modelsCell.dataset.state;
+      if (st !== 'aliases-active' && st !== 'aliases-warn') return;
       ev.stopPropagation();
       if (modelsPop && modelsPop.parentNode) {
         closeModelsPop();
@@ -3721,6 +3805,11 @@
     modelsPop = document.createElement('div');
     modelsPop.className = 'sp3-models-pop';
     modelsPop.addEventListener('click', function(ev){ ev.stopPropagation(); });
+    var fixEl = modelFixEl(state.session.display && state.session.display.model_fix);
+    if (fixEl) {
+      fixEl.addEventListener('click', onModelFixClick);
+      modelsPop.appendChild(fixEl);
+    }
     var head = document.createElement('div');
     head.className = 'head';
     head.textContent = keys.length + ' alias' + (keys.length === 1 ? '' : 'es') + ' — claude name → upstream model';
@@ -3730,7 +3819,7 @@
       var tr = document.createElement('tr');
       var tdFrom = document.createElement('td'); tdFrom.className = 'from'; tdFrom.textContent = keys[i] === '*' ? 'any other Claude model' : keys[i];
       var tdArrow = document.createElement('td'); tdArrow.className = 'arrow'; tdArrow.textContent = '→';
-      var tdTo = document.createElement('td'); tdTo.className = 'to'; tdTo.textContent = forward[keys[i]];
+      var tdTo = document.createElement('td'); tdTo.className = 'to'; tdTo.textContent = keys[i] === '*' && forward[keys[i]] === '*' ? 'unchanged (Claude name)' : forward[keys[i]];
       tr.appendChild(tdFrom); tr.appendChild(tdArrow); tr.appendChild(tdTo);
       tbl.appendChild(tr);
     }
@@ -3741,6 +3830,82 @@
   function closeModelsPop(){
     if (modelsPop && modelsPop.parentNode) modelsPop.parentNode.removeChild(modelsPop);
     modelsPop = null;
+  }
+  // modelFixEl builds the Models popover's fix for Claude models the session
+  // sent with no alias (session.display.model_fix): what happened, then one
+  // button per model this route's aliases already use, plus "keep Claude
+  // names". Without a profile the fix is a relaunch flag, shown as text.
+  function modelFixEl(fix){
+    if (!fix || !fix.models || !fix.models.length) return null;
+    var box = document.createElement('div');
+    box.className = 'model-fix';
+    var msg = document.createElement('div');
+    msg.className = 'mf-msg';
+    msg.textContent = 'Claude Code sent ' + fix.models.join(', ') + ' with no alias; the upstream got ' +
+      (fix.models.length === 1 ? 'that name' : 'those names') + ' as-is.';
+    box.appendChild(msg);
+    if (!fix.profile) {
+      var hint = document.createElement('div');
+      hint.className = 'mf-note';
+      hint.textContent = "Relaunch with --model-alias '*=<model>', or '*=*' if the upstream serves Claude names.";
+      box.appendChild(hint);
+      return box;
+    }
+    var actions = document.createElement('div');
+    actions.className = 'mf-actions';
+    var targets = fix.targets || [];
+    for (var i = 0; i < targets.length; i++) {
+      actions.appendChild(modelFixButton('Send them to ' + targets[i], targets[i]));
+    }
+    actions.appendChild(modelFixButton('Keep Claude names', '*'));
+    box.appendChild(actions);
+    var note = document.createElement('div');
+    note.className = 'mf-note';
+    note.textContent = 'Saves the choice to profile ' + fix.profile + ' and applies it now.';
+    box.appendChild(note);
+    return box;
+  }
+  function modelFixButton(label, target){
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'mf-btn';
+    b.setAttribute('data-target', target);
+    b.textContent = label;
+    return b;
+  }
+  function onModelFixClick(ev){
+    var btn = ev.target && ev.target.closest ? ev.target.closest('.mf-btn') : null;
+    if (!btn) return;
+    var target = btn.getAttribute('data-target');
+    var box = btn.parentNode;
+    var all = box ? box.querySelectorAll('.mf-btn') : [];
+    for (var i = 0; i < all.length; i++) all[i].disabled = true;
+    fetch('/profile/model-default', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CCWRAP-Profile-Token': PROFILE_TOKEN },
+      body: JSON.stringify({ target: target }),
+    })
+    .then(function(r){
+      return r.json().catch(function(){ return {}; }).then(function(body){ return { ok: r.ok, body: body }; });
+    })
+    .then(function(res){
+      if (!res.ok) {
+        for (var i = 0; i < all.length; i++) all[i].disabled = false;
+        showToast('could not save: ' + ((res.body && res.body.message) || 'unknown error'), 'warning');
+        return;
+      }
+      closeModelsPop();
+      var label = target === '*' ? 'keep their Claude names' : 'go to ' + target;
+      if (res.body && res.body.result === 'switched') {
+        showToast('Other Claude models now ' + label + '.');
+      } else {
+        showToast('Saved: other Claude models ' + label + ' — restart ccwrap to apply.', 'warning');
+      }
+    })
+    .catch(function(e){
+      for (var i = 0; i < all.length; i++) all[i].disabled = false;
+      showToast('could not save: ' + (e && e.message ? e.message : 'unknown error'), 'warning');
+    });
   }
   attachModelsCellHandlers();
 

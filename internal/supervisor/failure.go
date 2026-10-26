@@ -6,7 +6,6 @@ import (
 	"html"
 	"net/http"
 	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/Hoper-J/ccwrap/internal/model"
@@ -259,19 +258,10 @@ func (t *failureTap) noUpstream(summary, hint string) {
 	t.failure = ccwrapFailure(summary, hint)
 }
 
-// aliasHintTarget picks an upstream model to suggest in alias hints: the
-// default target, else one the route already maps to.
+// aliasHintTarget is the upstream model to suggest in alias hints: the one
+// every alias already maps to, or "" (shown as <model>) when there are
+// several to choose from.
 func aliasHintTarget(cfg modelalias.Config) string {
-	if d := cfg.Default(); d != "" {
-		return d
-	}
-	targets := make([]string, 0, len(cfg.Forward))
-	for _, target := range cfg.Forward {
-		targets = append(targets, target)
-	}
-	if len(targets) == 0 {
-		return ""
-	}
-	sort.Strings(targets)
-	return targets[0]
+	target, _ := cfg.SuggestedDefault()
+	return target
 }

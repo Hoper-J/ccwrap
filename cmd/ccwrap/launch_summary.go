@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/Hoper-J/ccwrap/internal/modelalias"
 	"github.com/Hoper-J/ccwrap/internal/preflight"
 	"github.com/Hoper-J/ccwrap/internal/ui"
+	"github.com/Hoper-J/ccwrap/internal/unmapped"
 	"github.com/Hoper-J/ccwrap/internal/upstreamheaders"
 )
 
@@ -93,10 +95,10 @@ func printLaunchSummary(sessionID, proxyURL, upstream string, routeSource model.
 		keys := aliasKeysForDisplay(alias.Forward)
 		first := keys[0]
 		if alias.Count() == 1 {
-			modelsLine = "1 alias · " + aliasKeyLabel(first) + " → " + alias.Forward[first]
+			modelsLine = "1 alias · " + aliasKeyLabel(first) + " → " + aliasTargetLabel(alias.Forward[first])
 		} else {
 			modelsLine = fmt.Sprintf("%d aliases · %s → %s, +%d more",
-				alias.Count(), aliasKeyLabel(first), alias.Forward[first], alias.Count()-1)
+				alias.Count(), aliasKeyLabel(first), aliasTargetLabel(alias.Forward[first]), alias.Count()-1)
 		}
 	}
 
@@ -197,10 +199,37 @@ func aliasKeyLabel(key string) string {
 	return key
 }
 
-// launchWarningLines are the banner's config warnings, each with its
-// one-line fix: a base URL ending in /v1, then an unaliased starting model.
-func launchWarningLines(pre *preflight.Result) []string {
-	return append(baseURLLines(pre), modelCoverageLines(pre)...)
+// aliasTargetLabel spells out the "*=*" default, which keeps Claude names.
+func aliasTargetLabel(target string) string {
+	if target == modelalias.KeepName {
+		return "unchanged"
+	}
+	return target
+}
+
+// aliasFixLines are the two ways to cover Claude models without an alias:
+// send them to one model (the one every alias already uses, else <model>
+// with this route's targets listed), or keep their Claude names on purpose.
+func aliasFixLines(alias modelalias.Config, profile string) []string {
+	cmd := "--model-alias"
+	if profile != "" {
+		cmd = "ccwrap profile edit " + profile + " --model-alias"
+	}
+	target, candidates := alias.SuggestedDefault()
+	send := fmt.Sprintf("    Send them to one model: %s '%s=%s'", cmd, modelalias.DefaultKey, fallbackText(target, "<model>"))
+	if target == "" && len(candidates) > 1 {
+		send += " (this route uses " + strings.Join(candidates, ", ") + ")"
+	}
+	return []string{
+		send,
+		fmt.Sprintf("    Or, if the upstream serves Claude names, keep them: %s '%s=%s'", cmd, modelalias.DefaultKey, modelalias.KeepName),
+	}
+}
+
+// launchWarningLines are the banner's config warnings, each with its fix: a
+// base URL ending in /v1, then Claude models the route has no alias for.
+func launchWarningLines(pre *preflight.Result, stateDir string) []string {
+	return append(baseURLLines(pre), modelCoverageLines(pre, seenUnaliasedModels(pre, stateDir))...)
 }
 
 // baseURLLines warns about a third-party base URL ending in /v1.
@@ -222,23 +251,68 @@ func baseURLLines(pre *preflight.Result) []string {
 	}
 }
 
-// modelCoverageLines warns that Claude Code starts on a model this route
-// has no alias for, and shows the one-line fix.
-func modelCoverageLines(pre *preflight.Result) []string {
-	u := pre.UncoveredModel
-	if u == nil {
+// modelCoverageLines warns about Claude models this route has no alias for:
+// the one Claude Code is set to start on, and those sessions on this profile
+// sent before (seen); then it shows the fixes once.
+func modelCoverageLines(pre *preflight.Result, seen []string) []string {
+	var lines []string
+	if u := pre.UncoveredModel; u != nil {
+		lines = append(lines, fmt.Sprintf("  ⚠ Claude Code's model %s (from %s) has no alias on this route; the upstream gets that name as-is.", u.Model, u.Source))
+	}
+	if len(seen) > 0 {
+		lines = append(lines, fmt.Sprintf("  ⚠ Claude Code sent %s with no alias on %s before; the upstream got %s as-is.", strings.Join(seen, ", "), pre.ActiveProfileName, theseNames(len(seen))))
+	}
+	if len(lines) == 0 {
 		return nil
 	}
-	target := "<model>"
-	if keys := aliasKeysForDisplay(pre.ModelAlias.Forward); len(keys) > 0 {
-		target = pre.ModelAlias.Forward[keys[0]]
+	return append(lines, aliasFixLines(pre.ModelAlias, pre.ActiveProfileName)...)
+}
+
+// seenUnaliasedModels are the Claude models earlier sessions on this profile
+// sent with no alias, which the route still does not cover. Claude Code's
+// built-in default model is invisible before launch; this is how ccwrap
+// learns it.
+func seenUnaliasedModels(pre *preflight.Result, stateDir string) []string {
+	if pre.RouteClass == model.RouteClassFirstParty || !pre.ModelAlias.Enabled() || pre.ActiveProfileName == "" {
+		return nil
 	}
-	fix := fmt.Sprintf("--model-alias '%s=%s'", modelalias.DefaultKey, target)
-	if pre.ActiveProfileName != "" {
-		fix = "ccwrap profile edit " + pre.ActiveProfileName + " " + fix
+	var out []string
+	for _, m := range unmapped.Models(stateDir, pre.ActiveProfileName) {
+		if pre.ModelAlias.Covers(m) || (pre.UncoveredModel != nil && pre.UncoveredModel.Model == m) {
+			continue
+		}
+		out = append(out, m)
 	}
-	return []string{
-		fmt.Sprintf("  ⚠ Claude Code's model %s (from %s) has no alias on this route; the upstream gets that name as-is.", u.Model, u.Source),
-		"    Send every unaliased Claude model to one target: " + fix,
+	return out
+}
+
+// unmappedExitLines tell, once Claude Code has exited, which Claude models
+// this session sent with no alias, with the fixes for its current profile.
+// Models in skip (already named at launch) are left out.
+func unmappedExitLines(sess *model.Session, skip []string) []string {
+	if sess == nil {
+		return nil
 	}
+	var models []string
+	for _, m := range sess.UnmappedModels {
+		if !slices.Contains(skip, m) {
+			models = append(models, m)
+		}
+	}
+	if len(models) == 0 {
+		return nil
+	}
+	where := "this route"
+	if sess.ActiveProfileName != "" {
+		where = sess.ActiveProfileName
+	}
+	head := fmt.Sprintf("ccwrap: Claude Code sent %s with no alias on %s; the upstream got %s as-is.", strings.Join(models, ", "), where, theseNames(len(models)))
+	return append([]string{head}, aliasFixLines(modelalias.Config{Forward: sess.ModelAliasForward}, sess.ActiveProfileName)...)
+}
+
+func theseNames(n int) string {
+	if n == 1 {
+		return "that name"
+	}
+	return "those names"
 }

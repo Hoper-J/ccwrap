@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Hoper-J/ccwrap/internal/model"
+	"github.com/Hoper-J/ccwrap/internal/modelalias"
 	"github.com/Hoper-J/ccwrap/internal/ui"
 )
 
@@ -325,22 +326,7 @@ func webSummaryFromSession(sess model.Session) []webKV {
 // hot-swaps the route via Supervisor.SetCaptureBodies; SSE session_updated
 // patches the cell live.
 func webRibbonFromSession(sess model.Session, hasProfilesFile bool, profileCount int) []webKV {
-	// Models cell. The zero-alias state
-	// renders "default" instead of empty/em-dash so the cell signals
-	// "claude-code's own model names pass through unchanged" rather
-	// than the ambiguous "no data". Non-zero state is clickable and
-	// opens a small popover listing the alias forwards (handled in JS
-	// via data-state="aliases-active").
-	models := "default"
-	modelsState := ""
-	switch {
-	case sess.ModelAliasCount == 1:
-		models = "1 alias"
-		modelsState = "aliases-active"
-	case sess.ModelAliasCount > 1:
-		models = fmt.Sprintf("%d aliases", sess.ModelAliasCount)
-		modelsState = "aliases-active"
-	}
+	modelsValue, modelsDetail, modelsState := modelsCellPresentation(sess)
 	trafficLabel := "Traffic"
 	if sess.State == model.StateEnded {
 		trafficLabel = "Total"
@@ -357,7 +343,7 @@ func webRibbonFromSession(sess model.Session, hasProfilesFile bool, profileCount
 	cells := []webKV{
 		{Label: "Route", Value: routeValue, Detail: routeDetail},
 		{Label: "Auth", Value: authValue, Detail: authDetail, DataState: authState},
-		{Label: "Models", Value: models, DataState: modelsState},
+		{Label: "Models", Value: modelsValue, Detail: modelsDetail, DataState: modelsState},
 		{Label: trafficLabel, Value: fmt.Sprintf("%d req", sess.RecentRequestCount), Detail: fmt.Sprintf("%d failed", sess.RecentFailedCount), DataState: trafficState(sess.RecentFailedCount), Mono: true},
 		{Label: "Profile", ValueHTML: chip, Detail: profileDetail(sess, hasProfilesFile, profileCount), DataState: profileCellDataState(sess, hasProfilesFile)},
 		{Label: "Bodies", Value: bodiesValue, Detail: bodiesDetail, DataState: bodiesState},
@@ -446,21 +432,65 @@ type sessionForWire struct {
 }
 
 type sessionDisplay struct {
-	RouteValue  string `json:"route_value"`
-	RouteDetail string `json:"route_detail"`
-	AuthValue   string `json:"auth_value"`
-	AuthDetail  string `json:"auth_detail"`
-	AuthState   string `json:"auth_state"`
+	RouteValue   string `json:"route_value"`
+	RouteDetail  string `json:"route_detail"`
+	AuthValue    string `json:"auth_value"`
+	AuthDetail   string `json:"auth_detail"`
+	AuthState    string `json:"auth_state"`
+	ModelsValue  string `json:"models_value"`
+	ModelsDetail string `json:"models_detail"`
+	ModelsState  string `json:"models_state"`
 	// HeroSentence is the posture line under the hero state word.
 	HeroSentence string `json:"hero_sentence"`
+	// ModelFix backs the Models popover's fix for unaliased models; nil
+	// when there is nothing to fix.
+	ModelFix *modelFixDisplay `json:"model_fix,omitempty"`
+}
+
+// modelFixDisplay is what the Models popover offers for Claude models the
+// session sent with no alias: send them to one of the models this route's
+// aliases already use, or keep their Claude names. Profile "" (no profile)
+// means the fix is a relaunch flag, not a button.
+type modelFixDisplay struct {
+	Models  []string `json:"models"`
+	Profile string   `json:"profile,omitempty"`
+	Targets []string `json:"targets"`
 }
 
 func sessionWithDisplay(sess model.Session) sessionForWire {
 	w := sessionForWire{Session: sess}
 	w.Display.RouteValue, w.Display.RouteDetail = routeCellPresentation(sess)
 	w.Display.AuthValue, w.Display.AuthDetail, w.Display.AuthState = authCellPresentation(sess)
+	w.Display.ModelsValue, w.Display.ModelsDetail, w.Display.ModelsState = modelsCellPresentation(sess)
 	w.Display.HeroSentence = ui.SessionPosture(&sess)
+	if len(sess.UnmappedModels) > 0 {
+		_, targets := modelalias.Config{Forward: sess.ModelAliasForward}.SuggestedDefault()
+		w.Display.ModelFix = &modelFixDisplay{Models: sess.UnmappedModels, Profile: sess.ActiveProfileName, Targets: targets}
+	}
 	return w
+}
+
+// modelsCellPresentation is the Models ribbon cell. No aliases reads
+// "default" (Claude Code's names pass through) rather than an ambiguous
+// blank. With aliases the cell opens a popover listing them; when the
+// session sent Claude models with no alias, it turns amber and the popover
+// leads with the fix.
+func modelsCellPresentation(sess model.Session) (value, detail, state string) {
+	switch {
+	case sess.ModelAliasCount == 1:
+		value, state = "1 alias", "aliases-active"
+	case sess.ModelAliasCount > 1:
+		value, state = fmt.Sprintf("%d aliases", sess.ModelAliasCount), "aliases-active"
+	default:
+		return "default", "", ""
+	}
+	switch n := len(sess.UnmappedModels); {
+	case n == 1:
+		detail, state = "1 unaliased model sent", "aliases-warn"
+	case n > 1:
+		detail, state = fmt.Sprintf("%d unaliased models sent", n), "aliases-warn"
+	}
+	return value, detail, state
 }
 
 // authCellPresentation derives the Auth ribbon cell's (value, detail, state)

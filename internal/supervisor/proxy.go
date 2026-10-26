@@ -245,6 +245,9 @@ func (sp *sessionProxy) handleInfoRequest(w http.ResponseWriter, r *http.Request
 	case "/profile/edit":
 		sp.handleProfileEdit(w, r)
 		return
+	case "/profile/model-default":
+		sp.handleProfileModelDefault(w, r)
+		return
 	case "/profile/rm":
 		sp.handleProfileRm(w, r)
 		return

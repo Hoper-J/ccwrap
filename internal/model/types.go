@@ -204,9 +204,13 @@ type Session struct {
 	RecentRequestCount                 int               `json:"recent_request_count"`
 	// RecentFailedCount counts the model requests (POST /v1/messages) among
 	// the recent ones that ended with an error status.
-	RecentFailedCount     int    `json:"recent_failed_count"`
-	ActiveProfileName     string `json:"active_profile_name,omitempty"`
-	ActiveProfileProvider string `json:"active_profile_provider,omitempty"`
+	RecentFailedCount int `json:"recent_failed_count"`
+	// UnmappedModels are the Claude models this session sent with no alias
+	// on its current route (cleared when the route changes), first seen
+	// first.
+	UnmappedModels        []string `json:"unmapped_models,omitempty"`
+	ActiveProfileName     string   `json:"active_profile_name,omitempty"`
+	ActiveProfileProvider string   `json:"active_profile_provider,omitempty"`
 	// CaptureBodies mirrors the per-session captureBodies routing flag so the
 	// inspect-web ribbon can render a "Bodies: on/off" cell and the runtime
 	// /capture/bodies toggle has a state to report. Launch-time initial value

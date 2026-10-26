@@ -27,6 +27,10 @@ const (
 	// DefaultKey is the alias key for "any other Claude model": a Claude
 	// model with no alias of its own goes to this key's target.
 	DefaultKey = "*"
+	// KeepName as the default's target ("*=*") keeps Claude models without
+	// their own alias under their Claude names, on purpose: for gateways that
+	// serve Claude names next to a few aliases. Valid only for DefaultKey.
+	KeepName = "*"
 )
 
 type Config struct {
@@ -78,6 +82,9 @@ func New(forward map[string]string, source string, strict bool) (Config, error) 
 		}
 		if LooksProviderSpecific(logical) {
 			return Config{}, fmt.Errorf("model alias logical model %q looks provider-specific; use a Claude logical model as the alias key", logical)
+		}
+		if provider == KeepName && logical != DefaultKey {
+			return Config{}, fmt.Errorf("model alias %q=%q: %q as a target only works for the %q default ('*=*' keeps other Claude models' names)", logical, provider, KeepName, DefaultKey)
 		}
 		if logical == DefaultKey {
 			// The default may share its target with an explicit alias;
@@ -169,8 +176,36 @@ func (c Config) Enabled() bool { return len(c.Forward) > 0 }
 func (c Config) Count() int    { return len(c.Forward) }
 
 // Default returns the target for Claude models without their own alias, or
-// "" when none is configured.
-func (c Config) Default() string { return c.Forward[DefaultKey] }
+// "" when none is configured or the default keeps their names.
+func (c Config) Default() string {
+	if t := c.Forward[DefaultKey]; t != KeepName {
+		return t
+	}
+	return ""
+}
+
+// KeepsNames reports a "*=*" default: Claude models without their own alias
+// reach the upstream under their Claude names, by the user's choice.
+func (c Config) KeepsNames() bool { return c.Forward[DefaultKey] == KeepName }
+
+// SuggestedDefault is the target to offer for a missing default: the one
+// upstream model every alias already maps to. With several targets it
+// returns "" and the candidates, sorted, for the user to choose from.
+func (c Config) SuggestedDefault() (target string, candidates []string) {
+	seen := map[string]bool{}
+	for logical, t := range c.Forward {
+		if logical == DefaultKey || seen[t] {
+			continue
+		}
+		seen[t] = true
+		candidates = append(candidates, t)
+	}
+	sort.Strings(candidates)
+	if len(candidates) == 1 {
+		return candidates[0], candidates
+	}
+	return "", candidates
+}
 
 // Covers reports whether a Claude Code model setting is mapped: an exact
 // alias, the default, or — for a family alias like "opus" or "sonnet[1m]",
@@ -178,7 +213,7 @@ func (c Config) Default() string { return c.Forward[DefaultKey] }
 // model of that family.
 func (c Config) Covers(model string) bool {
 	model = strings.TrimSpace(model)
-	if model == "" || c.Default() != "" {
+	if model == "" || c.Default() != "" || c.KeepsNames() {
 		return true
 	}
 	if _, ok := c.Forward[model]; ok {
@@ -534,7 +569,10 @@ func (c Config) StripsClaudeCodeExtras() bool {
 	if keepClaudeMetadata() {
 		return false
 	}
-	for _, provider := range c.Forward {
+	for logical, provider := range c.Forward {
+		if logical == DefaultKey && provider == KeepName {
+			continue
+		}
 		if !isClaudeModel(provider) {
 			return true
 		}
@@ -629,7 +667,7 @@ func RewriteJSONRequestBody(path string, body []byte, cfg Config) ([]byte, *Cont
 	ctx.LogicalModel = logical
 	ctx.UpstreamModel = provider
 	if !changed {
-		ctx.Unmapped = cfg.Enabled() && isClaudeModel(logical)
+		ctx.Unmapped = cfg.Enabled() && !cfg.KeepsNames() && isClaudeModel(logical)
 		return body, ctx, nil
 	}
 	// Strip Claude Code identity envelope when forwarding to non-claude-* upstream.

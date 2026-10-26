@@ -126,7 +126,13 @@ Ctrl+click the local URL after `inspect` in the launch banner to open the dashbo
    ccwrap profile edit <name> --model-alias '*=gpt-5.5'
    ```
 
-   Models without their own alias, like a `fable` set in your settings, then land on that target, and responses still come back under their own names. If the model Claude Code is about to start on (`--model` > `ANTHROPIC_MODEL` > the `model` setting) has no alias on the current route, the launch banner and `ccwrap doctor` (the `model_aliases` row) print that command for you.
+   Models without their own alias, like a `fable` set in your settings, then land on that target, and responses still come back under their own names. If the model Claude Code is about to start on (`--model` > `ANTHROPIC_MODEL` > the `model` setting) has no alias on the current route, the launch banner and `ccwrap doctor` (the `model_aliases` row) print that command for you. When none of those sets the model, ccwrap can't see Claude Code's built-in default ahead of time, so it goes by the traffic instead: once a session sends a Claude model with no alias, ccwrap says so after Claude Code exits, and later launches on that profile keep saying so until the route covers it. The dashboard's Models cell turns amber too; open it to pick a target model, or keep the Claude names, in one click, and it applies right away.
+
+   If the upstream does serve Claude model names and only a few need aliases, `'*=*'` keeps every other Claude model's name on purpose, and ccwrap stops flagging them:
+
+   ```bash
+   ccwrap profile edit <name> --model-alias '*=*'
+   ```
 
    **Bonus: study a model's request shape**
 

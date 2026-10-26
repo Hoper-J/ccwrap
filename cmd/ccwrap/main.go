@@ -131,7 +131,7 @@ Launch flags:
   --session-name NAME
   --claude-bin PATH
   --profile NAME                            (or env CCWRAP_PROFILE; from profiles.json)
-  --model-alias LOGICAL=PROVIDER            (repeatable; '*=PROVIDER' maps every other Claude model)
+  --model-alias LOGICAL=PROVIDER            (repeatable; '*=PROVIDER' maps every other Claude model, '*=*' keeps their names)
   --model-alias-file PATH                   (or env CCWRAP_MODEL_ALIASES_FILE / _JSON)
   --upstream-header NAME=VALUE              (repeatable; CCWRAP-owned, never Claude-visible)
   --upstream-headers-file PATH              (or env CCWRAP_UPSTREAM_HEADERS_FILE / _JSON)
@@ -378,6 +378,7 @@ func runClaude(paths app.Paths, args []string) error {
 	l.PrintSummary()
 	updHandle := startBackgroundUpdateCheck(l.ctx, l.pre.Egress, paths.StateDir, versionString(), launch.NoUpdateCheck, os.Getenv, time.Now)
 	code, err := l.Wait()
+	l.PrintUnmappedNotice(os.Stderr)
 	// The exit notice prints after Wait and before any return/os.Exit:
 	// the banner covers "the next launch"; this line covers "this run,
 	// whose check just finished". Non-blocking read — it never delays

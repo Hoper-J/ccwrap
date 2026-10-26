@@ -4299,21 +4299,6 @@ func TestWebMarkup_RmInlineConfirm(t *testing.T) {
 	}
 }
 
-// TestWebMarkup_ModelsCellLivePatchesDataState pins the fix:
-// updateModelsCell must update both the value text AND the
-// aliases-active data-state on SSE session_updated. Without the
-// data-state update, the ribbon Models cell stays unclickable even
-// after a chain-switch publishes new alias state.
-func TestWebMarkup_ModelsCellLivePatchesDataState(t *testing.T) {
-	body := captureRenderedDashboardHTML(t)
-	if !strings.Contains(body, "cell.dataset.state = 'aliases-active'") {
-		t.Errorf("updateModelsCell must set cell.dataset.state='aliases-active' on live patch")
-	}
-	if !strings.Contains(body, "v.textContent = n === 1 ? '1 alias' : n > 1 ? n + ' aliases' : 'default'") {
-		t.Errorf("updateModelsCell must mirror the 'default' label for zero-count")
-	}
-}
-
 // TestWebMarkup_AliasSerializeDispatchesInput pins the fix:
 // serializeAliasHidden must dispatch an 'input' event after programmatic
 // value sets, otherwise the form-level dirty detector (recomputeDirty)
