@@ -14,9 +14,5 @@ import (
 // CCWRAP_LOCAL_PEER_CHECK=0 (read at session-proxy creation) leaves ln as is.
 // Refusals go to the supervisor log, never stderr (Claude Code's terminal).
 func newLocalPeerListener(ln net.Listener, logger *log.Logger) net.Listener {
-	if localpeer.Disabled(os.Getenv) {
-		logger.Printf("local peer check disabled (%s=0): session port %s accepts connections from any local user", localpeer.DisableEnv, ln.Addr())
-		return ln
-	}
-	return localpeer.NewListener(ln, logger.Printf)
+	return localpeer.Guard(ln, os.Getenv, logger.Printf, "session port")
 }

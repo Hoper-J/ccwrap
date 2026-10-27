@@ -191,3 +191,14 @@ func SelfTest() (uint32, error) {
 		return 0, errors.New("self-test listener did not accept in time")
 	}
 }
+
+// Guard wraps ln so it accepts only the user's own connections and root's,
+// unless the check is turned off (DisableEnv=0); what is the listener's role
+// in the log line either way.
+func Guard(ln net.Listener, getenv func(string) string, logf func(string, ...any), what string) net.Listener {
+	if Disabled(getenv) {
+		logf("local peer check disabled (%s=0): %s %s accepts connections from any local user", DisableEnv, what, ln.Addr())
+		return ln
+	}
+	return NewListener(ln, logf)
+}
