@@ -177,6 +177,7 @@ func (l *sessionLauncher) PreparePaths() error {
 // socket; GC'd on supervisor exit.
 func (l *sessionLauncher) StartSupervisor() error {
 	lc := &supervisor.LaunchContext{
+		Version:          versionString(),
 		Options:          l.opts,
 		Inspection:       l.inspect,
 		Launch:           l.pre,

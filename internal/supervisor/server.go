@@ -48,6 +48,11 @@ var errSingleSessionSupervisor = errors.New("single-session supervisor already h
 
 var procmetaMatches = procmeta.Matches
 
+// sseWriteTimeout ends an event stream whose client stopped reading: each
+// write must finish within it. Keep-alive pings every 15s keep a reading
+// client's writes well inside it. A variable for tests.
+var sseWriteTimeout = 30 * time.Second
+
 // LaunchContext is the secret-bearing in-process snapshot the supervisor retains
 // from launch. It is never serialized, never crosses the socket, and never
 // appears in any SwitchOutcome/CLI output. GC'd on supervisor exit.
@@ -57,6 +62,8 @@ var procmetaMatches = procmeta.Matches
 // fields populated by the launcher (cmd/ccwrap composeLaunch) so the
 // resolver can run on switch without reading disk for any file-backed input.
 type LaunchContext struct {
+	// Version is the ccwrap version that launched the session (API meta).
+	Version    string
 	Options    preflight.Options          // includes the four file-content snapshot fields
 	Inspection *settings.InspectionResult // ~/.claude/settings*.json snapshot
 	Launch     *preflight.Result          // launch's *Result — for display projection + authBootstrap + identity
@@ -308,6 +315,7 @@ func (s *Supervisor) Run(ctx context.Context) error {
 	mux.HandleFunc("/v1/errors", s.handleErrors)
 	mux.HandleFunc("/v1/trace", s.handleTrace)
 	mux.HandleFunc("/v1/events", s.handleEvents)
+	mux.Handle("/api/v1/", s.apiV1())
 
 	s.httpServer = &http.Server{
 		Handler:           mux,
@@ -565,8 +573,7 @@ func (s *Supervisor) serveEventStream(w http.ResponseWriter, r *http.Request, se
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	flusher, ok := w.(http.Flusher)
-	if !ok {
+	if _, ok := w.(http.Flusher); !ok {
 		http.Error(w, "stream unsupported", http.StatusInternalServerError)
 		return
 	}
@@ -577,9 +584,14 @@ func (s *Supervisor) serveEventStream(w http.ResponseWriter, r *http.Request, se
 
 	ch, unsubscribe := s.subscribe()
 	defer unsubscribe()
-	_, _ = io.WriteString(w, "retry: 1500\n")
-	_, _ = io.WriteString(w, ": connected\n\n")
-	flusher.Flush()
+	sw := newSSEWriter(w)
+	defer sw.done()
+	if !sw.send(func(w io.Writer) {
+		_, _ = io.WriteString(w, "retry: 1500\n")
+		_, _ = io.WriteString(w, ": connected\n\n")
+	}) {
+		return
+	}
 
 	ctx := r.Context()
 	keepAlive := time.NewTicker(15 * time.Second)
@@ -594,13 +606,17 @@ func (s *Supervisor) serveEventStream(w http.ResponseWriter, r *http.Request, se
 				continue
 			}
 			data, _ := json.Marshal(eventForWire(ev))
-			_, _ = fmt.Fprintf(w, "id: %s\n", ev.ID)
-			_, _ = fmt.Fprintf(w, "event: %s\n", ev.Type)
-			_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
-			flusher.Flush()
+			if !sw.send(func(w io.Writer) {
+				_, _ = fmt.Fprintf(w, "id: %s\n", ev.ID)
+				_, _ = fmt.Fprintf(w, "event: %s\n", ev.Type)
+				_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
+			}) {
+				return
+			}
 		case <-keepAlive.C:
-			_, _ = io.WriteString(w, ": ping\n\n")
-			flusher.Flush()
+			if !sw.send(func(w io.Writer) { _, _ = io.WriteString(w, ": ping\n\n") }) {
+				return
+			}
 		case <-ctx.Done():
 			return
 		case <-s.closed:

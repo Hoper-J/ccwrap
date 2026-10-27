@@ -23,14 +23,20 @@ type Client struct {
 	socket     string
 }
 
-func NewClient(socketPath string) *Client {
-	tr := &http.Transport{
+// UnixTransport is an HTTP transport whose every request goes to the unix
+// socket at socketPath; request URLs use the host "unix".
+func UnixTransport(socketPath string) *http.Transport {
+	return &http.Transport{
 		Proxy: nil,
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			var d net.Dialer
 			return d.DialContext(ctx, "unix", socketPath)
 		},
 	}
+}
+
+func NewClient(socketPath string) *Client {
+	tr := UnixTransport(socketPath)
 	return &Client{
 		http:       &http.Client{Transport: tr, Timeout: 30 * time.Second},
 		streamHTTP: &http.Client{Transport: tr},

@@ -563,7 +563,11 @@ func isBodyID(s string) bool {
 // data-egress endpoint. bodyStore.load has independent defense-in-depth
 // containment.
 func (sp *sessionProxy) handleInfoRecentBody(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("id")
+	sp.writeBody(w, r.URL.Query().Get("id"))
+}
+
+// writeBody serves a captured body by id, or a JSON miss.
+func (sp *sessionProxy) writeBody(w http.ResponseWriter, id string) {
 	st := sp.session.bodies
 	if st == nil || !isBodyID(id) {
 		writeBodyMissJSON(w, "not available")

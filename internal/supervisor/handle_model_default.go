@@ -45,25 +45,33 @@ func (sp *sessionProxy) handleProfileModelDefault(w http.ResponseWriter, r *http
 		writeMutationError(w, http.StatusBadRequest, "usage", err.Error())
 		return
 	}
-	target := strings.TrimSpace(req.Target)
-	if target == "" {
-		writeMutationError(w, http.StatusBadRequest, "usage", "target must not be empty")
+	outcome, apiErr := sp.applyModelDefault(req.Target)
+	if apiErr != nil {
+		writeMutationError(w, apiErr.status, apiErr.code, apiErr.message)
 		return
+	}
+	writeJSON(w, outcome)
+}
+
+// applyModelDefault sets the active profile's "*" alias to target and applies
+// the profile to the live session; shared by the page endpoint and the API.
+func (sp *sessionProxy) applyModelDefault(target string) (SwitchOutcome, *apiError) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return SwitchOutcome{}, &apiError{http.StatusBadRequest, "usage", "target must not be empty"}
 	}
 	ap := sp.session.active.Load()
 	if ap == nil || ap.r.profileName == "" {
-		writeMutationError(w, http.StatusConflict, "no_profile",
-			fmt.Sprintf("this session runs without a profile; relaunch with --model-alias '%s=%s'", modelalias.DefaultKey, target))
-		return
+		return SwitchOutcome{}, &apiError{http.StatusConflict, "no_profile",
+			fmt.Sprintf("this session runs without a profile; relaunch with --model-alias '%s=%s'", modelalias.DefaultKey, target)}
 	}
 	name := ap.r.profileName
 	if status, kind, err := sp.setProfileDefaultAlias(name, target); err != nil {
-		writeMutationError(w, status, kind, err.Error())
-		return
+		return SwitchOutcome{}, &apiError{status, kind, err.Error()}
 	}
 	// The write is done and its locks released; re-apply the profile so
 	// the session uses it now (SwitchProfile takes its own locks).
-	writeJSON(w, sp.supervisor.SwitchProfile(sp.session.public.ID, name))
+	return sp.supervisor.SwitchProfile(sp.session.public.ID, name), nil
 }
 
 // setProfileDefaultAlias writes name's "*" alias under the same locks as the
