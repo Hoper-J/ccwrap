@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"github.com/Hoper-J/ccwrap/internal/model"
 	"github.com/Hoper-J/ccwrap/internal/preflight"
 	"github.com/Hoper-J/ccwrap/internal/procmeta"
+	"github.com/Hoper-J/ccwrap/internal/projects"
 	"github.com/Hoper-J/ccwrap/internal/settings"
 	"github.com/Hoper-J/ccwrap/internal/supervisor"
 	"github.com/Hoper-J/ccwrap/internal/ui"
@@ -218,6 +220,7 @@ func (l *sessionLauncher) CreateSession() error {
 	created, err := l.client.CreateSession(l.ctx, model.SessionCreateRequest{
 		ID:          l.sessionID,
 		Name:        l.launch.SessionName,
+		ProjectDir:  l.cwd,
 		LauncherPID: os.Getpid(),
 	})
 	if err != nil {
@@ -237,6 +240,8 @@ func (l *sessionLauncher) CreateSession() error {
 	if err := writeManifest(l.sessionPaths.RuntimeDir, l.sessionPaths.SocketPath, created, l.pre.Egress); err != nil {
 		return err
 	}
+	// The Projects page offers this folder's last profile by default.
+	_ = projects.RememberLaunch(l.paths.StateDir, l.cwd, l.pre.ActiveProfileName, time.Now())
 	return nil
 }
 
@@ -284,7 +289,26 @@ func (l *sessionLauncher) WriteSessionSettings() error {
 		}
 	}
 	l.childEnv = preflight.BuildChildEnv(os.Environ(), l.proxyURL, l.ca.CertPath(), l.ca.BundlePath(), childModelEnv, authBootstrap, l.launch.Timezone)
+	// Commands Claude Code runs (its Bash tool, "!" commands) inherit this,
+	// so `ccwrap open` inside a session knows which one it is in. Replaces
+	// any value from an outer session.
+	l.childEnv = setEnvVar(l.childEnv, sessionIDEnv, l.sessionID)
 	return nil
+}
+
+// sessionIDEnv names the ccwrap session a process runs under.
+const sessionIDEnv = "CCWRAP_SESSION_ID"
+
+// setEnvVar returns env with key set to value, dropping earlier entries.
+func setEnvVar(env []string, key, value string) []string {
+	prefix := key + "="
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, prefix) {
+			out = append(out, kv)
+		}
+	}
+	return append(out, prefix+value)
 }
 
 // ResolveClaudeBin locates the Claude Code executable up front — it is the
@@ -507,6 +531,7 @@ func writeManifest(sessionDir, controlSocket string, sess *model.Session, eg mod
 		SupervisorStartToken:               startToken,
 		ClaudePID:                          sess.ClaudePID,
 		Name:                               sess.Name,
+		ProjectDir:                         sess.ProjectDir,
 		ControlSocket:                      controlSocket,
 		ProxyListenAddr:                    sess.ProxyListenAddr,
 		ProxyInfoURL:                       proxyInfoURL(sess.ProxyListenAddr),

@@ -8,11 +8,10 @@
 package unmapped
 
 import (
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"sort"
 	"time"
+
+	"github.com/Hoper-J/ccwrap/internal/statefile"
 )
 
 const (
@@ -28,10 +27,7 @@ type store struct {
 
 func load(stateDir string) store {
 	var s store
-	data, err := os.ReadFile(filepath.Join(stateDir, fileName))
-	if err == nil {
-		_ = json.Unmarshal(data, &s)
-	}
+	statefile.Read(stateDir, fileName, &s)
 	if s.Profiles == nil {
 		s.Profiles = map[string]map[string]time.Time{}
 	}
@@ -59,23 +55,7 @@ func Record(stateDir, profile, model string, t time.Time) error {
 		}
 		delete(seen, oldest)
 	}
-	data, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(stateDir, fileName+".*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(append(data, '\n')); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), filepath.Join(stateDir, fileName))
+	return statefile.Write(stateDir, fileName, s)
 }
 
 // Models returns the models recorded for profile, sorted.

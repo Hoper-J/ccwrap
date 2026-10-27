@@ -162,8 +162,10 @@ type StatusResponse struct {
 }
 
 type Session struct {
-	ID                                 string            `json:"id"`
-	Name                               string            `json:"name,omitempty"`
+	ID   string `json:"id"`
+	Name string `json:"name,omitempty"`
+	// ProjectDir is the working directory Claude Code was launched in.
+	ProjectDir                         string            `json:"project_dir,omitempty"`
 	CreatedAt                          time.Time         `json:"created_at"`
 	UpdatedAt                          time.Time         `json:"updated_at"`
 	EndedAt                            *time.Time        `json:"ended_at,omitempty"`
@@ -289,6 +291,7 @@ type TraceResponse struct {
 type SessionCreateRequest struct {
 	ID          string `json:"id,omitempty"`
 	Name        string `json:"name,omitempty"`
+	ProjectDir  string `json:"project_dir,omitempty"`
 	LauncherPID int    `json:"launcher_pid"`
 }
 
@@ -510,6 +513,7 @@ type SessionManifest struct {
 	SupervisorStartToken               string            `json:"supervisor_start_token,omitempty"`
 	ClaudePID                          int               `json:"claude_pid,omitempty"`
 	Name                               string            `json:"name,omitempty"`
+	ProjectDir                         string            `json:"project_dir,omitempty"`
 	ControlSocket                      string            `json:"control_socket"`
 	ProxyListenAddr                    string            `json:"proxy_listen_addr,omitempty"`
 	ProxyInfoURL                       string            `json:"proxy_info_url,omitempty"`

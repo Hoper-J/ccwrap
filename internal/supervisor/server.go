@@ -646,6 +646,7 @@ func (s *Supervisor) createSession(req model.SessionCreateRequest) (model.Sessio
 	sess.public = model.Session{
 		ID:                id,
 		Name:              req.Name,
+		ProjectDir:        req.ProjectDir,
 		CreatedAt:         time.Now(),
 		UpdatedAt:         time.Now(),
 		State:             model.StateCreated,

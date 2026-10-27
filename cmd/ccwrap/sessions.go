@@ -262,6 +262,7 @@ func fetchSnapshot(ds model.DiscoveredSession) (*model.Session, error) {
 		return &model.Session{
 			ID:                                 ds.Manifest.SessionID,
 			Name:                               ds.Manifest.Name,
+			ProjectDir:                         ds.Manifest.ProjectDir,
 			CreatedAt:                          ds.Manifest.CreatedAt,
 			UpdatedAt:                          ds.Manifest.UpdatedAt,
 			State:                              ds.Manifest.State,
@@ -331,6 +332,9 @@ func printStatus(discovered []model.DiscoveredSession, sessions []*model.Session
 		}
 		fmt.Println()
 		auth := ui.HumanAuth(sess.AuthMode, sess.AuthSource) + " · " + ui.HumanAuthPolicy(sess.AuthPolicy) + " · " + ui.HumanAuthBootstrap(sess.AuthBootstrap, sess.AuthBootstrapKind)
+		if sess.ProjectDir != "" {
+			fmt.Println("  " + pal.Dim("project") + "   " + ui.DisplayDir(sess.ProjectDir))
+		}
 		fmt.Println("  " + pal.Dim("proxy") + "     " + proxyInfoURL(sess.ProxyListenAddr))
 		fmt.Println("  " + pal.Dim("route") + "     " + ui.HumanRouteClass(sess.RouteClass) + " · " + strings.ToLower(ui.HumanRouteSource(sess.RouteSource)))
 		fmt.Println("  " + pal.Dim("auth") + "      " + auth)
