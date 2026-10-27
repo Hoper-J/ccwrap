@@ -23,7 +23,13 @@ const maxScreening = 8
 // slow lookup delays only its own connection. logf gets one line per refused
 // uid and one per kind of lookup failure.
 func NewListener(ln net.Listener, logf func(format string, args ...any)) net.Listener {
-	return newListener(ln, uint32(os.Geteuid()), PeerUID, logf)
+	return newListener(ln, uint32(os.Geteuid()), PeerUID, logf, policy{what: "port"})
+}
+
+// policy is how a listener treats peers beyond its own uid and root.
+type policy struct {
+	what   string // the port, as log lines name it ("session port")
+	strict bool   // refuse a peer whose owner cannot be determined
 }
 
 type listener struct {
@@ -31,6 +37,7 @@ type listener struct {
 	self    uint32
 	peerUID func(net.Conn) (uint32, error)
 	logf    func(format string, args ...any)
+	policy  policy
 
 	conns     chan net.Conn
 	errs      chan error
@@ -43,12 +50,13 @@ type listener struct {
 	logged map[string]bool
 }
 
-func newListener(ln net.Listener, self uint32, peerUID func(net.Conn) (uint32, error), logf func(string, ...any)) *listener {
+func newListener(ln net.Listener, self uint32, peerUID func(net.Conn) (uint32, error), logf func(string, ...any), p policy) *listener {
 	l := &listener{
 		Listener: ln,
 		self:     self,
 		peerUID:  peerUID,
 		logf:     logf,
+		policy:   p,
 		conns:    make(chan net.Conn),
 		errs:     make(chan error),
 		slots:    make(chan struct{}, maxScreening),
@@ -143,16 +151,20 @@ func (l *listener) lookup(c net.Conn) (uid uint32, err error) {
 }
 
 // admit applies the policy: own uid and root pass, any other identified uid
-// and ownerless peers are refused, an unidentified peer passes.
+// and ownerless peers are refused, an unidentified peer passes unless the
+// listener is strict.
 func (l *listener) admit(c net.Conn, uid uint32, err error) bool {
 	switch {
 	case err == nil && (uid == l.self || uid == 0):
 		return true
 	case err == nil:
-		l.logOnce(fmt.Sprintf("uid %d", uid), "local peer check: refused connection from uid %d (%v); session ports accept only uid %d and root (%s=0 disables this check)", uid, c.RemoteAddr(), l.self, DisableEnv)
+		l.logOnce(fmt.Sprintf("uid %d", uid), "local peer check: refused connection from uid %d (%v); the %s accepts only uid %d and root (%s=0 disables this check)", uid, c.RemoteAddr(), l.policy.what, l.self, DisableEnv)
 		return false
 	case errors.Is(err, ErrOrphaned):
 		l.logOnce("orphaned", "local peer check: refused connection from %v: %v", c.RemoteAddr(), err)
+		return false
+	case l.policy.strict:
+		l.logOnce("lookup "+failureKind(err), "local peer check: could not identify the owner of %v (%v); refusing it, since the %s accepts only uid %d and root (%s=0 disables this check) — further failures of this kind are not logged", c.RemoteAddr(), err, l.policy.what, l.self, DisableEnv)
 		return false
 	default:
 		l.logOnce("lookup "+failureKind(err), "local peer check: could not identify the owner of %v (%v); allowing it — further failures of this kind are not logged", c.RemoteAddr(), err)

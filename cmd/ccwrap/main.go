@@ -57,6 +57,8 @@ func realMain() error {
 		return dashboardCommand(paths, os.Args[2:])
 	case "open":
 		return openCommand(paths, os.Args[2:])
+	case "ui":
+		return uiCommand(paths, os.Args[2:])
 	case "doctor":
 		return doctorCommand(paths, os.Args[2:])
 	case "stop":
@@ -149,6 +151,7 @@ Launch flags:
 Management commands:
   ccwrap status     [--json] [--session ID]
   ccwrap open       [--print] [SESSION-ID | PROJECT]  (open a session's web dashboard; picks the current session by default)
+  ccwrap ui         [status | stop]                   (the per-user app service; started on demand)
   ccwrap dashboard  [--session ID] [--view overview|requests|errors|diagnostics]
   ccwrap doctor     [--json] [--verbose] [--session ID] [--profile NAME]
   ccwrap stop       [--session ID | --all]

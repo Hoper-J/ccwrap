@@ -33,6 +33,11 @@ const testSelf = 1000
 
 func newScriptedListener(t *testing.T) *scriptedListener {
 	t.Helper()
+	return newScriptedListenerWith(t, policy{what: "session port"})
+}
+
+func newScriptedListenerWith(t *testing.T, p policy) *scriptedListener {
+	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +55,7 @@ func newScriptedListener(t *testing.T) *scriptedListener {
 		s.mu.Lock()
 		s.logs = append(s.logs, fmt.Sprintf(format, args...))
 		s.mu.Unlock()
-	})
+	}, p)
 	t.Cleanup(func() { _ = s.Close() })
 	return s
 }
@@ -130,7 +135,7 @@ func TestListenerAdmitsOwnUIDAndRootOnly(t *testing.T) {
 	if n := strings.Count(logs, "refused connection from uid 1001"); n != 1 {
 		t.Errorf("uid 1001 refusal logged %d times, want once:\n%s", n, logs)
 	}
-	for _, want := range []string{"session ports accept only uid 1000 and root", "CCWRAP_LOCAL_PEER_CHECK=0", "no owning process", ErrNotFound.Error(), ErrUnsupported.Error(), errLayout.Error(), "panicked"} {
+	for _, want := range []string{"the session port accepts only uid 1000 and root", "CCWRAP_LOCAL_PEER_CHECK=0", "no owning process", ErrNotFound.Error(), ErrUnsupported.Error(), errLayout.Error(), "panicked"} {
 		if !strings.Contains(logs, want) {
 			t.Errorf("log missing %q:\n%s", want, logs)
 		}
@@ -224,7 +229,7 @@ func TestListenerSlowLookupDoesNotBlockOthers(t *testing.T) {
 			<-release
 		}
 		return testSelf, nil
-	}, nil)
+	}, nil, policy{what: "session port"})
 	defer l.Close()
 
 	slow, err := net.Dial("tcp", ln.Addr().String())
@@ -360,5 +365,41 @@ func TestDisabled(t *testing.T) {
 		if got := Disabled(func(string) string { return v }); got != want {
 			t.Errorf("Disabled(%q) = %v, want %v", v, got, want)
 		}
+	}
+}
+
+// The ui port can open terminals and edit profiles, so a peer whose owner
+// cannot be determined is refused there instead of let through.
+func TestStrictListenerRefusesUnidentifiedPeers(t *testing.T) {
+	s := newScriptedListenerWith(t, policy{what: "ui port", strict: true})
+	serveOK(s)
+	cases := []struct {
+		name string
+		res  lookupResult
+		want string
+	}{
+		{"own uid", lookupResult{uid: testSelf}, "ok"},
+		{"root", lookupResult{uid: 0}, "ok"},
+		{"other uid", lookupResult{uid: 1001}, "closed"},
+		{"orphaned peer", lookupResult{err: ErrOrphaned}, "closed"},
+		{"peer not found", lookupResult{err: fmt.Errorf("x: %w", ErrNotFound)}, "closed"},
+		{"unsupported", lookupResult{err: ErrUnsupported}, "closed"},
+		{"layout", lookupResult{err: fmt.Errorf("%w: test", errLayout)}, "closed"},
+		{"lookup panics", lookupResult{panic: true}, "closed"},
+	}
+	for _, tc := range cases {
+		s.set(tc.res)
+		if got := dialOutcome(t, s.Addr().String()); got != tc.want {
+			t.Errorf("%s: outcome %q, want %q", tc.name, got, tc.want)
+		}
+	}
+	logs := s.logText()
+	for _, want := range []string{"the ui port accepts only uid 1000 and root", "could not identify the owner", "refusing it", "CCWRAP_LOCAL_PEER_CHECK=0"} {
+		if !strings.Contains(logs, want) {
+			t.Errorf("log missing %q:\n%s", want, logs)
+		}
+	}
+	if strings.Contains(logs, "allowing it") {
+		t.Errorf("strict listener logged allowing a peer:\n%s", logs)
 	}
 }

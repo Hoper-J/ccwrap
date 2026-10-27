@@ -196,9 +196,20 @@ func SelfTest() (uint32, error) {
 // unless the check is turned off (DisableEnv=0); what is the listener's role
 // in the log line either way.
 func Guard(ln net.Listener, getenv func(string) string, logf func(string, ...any), what string) net.Listener {
+	return guard(ln, getenv, logf, policy{what: what})
+}
+
+// GuardStrict is Guard for a port whose connections can change things:
+// ccwrap ui opens terminals and edits profiles. A peer whose owner cannot be
+// determined is refused there instead of let through.
+func GuardStrict(ln net.Listener, getenv func(string) string, logf func(string, ...any), what string) net.Listener {
+	return guard(ln, getenv, logf, policy{what: what, strict: true})
+}
+
+func guard(ln net.Listener, getenv func(string) string, logf func(string, ...any), p policy) net.Listener {
 	if Disabled(getenv) {
-		logf("local peer check disabled (%s=0): %s %s accepts connections from any local user", DisableEnv, what, ln.Addr())
+		logf("local peer check disabled (%s=0): %s %s accepts connections from any local user", DisableEnv, p.what, ln.Addr())
 		return ln
 	}
-	return NewListener(ln, logf)
+	return newListener(ln, uint32(os.Geteuid()), PeerUID, logf, p)
 }
