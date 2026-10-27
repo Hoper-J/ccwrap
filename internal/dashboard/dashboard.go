@@ -551,7 +551,7 @@ func renderSessionHeader(pal ui.Palette, sess *model.Session, claudeID string) [
 	}
 	if sess.ClaudePID > 0 {
 		meta := fmt.Sprintf("claude pid %d", sess.ClaudePID)
-		if up := uptimeLabel(sess.CreatedAt); up != "" {
+		if up := ui.Uptime(sess.CreatedAt); up != "" {
 			// "up 37m", NOT "37m ago" — CreatedAt is an uptime anchor; the
 			// ago-suffix read like a last-seen timestamp (web says "up" too).
 			meta += " · up " + up
@@ -559,26 +559,6 @@ func renderSessionHeader(pal ui.Palette, sess *model.Session, claudeID string) [
 		line += "   " + pal.Dim(meta)
 	}
 	return []string{line}
-}
-
-// uptimeLabel formats a duration since ts as "Xs/Xm/Xh/Xd" without the
-// "ago" suffix — for "up 5m" display in the session header. Zero time →
-// empty (caller skips the segment). Mirrors the web heroMeta vocabulary.
-func uptimeLabel(ts time.Time) string {
-	if ts.IsZero() {
-		return ""
-	}
-	age := time.Since(ts)
-	switch {
-	case age < time.Minute:
-		return fmt.Sprintf("%ds", int(age.Seconds()))
-	case age < time.Hour:
-		return fmt.Sprintf("%dm", int(age.Minutes()))
-	case age < 24*time.Hour:
-		return fmt.Sprintf("%dh", int(age.Hours()))
-	default:
-		return fmt.Sprintf("%dd", int(age.Hours()/24))
-	}
 }
 
 // renderLiveStrip uses poll vocabulary only. The TUI is

@@ -357,7 +357,7 @@ func (sp *sessionProxy) handleInfoPage(w http.ResponseWriter, r *http.Request) {
 		}
 	case sess.ClaudePID > 0:
 		heroMeta = fmt.Sprintf("claude pid %d", sess.ClaudePID)
-		if up := uptimeLabel(sess.CreatedAt); up != "" {
+		if up := ui.Uptime(sess.CreatedAt); up != "" {
 			heroMeta += " · up " + up
 		}
 	}

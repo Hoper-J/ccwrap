@@ -1016,26 +1016,6 @@ func activityAgeLabel(ts time.Time) string {
 	}
 }
 
-// uptimeLabel formats a duration since ts as "Xs/Xm/Xh/Xd" without
-// the "ago" suffix — for "up 5m" style display in the hero meta line.
-// Zero time → empty string (caller decides whether to render).
-func uptimeLabel(ts time.Time) string {
-	if ts.IsZero() {
-		return ""
-	}
-	age := time.Since(ts)
-	switch {
-	case age < time.Minute:
-		return fmt.Sprintf("%ds", int(age.Seconds()))
-	case age < time.Hour:
-		return fmt.Sprintf("%dm", int(age.Minutes()))
-	case age < 24*time.Hour:
-		return fmt.Sprintf("%dh", int(age.Hours()))
-	default:
-		return fmt.Sprintf("%dd", int(age.Hours()/24))
-	}
-}
-
 func activityRFC3339(ts time.Time) string {
 	if ts.IsZero() {
 		return ""
