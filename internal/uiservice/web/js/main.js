@@ -9,6 +9,7 @@ import { renderSidebar, sessionItems, initSidebar } from './shell/sidebar.js';
 import { renderBanner } from './shell/banner.js';
 import { createToasts } from './shell/toast.js';
 import { renderEmpty, launchProfile } from './views/empty.js';
+import { mountSession } from './session/view.js';
 
 const boot = bootstrap(document.body.dataset);
 const api = createApi(boot.token);
@@ -138,17 +139,42 @@ function renderShell(st) {
 
 // ---- Views ----------------------------------------------------------------
 
+// mounted is the live view in main: a session view keeps itself current
+// from events, so it is mounted once per session, not redrawn.
+let mounted = null;
+// deny is the credential headers the inspector shows masked.
+const deny = new Set(boot.deny);
+
+function unmount() {
+  if (mounted && mounted.handle) mounted.handle.unmount();
+  mounted = null;
+}
+
 function renderMain(st) {
   const r = st.route;
   if (r.view === 'session') {
     const id = currentSessionId(st);
-    if (!id) {
-      if (!st.loaded) return show(main);
-      return renderEmpty(main, { projects: st.projects, opening: st.opening, onProjects: () => go('#/projects'), onContinue: continueIn });
+    if (id) {
+      if (mounted && mounted.kind === 'session' && mounted.id === id) return;
+      unmount();
+      main.scrollTop = 0;
+      mounted = {
+        kind: 'session',
+        id,
+        handle: mountSession(main, {
+          api, id, deny, toast, go,
+          summary: () => store.get().sessions.find((x) => x.id === id),
+          profiles: async () => (await api.get('/profiles')).profiles || [],
+          continueIn: (path, profile) => continueIn({ path, name: path.split('/').pop(), last_profile: profile }),
+        }),
+      };
+      return;
     }
-    const s = st.sessions.find((x) => x.id === id);
-    return placeholder(s ? s.display.title : 'Session', s ? 'The session view comes next.' : 'No running session with this id.');
+    unmount();
+    if (!st.loaded) return show(main);
+    return renderEmpty(main, { projects: st.projects, opening: st.opening, onProjects: () => go('#/projects'), onContinue: continueIn });
   }
+  unmount();
   if (r.view === 'projects') return placeholder('Projects', 'The Projects page comes next.');
   if (r.view === 'profiles') return placeholder('Profiles', 'The Profiles page comes next.');
   return placeholder(r.isNew ? 'New profile' : r.name, 'The profile page comes next.');
@@ -181,6 +207,9 @@ async function continueIn(p) {
 let lastKey = '';
 store.subscribe((st) => {
   renderShell(st);
+  // The session view follows the list too: a session that ended shows so
+  // even if its session.ended never arrived.
+  if (mounted && mounted.kind === 'session' && st.route.view === 'session') mounted.handle.update();
   // Redraw the page only when what it shows changed, so focus and scroll
   // stay put while the list ticks.
   const key = JSON.stringify([st.route, currentSessionId(st), st.loaded, st.projects.length, st.opening,
@@ -234,6 +263,7 @@ const events = connectEvents(boot.instance, {
       return;
     }
     if (type === 'session.updated' || type === 'session.ended') patchSession(payload.session_id, payload.data);
+    if (mounted && mounted.kind === 'session' && mounted.id === payload.session_id) mounted.handle.event(type, payload);
   },
 });
 

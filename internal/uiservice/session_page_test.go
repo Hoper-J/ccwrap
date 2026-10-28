@@ -1,0 +1,256 @@
+package uiservice
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+	"testing"
+)
+
+// Activity rows read as the session page reads them: method, path without
+// ?beta=true, the model view, the failure; credential headers masked; the
+// host ccwrap sent the request to, against the one Claude Code asked for.
+func TestSessionActivityRows(t *testing.T) {
+	out := runModule(t, `
+import { activityRow, headerGroups, healthWord } from '$JS/session/model.js';
+const deny = new Set(['authorization', 'x-api-key']);
+const req = {
+  timestamp: '2026-10-28T10:00:00Z', method: 'POST', path: '/v1/messages?beta=true', status_code: 404, latency_ms: 12,
+  stream_state: 'http', logical_target_host: 'api.anthropic.com', actual_upstream_host: 'gw.example', model: 'claude-opus-5-5', model_unmapped: true,
+  request_headers: { 'Authorization': ['Bearer sk-x'], 'Anthropic-Version': ['2023-06-01'], 'User-Agent': ['claude-cli/2'], 'X-Odd': ['1'] },
+  body_ref: { id: 'b1' }, response_body_ref: { id: 'r1' },
+  failure: { source: 'upstream', type: 'not_found_error', message: 'model not found: claude-opus-5-5', hint: 'No alias…' },
+};
+const r = activityRow(req, 'forwarded-api', { deny, unmask: false });
+const u = activityRow(req, 'forwarded-api', { deny, unmask: true });
+const same = activityRow({ ...req, actual_upstream_host: 'api.anthropic.com' }, 'forwarded-api', { deny, unmask: false });
+const e = activityRow({ timestamp: 't', severity: 'warn', summary: 'boom', count: 3, error_class: 'upstream_http_429', upstream_host: 'gw', suggested_action: 'wait' }, 'error', {});
+const tr = activityRow({ timestamp: 't', category: 'profile_switch', summary: 'switched', detail: '{"from":"a","to":"b","to_provider":"B","class":"live"}' }, 'trace', {});
+const tunnel = activityRow({ timestamp: 't', method: 'CONNECT', path: 'github.com:443', status_code: 200 }, 'tunnel', { deny, unmask: false });
+console.log(JSON.stringify({ r, u: u.headers, same: same.headers[0], e, tr, tunnel,
+  words: [healthWord({ state: 'active', session_health: 'ok' }), healthWord({ state: 'active', session_health: 'warn' }), healthWord({ state: 'attached', session_health: 'error' }), healthWord({ state: 'ended', session_health: 'error' })] }));
+`)
+	var got struct {
+		R struct {
+			Main, Right, St, BodyID, ResponseBodyID string
+			Forwarded                               bool
+			Headers                                 []headerGroup
+			Failure                                 struct{ Head, Message string }
+		}
+		U    []headerGroup
+		Same headerGroup
+		E    struct{ Label, Severity, Main, Right string }
+		Tr   struct {
+			Switch struct{ From, To, ToProvider string }
+		}
+		Tunnel struct {
+			Note    string
+			Headers any
+		}
+		Words []string
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("%s: %v", out, err)
+	}
+	r := got.R
+	if r.Main != "POST /v1/messages · claude-opus-5-5 (no alias)" || r.Right != "404 model not found: claude-opus-5-5 · 12 ms · http · gw.example" || r.St != "warn" || !r.Forwarded {
+		t.Errorf("row = %+v", r)
+	}
+	if r.BodyID != "b1" || r.ResponseBodyID != "r1" || r.Failure.Head != "upstream returned 404 · not_found_error" {
+		t.Errorf("inspector = %+v", r)
+	}
+	var groups []string
+	for _, g := range r.Headers {
+		groups = append(groups, g.Name)
+	}
+	if strings.Join(groups, ",") != "Routing,Protocol & versioning,Client identity,Credentials,Other" {
+		t.Errorf("groups = %v", groups)
+	}
+	if host := r.Headers[0].Rows[0]; host.Name != "host" || host.Value != "gw.example" || host.Was != "api.anthropic.com" || host.Tag != "rewritten" {
+		t.Errorf("rewritten host row = %+v", host)
+	}
+	if host := got.Same.Rows[0]; got.Same.Name != "Routing" || host.Value != "api.anthropic.com" || host.Was != "" || host.Tag != "" {
+		t.Errorf("unchanged host row = %+v", got.Same)
+	}
+	if cred := groupRows(r.Headers, "Credentials")[0]; cred.Value != "‹redacted by ccwrap›" || !cred.Redacted {
+		t.Errorf("credential row = %+v", cred)
+	}
+	if cred := groupRows(got.U, "Credentials")[0]; cred.Value != "Bearer sk-x" || cred.Redacted {
+		t.Errorf("unmasked credential row = %+v", cred)
+	}
+	if got.E.Label != "warning" || got.E.Severity != "warn" || got.E.Main != "boom ×3" || got.E.Right != "upstream_http_429 · gw · wait" {
+		t.Errorf("error row = %+v", got.E)
+	}
+	if s := got.Tr.Switch; s.From != "a" || s.To != "b" || s.ToProvider != "B" {
+		t.Errorf("switch = %+v", s)
+	}
+	if got.Tunnel.Headers != nil || got.Tunnel.Note != "" {
+		t.Errorf("a tunnel row has no inspector: %+v", got.Tunnel)
+	}
+	if strings.Join(got.Words, ",") != "active,degraded,error,ended" {
+		t.Errorf("health words = %v", got.Words)
+	}
+}
+
+// The inspector tags what ccwrap did to each header on the way upstream —
+// rewritten, stripped, or injected (a header Claude Code did not send) —
+// and never shows a value ccwrap set; the summary counts each kind.
+func TestSessionHeaderDiff(t *testing.T) {
+	out := runModule(t, `
+import { headerGroups, headerSummary } from '$JS/session/model.js';
+const deny = new Set(['authorization', 'x-api-key']);
+const headers = { 'Authorization': ['Bearer sk-ph‹redacted 9 chars›'], 'Anthropic-Beta': ['a,b'], 'User-Agent': ['claude-cli/2'], 'Accept-Encoding': ['gzip'] };
+const diff = { changes: [
+  { name: 'Accept-Encoding', action: 'rewritten' }, { name: 'Anthropic-Beta', action: 'rewritten' },
+  { name: 'Authorization', action: 'stripped' }, { name: 'X-Api-Key', action: 'injected' }, { name: 'X-Team', action: 'injected' },
+] };
+const groups = headerGroups(headers, deny, false, { host: 'gw.example', was: 'api.anthropic.com' }, diff);
+const rows = {};
+for (const g of groups) for (const r of g.rows) rows[r.name] = { group: g.name, ...r };
+console.log(JSON.stringify({ rows, compared: headerSummary(groups, true), plain: headerSummary(groups, false) }));
+`)
+	var got struct {
+		Rows map[string]struct {
+			Group, Value, Was, Tag string
+			Set, Struck, Redacted  bool
+		}
+		Compared, Plain [][]any
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("%s: %v", out, err)
+	}
+	r := got.Rows
+	if a := r["Authorization"]; a.Tag != "stripped" || !a.Struck || !a.Redacted || a.Group != "Credentials" {
+		t.Errorf("stripped credential = %+v", a)
+	}
+	if k := r["X-Api-Key"]; k.Tag != "injected" || !k.Set || k.Value != "set by ccwrap" || k.Group != "Credentials" {
+		t.Errorf("injected key = %+v", k)
+	}
+	if x := r["X-Team"]; x.Tag != "injected" || x.Value != "set by ccwrap" || x.Group != "Other" {
+		t.Errorf("injected upstream header = %+v", x)
+	}
+	if b := r["Anthropic-Beta"]; b.Tag != "rewritten" || b.Was != "a,b" || b.Value != "set by ccwrap" || b.Group != "Protocol & versioning" {
+		t.Errorf("rewritten header = %+v", b)
+	}
+	if u := r["User-Agent"]; u.Tag != "" || u.Value != "claude-cli/2" {
+		t.Errorf("passthrough header = %+v", u)
+	}
+	if fmt.Sprint(got.Compared) != "[[rewritten 3] [injected 2] [stripped 1] [redacted 1] [passthrough 1]]" {
+		t.Errorf("compared summary = %v", got.Compared)
+	}
+	if fmt.Sprint(got.Plain) != "[[headers 7] [groups 6] [rewritten 3] [redacted 1]]" {
+		t.Errorf("plain summary = %v", got.Plain)
+	}
+}
+
+// headerGroup is one group of an inspector's request headers.
+type headerGroup struct {
+	Name string
+	Rows []headerRow
+}
+
+type headerRow struct {
+	Name, Value, Was, Tag string
+	Redacted              bool
+}
+
+func groupRows(groups []headerGroup, name string) []headerRow {
+	for _, g := range groups {
+		if g.Name == name {
+			return g.Rows
+		}
+	}
+	return nil
+}
+
+// Filters count and cap the retained activity, newest first; live records
+// fold the way the session's rings do.
+func TestSessionActivityFilters(t *testing.T) {
+	out := runModule(t, `
+import { counts, visibleEntries, defaultFilter, addRecord, RETAIN } from '$JS/session/model.js';
+let act = { requests: [
+  { timestamp: '2026-10-28T10:00:01Z', class: 'forwarded-api' },
+  { timestamp: '2026-10-28T10:00:03Z', class: 'tunnel' },
+], errors: [{ timestamp: '2026-10-28T10:00:02Z', error_class: 'x', summary: 's', upstream_host: 'h', count: 1 }], trace: [] };
+const before = counts(act);
+const all = visibleEntries(act, 'all', 10).map(([r, c]) => c);
+const limited = visibleEntries(act, 'all', 2).length;
+act = addRecord(act, 'error', { timestamp: '2026-10-28T10:00:04Z', error_class: 'x', summary: 's', upstream_host: 'h', count: 2 });
+const folded = act.errors.length;
+for (let i = 0; i < RETAIN.requests + 5; i++) act = addRecord(act, 'request', { timestamp: 'x', class: 'forwarded-api' });
+console.log(JSON.stringify({ before, all, limited, folded, capped: act.requests.length,
+  def: [defaultFilter({ requests: [{ class: 'tunnel' }], errors: [], trace: [] }), defaultFilter({ requests: [{ class: 'forwarded-api' }], errors: [], trace: [] })] }));
+`)
+	want := `{"before":{"all":3,"error":1,"trace":0,"forwarded-api":1,"tunnel":1},"all":["tunnel","error","forwarded-api"],"limited":2,"folded":1,"capped":250,"def":["all","forwarded-api"]}`
+	if strings.TrimSpace(out) != want {
+		t.Fatalf("got  %s\nwant %s", strings.TrimSpace(out), want)
+	}
+}
+
+// A captured stream is put back together: text, thinking, model, stop,
+// output tokens.
+func TestSessionBodyReassembly(t *testing.T) {
+	out := runModule(t, `
+import { isSSEBody, reassembleSSE, anatomy } from '$JS/session/bodies.js';
+const sse = 'event: message_start\r\ndata: {"type":"message_start","message":{"model":"m1","usage":{"output_tokens":1}}}\r\n\r\n' +
+  'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"hmm"}}\n\n' +
+  'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hel"}}\n\n' +
+  'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"lo"}}\n\n' +
+  'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":9}}\n\n';
+const body = JSON.stringify({ model: 'x', messages: [{ role: 'user', content: 'hi' }], system: 'y'.repeat(300) });
+console.log(JSON.stringify({ sse: isSSEBody(sse), json: isSSEBody('{"a":1}'), r: reassembleSSE(sse), a: anatomy(JSON.parse(body), body.length).map((x) => x.key + ' ' + x.pct) }));
+`)
+	want := `{"sse":true,"json":false,"r":{"text":"Hello","thinking":"hmm","model":"m1","stop":"end_turn","outTok":9,"events":5},"a":["system 82%","messages 9%","model 1%"]}`
+	if strings.TrimSpace(out) != want {
+		t.Fatalf("got  %s\nwant %s", strings.TrimSpace(out), want)
+	}
+}
+
+// The ribbon's own words: the egress probe line, the alias table, issue
+// titles and evidence, the header meta line.
+func TestSessionWords(t *testing.T) {
+	out := runModule(t, `
+import { egressLine, aliasRows } from '$JS/session/ribbon.js';
+import { issueTitle, issueEvidence } from '$JS/session/issues.js';
+import { metaLine } from '$JS/session/header.js';
+const now = Date.parse('2026-10-28T10:00:00Z');
+console.log(JSON.stringify({
+  ok: egressLine({ status: 'OK', public_ip: '203.0.113.9', city: 'Tokyo', country: 'jp', org: 'AS1', latency_ms: 120 }),
+  fail: egressLine({ status: 'NET_FAIL', latency_ms: 0, err: 'refused' }),
+  aliases: aliasRows({ 'claude-opus-5-5': 'gpt-6', '*': '*', 'claude-haiku-5': 'mini' }),
+  title: [issueTitle({ title: 'claude-opus-5-5 has no alias', title_code: 'claude-opus-5-5' }), issueTitle({ title: 'Rate limited', title_code: '' })],
+  evidence: [issueEvidence({ evidence: '429 slow · 2 requests', last_seen_at: '2026-10-28T09:58:00Z' }, now), issueEvidence({ evidence: '', last_seen_at: '' }, now)],
+  meta: [metaLine({ active_profile_name: 'deepseek', state: 'active', claude_pid: 42, created_at: '2026-10-28T09:48:00Z', last_activity_at: '2026-10-28T09:59:52Z' }, now),
+    metaLine({ state: 'ended', ended_at: '2026-10-28T09:59:20Z' }, now)],
+}));
+`)
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("%s: %v", out, err)
+	}
+	b, _ := json.Marshal(got)
+	for _, want := range []string{
+		`"ok":{"ok":true,"text":"✓ 203.0.113.9 · Tokyo, 🇯🇵 JP · AS1 · 120ms"}`,
+		`"fail":{"ok":false,"text":"✗ NET_FAIL · 0ms · refused"}`,
+		`"aliases":[{"from":"claude-haiku-5","to":"mini"},{"from":"claude-opus-5-5","to":"gpt-6"},{"from":"other Claude models","other":true,"to":"keep their Claude names"}]`,
+		`"title":[{"code":"claude-opus-5-5","rest":" has no alias"},{"code":"","rest":"Rate limited"}]`,
+		`"evidence":["429 slow · 2 requests · last 2m ago",""]`,
+		`"meta":["deepseek · active · claude pid 42 · up 12m · last activity 8s ago","no profile · ended 40s ago"]`,
+	} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("missing %s\nin %s", want, b)
+		}
+	}
+}
+
+// The posture sentence bolds the upstream host and the alias count.
+func TestSessionPostureEmphasis(t *testing.T) {
+	out := runModule(t, `
+import { emphasisParts } from '$JS/session/header.js';
+console.log(JSON.stringify(emphasisParts('Routing Claude Code through api.deepseek.com. CCWRAP holds your gateway credentials and applies 2 model aliases; Claude Code only sees logical names.', ['api.deepseek.com', ''])));
+`)
+	want := `[{"text":"Routing Claude Code through ","bold":false},{"text":"api.deepseek.com","bold":true},{"text":". CCWRAP holds your gateway credentials and applies ","bold":false},{"text":"2 model aliases","bold":true},{"text":"; Claude Code only sees logical names.","bold":false}]`
+	if strings.TrimSpace(out) != want {
+		t.Fatalf("got  %s\nwant %s", strings.TrimSpace(out), want)
+	}
+}

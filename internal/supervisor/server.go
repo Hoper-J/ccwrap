@@ -154,6 +154,26 @@ type sessionState struct {
 	// loaded hello (CCWRAP_NATIVE_TLS_HELLO) rather than captured live; guarded
 	// by sess.mu. Sticky — never reset by a later nil-hello profile-switch setRoute.
 	nativeTLSHelloLoaded bool
+	// updateQueued is set while a coalesced session_updated is pending
+	// (queueSessionUpdate).
+	updateQueued atomic.Bool
+}
+
+// sessionUpdateDelay coalesces the session_updated events that requests
+// cause (counters, last activity): at most one per delay, with the latest
+// state.
+const sessionUpdateDelay = 500 * time.Millisecond
+
+// queueSessionUpdate sends session_updated once sessionUpdateDelay has
+// passed, unless one is already on its way.
+func (s *Supervisor) queueSessionUpdate(id string, sess *sessionState) {
+	if !sess.updateQueued.CompareAndSwap(false, true) {
+		return
+	}
+	time.AfterFunc(sessionUpdateDelay, func() {
+		sess.updateQueued.Store(false)
+		s.broadcast("session_updated", id, sess.snapshot())
+	})
 }
 
 type Supervisor struct {
@@ -1058,13 +1078,16 @@ func (s *Supervisor) markSessionActive(id string) {
 		return
 	}
 	sess.mu.Lock()
-	if sess.public.State == model.StateAttached ||
-		sess.public.State == model.StateLaunching {
+	changed := sess.public.State == model.StateAttached || sess.public.State == model.StateLaunching
+	if changed {
 		sess.public.State = model.StateActive
 		sess.public.UpdatedAt = time.Now()
 	}
 	sess.mu.Unlock()
 	s.touch()
+	if changed {
+		s.broadcast("session_updated", id, sess.snapshot())
+	}
 }
 
 func (s *Supervisor) recordRequest(id string, record model.RequestRecord) {
@@ -1137,6 +1160,9 @@ func (s *Supervisor) recordRequest(id string, record model.RequestRecord) {
 	s.broadcast("request", id, record)
 	if newUnmapped || issuesChanged {
 		s.broadcast("session_updated", id, sess.snapshot())
+	} else {
+		// The counters and the last activity moved; pages show them.
+		s.queueSessionUpdate(id, sess)
 	}
 	if newUnmapped {
 		if err := unmapped.Record(s.paths.StateDir, record.ActiveProfileName, record.Model, time.Now()); err != nil {

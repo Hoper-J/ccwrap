@@ -1,6 +1,6 @@
 // Hash routes, so the page works on a forwarded port with no server
 // routing: #/sessions/<id> · #/projects · #/profiles · #/profiles/<name> ·
-// #/profiles/new.
+// #/profiles/new · #/profiles/<name>/<field>.
 
 export function parseRoute(hash) {
   const parts = String(hash || '').replace(/^#\/?/, '').split('/').filter(Boolean).map((p) => {
@@ -11,7 +11,9 @@ export function parseRoute(hash) {
     case 'projects': return { view: 'projects' };
     case 'profiles':
       if (parts[1] === 'new') return { view: 'profile', isNew: true, name: '' };
-      if (parts[1]) return { view: 'profile', isNew: false, name: parts[1] };
+      // #/profiles/<name>/<field> opens the profile at a field to fix
+      // (key, base_url).
+      if (parts[1]) return { view: 'profile', isNew: false, name: parts[1], field: parts[2] || '' };
       return { view: 'profiles' };
   }
   return { view: 'session', id: '' };

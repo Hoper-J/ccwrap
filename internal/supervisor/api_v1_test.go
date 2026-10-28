@@ -6,12 +6,15 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Hoper-J/ccwrap/internal/control"
 	"github.com/Hoper-J/ccwrap/internal/model"
+	"github.com/Hoper-J/ccwrap/internal/testutil"
 )
 
 // apiCall sends one request to the session's v1 API over its control socket.
@@ -163,6 +166,84 @@ func TestAPIv1Events(t *testing.T) {
 	}
 }
 
+// After a request a session.updated follows with the new counts and state.
+// When the session closes and the supervisor stops right after, as the
+// launcher does, the stream still carries session.ended, then ends.
+func TestAPIv1EventsFollowRequestsAndEnd(t *testing.T) {
+	up := diagUpstream(t, false)
+	paths := testutil.ShortAppPaths(t, "e.sock")
+	srv, err := New(paths, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runCtx, stop := context.WithCancel(context.Background())
+	t.Cleanup(stop)
+	go func() { _ = srv.Run(runCtx) }()
+	client := control.NewClient(paths.SocketPath)
+	waitForSupervisor(t, client)
+	sess, err := client.CreateSession(context.Background(), model.SessionCreateRequest{LauncherPID: os.Getpid(), Name: "diag"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.SetRoute(context.Background(), sess.ID, diagRoute(up.URL, map[string]string{"claude-opus-5-5": "gpt-6"})); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, "GET", "http://unix/api/v1/events", nil)
+	resp, err := (&http.Client{Transport: control.UnixTransport(paths.SocketPath)}).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	events := make(chan [2]string, 64)
+	go func() {
+		sc := bufio.NewScanner(resp.Body)
+		sc.Buffer(make([]byte, 1<<20), 1<<20)
+		var typ string
+		for sc.Scan() {
+			if line := sc.Text(); strings.HasPrefix(line, "event: ") {
+				typ = strings.TrimPrefix(line, "event: ")
+			} else if strings.HasPrefix(line, "data: ") {
+				events <- [2]string{typ, strings.TrimPrefix(line, "data: ")}
+			}
+		}
+		close(events)
+	}()
+	waitFor := func(typ, contains string) {
+		t.Helper()
+		for {
+			select {
+			case ev, ok := <-events:
+				if !ok {
+					t.Fatalf("stream closed before %s", typ)
+				}
+				if ev[0] == typ && strings.Contains(ev[1], contains) {
+					return
+				}
+			case <-ctx.Done():
+				t.Fatalf("timed out waiting for %s with %s", typ, contains)
+			}
+		}
+	}
+	waitFor("hello", sess.ID)
+	messagesClient(t, paths.CABundlePath, sess)("claude-opus-5-5")
+	waitFor("session.updated", `"recent_request_count":1`)
+	if err := client.CloseSession(ctx, sess.ID, model.SessionCloseRequest{Reason: "claude process exited"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = srv.Shutdown(ctx)
+	waitFor("session.ended", `"state":"ended"`)
+	select {
+	case _, ok := <-events:
+		if ok {
+			t.Fatal("the stream goes on after session.ended")
+		}
+	case <-ctx.Done():
+		t.Fatal("the stream did not end")
+	}
+}
+
 // On a session with a profile, the API's model-default and profile switch
 // apply live, without a token.
 func TestAPIv1ProfileActions(t *testing.T) {
@@ -179,5 +260,56 @@ func TestAPIv1ProfileActions(t *testing.T) {
 	}
 	if status, out := apiCall(t, socket, "POST", "/api/v1/profile", `{"name":"nope"}`); status != 200 || out["result"] == string(SwitchResultSwitched) {
 		t.Fatalf("switch to unknown profile: %d %v", status, out)
+	}
+}
+
+// The v1 session words its ribbon, configuration and posture for clients:
+// display.cells, display.config, display.posture (+ posture_note).
+func TestAPIv1SessionDisplayForClients(t *testing.T) {
+	up := diagUpstream(t, false)
+	paths, sess := routedSessionPaths(t, diagRoute(up.URL, map[string]string{"claude-opus-5-5": "gpt-6"}))
+	status, got := apiCall(t, paths.SocketPath, "GET", "/api/v1/session", "")
+	disp, _ := got["display"].(map[string]any)
+	if status != 200 || disp == nil {
+		t.Fatalf("session: %d %v", status, got)
+	}
+	cells, _ := disp["cells"].([]any)
+	var keys []string
+	for _, c := range cells {
+		keys = append(keys, c.(map[string]any)["key"].(string))
+	}
+	if strings.Join(keys, ",") != "route,auth,models,traffic,profile,bodies,egress,native_tls" {
+		t.Fatalf("cells = %v", keys)
+	}
+	models := cells[2].(map[string]any)
+	if models["label"] != "Models" || models["value"] != "1 alias" || models["state"] != "aliases-active" {
+		t.Fatalf("models cell = %v", models)
+	}
+	if profile := cells[4].(map[string]any); profile["value"] != "gw" || profile["state"] != "active" {
+		t.Fatalf("profile cell = %v", profile)
+	}
+	config, _ := disp["config"].([]any)
+	if len(config) == 0 || config[0].(map[string]any)["label"] != "Session ID" || config[0].(map[string]any)["value"] != sess.ID {
+		t.Fatalf("config = %v", config)
+	}
+	if !strings.HasPrefix(disp["posture"].(string), "Routing Claude Code through ") || disp["posture_note"] != nil {
+		t.Fatalf("posture = %v / %v", disp["posture"], disp["posture_note"])
+	}
+}
+
+// egress-test probes where the session's traffic exits now.
+func TestAPIv1EgressTest(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"ip":"203.0.113.9","country":"JP"}`)
+	}))
+	defer target.Close()
+	t.Setenv("CCWRAP_EGRESS_TEST_URL", target.URL)
+	paths, _ := routedSessionPaths(t, diagRoute("http://127.0.0.1:9", nil))
+	status, got := apiCall(t, paths.SocketPath, "POST", "/api/v1/egress-test", "")
+	if status != 200 || got["status"] != "OK" || got["public_ip"] != "203.0.113.9" {
+		t.Fatalf("egress-test: %d %v", status, got)
+	}
+	if status, out := apiCall(t, paths.SocketPath, "GET", "/api/v1/egress-test", ""); status != http.StatusMethodNotAllowed || errCode(out) != "method_not_allowed" {
+		t.Fatalf("GET egress-test: %d %v", status, out)
 	}
 }

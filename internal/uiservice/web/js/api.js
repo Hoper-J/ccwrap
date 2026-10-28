@@ -2,13 +2,14 @@
 // the merged event stream.
 
 // bootstrap is what the page was served with: the write token, the service
-// instance, its version and address.
+// instance, its version and address, and the credential header names.
 export function bootstrap(dataset) {
   return {
     token: dataset.token || '',
     instance: dataset.instance || '',
     version: dataset.version || '',
     address: dataset.address || '',
+    deny: String(dataset.deny || '').split(',').filter(Boolean),
   };
 }
 
@@ -43,7 +44,19 @@ export function createApi(token, fetchImpl = globalThis.fetch.bind(globalThis)) 
     }
     return data;
   }
+  // text reads a body as it is (captured request and response bodies).
+  async function text(path) {
+    let res;
+    try {
+      res = await fetchImpl('/api/v1' + path, { cache: 'no-store', credentials: 'same-origin' });
+    } catch (err) {
+      throw new ApiError(0, 'unreachable', "ccwrap ui can't be reached.");
+    }
+    if (!res.ok) throw new ApiError(res.status, 'http_' + res.status, res.statusText || 'request failed');
+    return res.text();
+  }
   return {
+    text,
     get: (path) => request('GET', path),
     post: (path, body) => request('POST', path, body),
     put: (path, body) => request('PUT', path, body),

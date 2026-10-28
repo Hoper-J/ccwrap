@@ -6,6 +6,8 @@ import (
 	"io/fs"
 	"net/http"
 	"strings"
+
+	"github.com/Hoper-J/ccwrap/internal/ui"
 )
 
 // The app's page: one HTML shell plus static CSS and ES modules, all built
@@ -44,7 +46,10 @@ func pageHeaders(h http.Header) {
 
 type pageData struct {
 	Token, InstanceID, Version, Address string
-	Sprite                              template.HTML
+	// Deny is the credential header names the inspector masks, comma
+	// separated.
+	Deny   string
+	Sprite template.HTML
 }
 
 func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
@@ -52,7 +57,8 @@ func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = pageTemplate.Execute(w, pageData{
-		Token: s.token, InstanceID: s.info.InstanceID, Version: s.info.Version, Address: s.info.HTTPAddr, Sprite: iconSprite,
+		Token: s.token, InstanceID: s.info.InstanceID, Version: s.info.Version, Address: s.info.HTTPAddr,
+		Deny: strings.Join(ui.CredentialDenyList(), ","), Sprite: iconSprite,
 	})
 }
 

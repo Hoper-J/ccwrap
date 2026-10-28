@@ -33,19 +33,19 @@ func TestSessionPosture(t *testing.T) {
 			want: "Routing Claude Code through 50.18.84.244:3000. CCWRAP holds your gateway credentials and applies 1 model alias; Claude Code only sees logical names.",
 		},
 		{
-			// Only the count: the error list carries the details.
+			// Only the count: the issues carry the details.
 			name: "warn health, count only",
-			sess: &model.Session{RouteClass: model.RouteClassFirstParty, ExactUpstreamHost: "api.anthropic.com", AuthPolicy: model.AuthPolicyFirstPartyPassthrough, Health: model.HealthWarn, RecentErrorCount: 2},
+			sess: &model.Session{RouteClass: model.RouteClassFirstParty, ExactUpstreamHost: "api.anthropic.com", AuthPolicy: model.AuthPolicyFirstPartyPassthrough, Health: model.HealthWarn, RecentErrorCount: 5, Issues: []model.Issue{{ID: "rate_limited", State: model.IssueOpen}, {ID: "requests_failing", State: model.IssueOpen}}},
 			want: "Routing Claude Code through api.anthropic.com with your local credentials. — 2 issues recorded since launch.",
 		},
 		{
 			name: "one issue",
-			sess: &model.Session{RouteClass: model.RouteClassFirstParty, ExactUpstreamHost: "api.anthropic.com", AuthPolicy: model.AuthPolicyFirstPartyPassthrough, Health: model.HealthError, RecentErrorCount: 1},
+			sess: &model.Session{RouteClass: model.RouteClassFirstParty, ExactUpstreamHost: "api.anthropic.com", AuthPolicy: model.AuthPolicyFirstPartyPassthrough, Health: model.HealthError, Issues: []model.Issue{{ID: "upstream_unreachable", State: model.IssueOpen}}},
 			want: "Routing Claude Code through api.anthropic.com with your local credentials. — 1 issue recorded since launch.",
 		},
 		{
 			name: "healed (ok) still shows cumulative count",
-			sess: &model.Session{RouteClass: model.RouteClassFirstParty, ExactUpstreamHost: "api.anthropic.com", AuthPolicy: model.AuthPolicyFirstPartyPassthrough, Health: model.HealthOK, RecentErrorCount: 2},
+			sess: &model.Session{RouteClass: model.RouteClassFirstParty, ExactUpstreamHost: "api.anthropic.com", AuthPolicy: model.AuthPolicyFirstPartyPassthrough, Health: model.HealthOK, Issues: []model.Issue{{ID: "rate_limited", State: model.IssueResolved}, {ID: "requests_failing", State: model.IssueResolved}}},
 			want: "Routing Claude Code through api.anthropic.com with your local credentials. — 2 issues recorded since launch.",
 		},
 		{

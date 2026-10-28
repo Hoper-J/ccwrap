@@ -42,6 +42,9 @@ func (s *Supervisor) apiV1() http.Handler {
 	mux.HandleFunc("POST /api/v1/profile", s.withAPISession(s.apiSwitchProfile))
 	mux.HandleFunc("POST /api/v1/capture", s.withAPISession(s.apiCapture))
 	mux.HandleFunc("POST /api/v1/model-default", s.withAPISession(s.apiModelDefault))
+	mux.HandleFunc("POST /api/v1/egress-test", s.withAPISession(func(w http.ResponseWriter, r *http.Request, sess *sessionState) {
+		sess.proxy.writeActiveEgressProbe(w)
+	}))
 	mux.HandleFunc("GET /api/v1/native-tls", s.withAPISession(func(w http.ResponseWriter, r *http.Request, sess *sessionState) {
 		sess.proxy.handleNativeTLSInfo(w, r)
 	}))
@@ -52,7 +55,7 @@ func (s *Supervisor) apiV1() http.Handler {
 	// apart itself.
 	known := map[string]string{
 		"/api/v1/meta": "GET", "/api/v1/session": "GET", "/api/v1/activity": "GET", "/api/v1/events": "GET",
-		"/api/v1/profile": "POST", "/api/v1/capture": "POST", "/api/v1/model-default": "POST",
+		"/api/v1/profile": "POST", "/api/v1/capture": "POST", "/api/v1/model-default": "POST", "/api/v1/egress-test": "POST",
 		"/api/v1/native-tls": "GET", "/api/v1/native-tls/clienthello.bin": "GET",
 	}
 	mux.HandleFunc("/api/v1/", func(w http.ResponseWriter, r *http.Request) {
@@ -91,7 +94,7 @@ func (s *Supervisor) withAPISession(h func(http.ResponseWriter, *http.Request, *
 func (s *Supervisor) apiMeta(w http.ResponseWriter, r *http.Request) {
 	meta := map[string]any{
 		"api":          apiVersion,
-		"capabilities": []string{"session", "activity", "bodies", "events", "profile", "capture", "model-default", "native-tls"},
+		"capabilities": []string{"session", "activity", "bodies", "events", "profile", "capture", "model-default", "native-tls", "egress-test"},
 	}
 	if lc := s.launchContext(); lc != nil {
 		meta["version"] = lc.Version
@@ -155,7 +158,7 @@ func (s *Supervisor) apiBody(w http.ResponseWriter, r *http.Request, sess *sessi
 
 // apiEvents streams the session's events as SSE. The first event, hello,
 // names the session, so a client that reconnects to a reused address can
-// tell it reached a different one.
+// tell it reached a different one; the stream ends after session.ended.
 func (s *Supervisor) apiEvents(w http.ResponseWriter, r *http.Request, sess *sessionState) {
 	if _, ok := w.(http.Flusher); !ok {
 		writeAPIError(w, &apiError{http.StatusInternalServerError, "internal", "streaming unsupported"})
@@ -175,18 +178,24 @@ func (s *Supervisor) apiEvents(w http.ResponseWriter, r *http.Request, sess *ses
 	}) {
 		return
 	}
+	// send writes one event and reports whether the stream is over: the
+	// event ended the session, or the client stopped reading.
+	send := func(ev model.Event) bool {
+		if ev.SessionID != id {
+			return false
+		}
+		typ, ev, ok := v1Event(ev)
+		if ok && !sw.send(func(w io.Writer) { writeSSE(w, typ, ev) }) {
+			return true
+		}
+		return typ == "session.ended"
+	}
 	keepAlive := time.NewTicker(15 * time.Second)
 	defer keepAlive.Stop()
 	for {
 		select {
 		case ev, ok := <-ch:
-			if !ok {
-				return
-			}
-			if ev.SessionID != id {
-				continue
-			}
-			if typ, ev, ok := v1Event(ev); ok && !sw.send(func(w io.Writer) { writeSSE(w, typ, ev) }) {
+			if !ok || send(ev) {
 				return
 			}
 		case <-keepAlive.C:
@@ -196,7 +205,18 @@ func (s *Supervisor) apiEvents(w http.ResponseWriter, r *http.Request, sess *ses
 		case <-r.Context().Done():
 			return
 		case <-s.closed:
-			return
+			// The supervisor stops right after the session closes: send
+			// what is queued, session.ended among it, before the stream ends.
+			for {
+				select {
+				case ev, ok := <-ch:
+					if !ok || send(ev) {
+						return
+					}
+				default:
+					return
+				}
+			}
 		}
 	}
 }

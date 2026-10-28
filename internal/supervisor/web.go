@@ -444,6 +444,13 @@ type sessionDisplay struct {
 	HeroSentence string `json:"hero_sentence"`
 	// Badge sums up the open issues for a session list (issueBadge).
 	Badge string `json:"badge,omitempty"`
+	// Posture and PostureNote are HeroSentence in two parts: the route
+	// sentence and the "— N issues recorded since launch." note.
+	Posture     string `json:"posture"`
+	PostureNote string `json:"posture_note,omitempty"`
+	// Cells are the ribbon, in order; Config the configuration details.
+	Cells  []displayCell `json:"cells"`
+	Config []displayKV   `json:"config"`
 	// ModelFix backs the Models popover's fix for unaliased models; nil
 	// when there is nothing to fix.
 	ModelFix *modelFixDisplay `json:"model_fix,omitempty"`
@@ -465,12 +472,73 @@ func sessionWithDisplay(sess model.Session) sessionForWire {
 	w.Display.AuthValue, w.Display.AuthDetail, w.Display.AuthState = authCellPresentation(sess)
 	w.Display.ModelsValue, w.Display.ModelsDetail, w.Display.ModelsState = modelsCellPresentation(sess)
 	w.Display.HeroSentence = ui.SessionPosture(&sess)
+	w.Display.Posture, w.Display.PostureNote = ui.SessionPostureParts(&sess)
 	w.Display.Badge = issueBadge(sess)
+	w.Display.Cells = displayCells(sess)
+	for _, kv := range webSummaryFromSession(sess) {
+		w.Display.Config = append(w.Display.Config, displayKV{Label: kv.Label, Value: kv.Value})
+	}
 	if len(sess.UnmappedModels) > 0 {
 		_, targets := modelalias.Config{Forward: sess.ModelAliasForward}.SuggestedDefault()
 		w.Display.ModelFix = &modelFixDisplay{Models: sess.UnmappedModels, Profile: sess.ActiveProfileName, Targets: targets}
 	}
 	return w
+}
+
+// displayCell is one ribbon cell as an API client gets it. Key names the
+// cell (route, auth, models, traffic, profile, bodies, egress, native_tls);
+// State is the cell's data-state (amber/red variants, "" for plain).
+type displayCell struct {
+	Key    string `json:"key"`
+	Label  string `json:"label"`
+	Value  string `json:"value"`
+	Detail string `json:"detail,omitempty"`
+	State  string `json:"state,omitempty"`
+	Mono   bool   `json:"mono,omitempty"`
+}
+
+type displayKV struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
+}
+
+// displayCells is the ribbon webRibbonFromSession draws, as data: the same
+// cells and words, with the Profile cell as plain text (the page knows
+// nothing about profiles.json here, so inherit-env reads "no profile").
+func displayCells(sess model.Session) []displayCell {
+	routeValue, routeDetail := routeCellPresentation(sess)
+	authValue, authDetail, authState := authCellPresentation(sess)
+	modelsValue, modelsDetail, modelsState := modelsCellPresentation(sess)
+	bodiesValue, bodiesDetail, bodiesState := bodiesCellPresentation(sess.CaptureBodies, sess.CaptureBodiesUnmasked, sess.CaptureTelemetry)
+	egressValue, egressDetail, egressMono := egressCellPresentation(sess)
+	trafficLabel := "Traffic"
+	if sess.State == model.StateEnded {
+		trafficLabel = "Total"
+	}
+	profileValue, profileDetail := profileNameOrInheritEnv(sess), "no profile"
+	if sess.ActiveProfileName != "" {
+		profileDetail = webProfileDetail(sess)
+	}
+	cells := []displayCell{
+		{Key: "route", Label: "Route", Value: routeValue, Detail: routeDetail},
+		{Key: "auth", Label: "Auth", Value: authValue, Detail: authDetail, State: authState},
+		{Key: "models", Label: "Models", Value: modelsValue, Detail: modelsDetail, State: modelsState},
+		{Key: "traffic", Label: trafficLabel, Value: fmt.Sprintf("%d req", sess.RecentRequestCount), Detail: fmt.Sprintf("%d failed", sess.RecentFailedCount), State: trafficState(sess.RecentFailedCount), Mono: true},
+		{Key: "profile", Label: "Profile", Value: profileValue, Detail: profileDetail, State: profileCellDataState(sess, false)},
+		{Key: "bodies", Label: "Bodies", Value: bodiesValue, Detail: bodiesDetail, State: bodiesState},
+		{Key: "egress", Label: "Egress", Value: egressValue, Detail: egressDetail, Mono: egressMono},
+	}
+	if sess.NativeTLS != "" {
+		v, d, st := nativeTLSCellPresentation(sess.NativeTLS, sess.NativeTLSFallbacks, sess.NativeTLSLoaded)
+		cells = append(cells, displayCell{Key: "native_tls", Label: "NATIVE TLS", Value: v, Detail: d, State: st})
+	}
+	return cells
+}
+
+// webProfileDetail is the Profile cell's detail for an active profile:
+// "<provider> · N aliases".
+func webProfileDetail(sess model.Session) string {
+	return profileDetail(sess, true, 0)
 }
 
 // modelsCellPresentation is the Models ribbon cell. No aliases reads

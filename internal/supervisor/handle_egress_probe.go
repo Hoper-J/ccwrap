@@ -342,3 +342,18 @@ func parseLauncherEgressFlag(flag string) profiles.EgressSpec {
 	}
 	return profiles.EgressSpec{Mode: "inherit"}
 }
+
+// writeActiveEgressProbe reports where the session's traffic exits now:
+// the posture's egress, probed the way the session would dial. The v1 API's
+// egress-test.
+func (sp *sessionProxy) writeActiveEgressProbe(w http.ResponseWriter) {
+	profile := sp.synthesizeActiveSessionProfile()
+	var ap *posture
+	if sp.session != nil {
+		ap = sp.session.active.Load()
+	}
+	writeJSON(w, profiletest.ProbeEgress(profile, profiletest.EgressProbeOptions{
+		Timeout: 5 * time.Second,
+		NoProxy: egressProbeNoProxyOverlay(profile.Name, false, ap),
+	}))
+}

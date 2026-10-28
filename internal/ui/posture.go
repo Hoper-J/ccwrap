@@ -9,21 +9,28 @@ import (
 // SessionPosture returns the one-line plain-English hero summary
 // rendered identically by every session-bearing surface. Wire/enum
 // strings never appear here. Recorded problems appear only as a count:
-// the error list itself carries the details.
+// the session's issues carry the details.
 func SessionPosture(sess *model.Session) string {
+	base, note := SessionPostureParts(sess)
+	return base + note
+}
+
+// SessionPostureParts is SessionPosture in two parts: the route sentence and
+// the " — N issues recorded since launch." note ("" when none), so a page can
+// color the note.
+func SessionPostureParts(sess *model.Session) (base, note string) {
 	if sess == nil {
-		return ""
+		return "", ""
 	}
 	if sess.State == model.StateEnded {
 		// model.Session has no close-reason field, so degrade to
 		// the reasonless form. Do not invent a reason.
-		return "Session closed. Final state preserved below."
+		return "Session closed. Final state preserved below.", ""
 	}
 	host := sess.ExactUpstreamHost
 	if host == "" {
 		host = "api.anthropic.com"
 	}
-	var base string
 	switch sess.RouteClass {
 	case model.RouteClassThirdPartyHidden, model.RouteClassThirdPartyCompatible:
 		aliases := "aliases"
@@ -40,14 +47,15 @@ func SessionPosture(sess *model.Session) string {
 			base = fmt.Sprintf("Routing Claude Code through %s with your local credentials.", host)
 		}
 	}
-	// "issues": the list holds ccwrap's errors and the upstream's error
-	// responses (warnings) alike.
-	if sess.RecentErrorCount > 0 {
+	// The session's issues, open and resolved alike: the count says what
+	// went wrong since launch, the issue cards say what and whether it is
+	// fixed.
+	if n := len(sess.Issues); n > 0 {
 		noun := "issues"
-		if sess.RecentErrorCount == 1 {
+		if n == 1 {
 			noun = "issue"
 		}
-		base += fmt.Sprintf(" — %d %s recorded since launch.", sess.RecentErrorCount, noun)
+		note = fmt.Sprintf(" — %d %s recorded since launch.", n, noun)
 	}
-	return base
+	return base, note
 }

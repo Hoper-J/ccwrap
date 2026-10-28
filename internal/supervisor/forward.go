@@ -161,6 +161,9 @@ func (sp *sessionProxy) forwardToUpstream(w http.ResponseWriter, r *http.Request
 	// SSE streaming). Set from the tee's Close, read by recordRequest below
 	// — Close runs before ServeHTTP returns, so the ref is visible there.
 	var responseBodyRef *model.RequestBodyRef
+	// What the Rewrite hook did to the headers: set there, read by the
+	// record below (Rewrite runs inside ServeHTTP).
+	var upstreamHeaders *model.HeaderDiff
 	tap := newFailureTap(ap, aliasCtx, sp.supervisor.unmaskCredentials)
 	proxy := &httputil.ReverseProxy{
 		Transport:     upstreamTr,
@@ -187,6 +190,7 @@ func (sp *sessionProxy) forwardToUpstream(w http.ResponseWriter, r *http.Request
 				upstreamheaders.Apply(pr.Out.Header, copyUpstreamHeaders(ap.r.upstreamHeaders.Headers))
 				applyAuthOverride(pr.Out.Header, ap.r.overrideAuth)
 			}
+			upstreamHeaders = upstreamHeaderChanges(pr.In.Header, pr.Out.Header)
 		},
 		ModifyResponse: func(resp *http.Response) error {
 			if err := modelalias.RewriteResponse(resp, aliasCtx); err != nil {
@@ -269,7 +273,8 @@ func (sp *sessionProxy) forwardToUpstream(w http.ResponseWriter, r *http.Request
 		StreamState:        detectStreamState(r, rw.HeaderSnapshot()),
 		// Inbound headers, cloned (record outlives the request in a
 		// 250-deep ring; do not alias r.Header).
-		RequestHeaders: r.Header.Clone(),
+		RequestHeaders:  r.Header.Clone(),
+		UpstreamHeaders: upstreamHeaders,
 		// File-backed body refs, nil unless capture is on. UpstreamBodyRef
 		// is set only when modelalias actually changed the body.
 		BodyRef:         bodyRef,

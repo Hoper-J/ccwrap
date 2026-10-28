@@ -446,6 +446,10 @@ type RequestRecord struct {
 	StreamState        StreamState     `json:"stream_state"`
 	RequestHeaders     http.Header     `json:"request_headers,omitempty"`
 	BodyRef            *RequestBodyRef `json:"body_ref,omitempty"`
+	// UpstreamHeaders is what ccwrap did to RequestHeaders on the way
+	// upstream; nil when the request did not go through ccwrap's rewrite
+	// (tunnels, synthetic answers, telemetry).
+	UpstreamHeaders *HeaderDiff `json:"upstream_headers,omitempty"`
 	// UpstreamBodyRef is the body as it lands on the wire to the upstream
 	// — captured AFTER all in-supervisor request mutators (modelalias
 	// rewrite, system-block stripping). Set ONLY when capture is on AND
@@ -479,6 +483,29 @@ type RequestRecord struct {
 	// whether or not body capture is on.
 	Failure *RequestFailure `json:"failure,omitempty"`
 }
+
+// HeaderDiff lists the request headers ccwrap changed on the way upstream,
+// by canonical name; every other header went as Claude Code sent it.
+type HeaderDiff struct {
+	Changes []HeaderChange `json:"changes"`
+}
+
+// HeaderChange is one header ccwrap rewrote, injected or stripped. It
+// carries no value: the ones ccwrap sets are keys and configured upstream
+// headers, which never leave the proxy, and Claude Code's own value is in
+// RequestHeaders.
+type HeaderChange struct {
+	Name   string       `json:"name"`
+	Action HeaderAction `json:"action"`
+}
+
+type HeaderAction string
+
+const (
+	HeaderRewritten HeaderAction = "rewritten"
+	HeaderInjected  HeaderAction = "injected"
+	HeaderStripped  HeaderAction = "stripped"
+)
 
 // RequestFailure is what went wrong with one request, as far as ccwrap can
 // tell: the error the upstream returned, or ccwrap's own reason when no

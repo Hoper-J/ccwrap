@@ -182,7 +182,7 @@ console.log(JSON.stringify({ routes, landing: landingSession(sessions).id, none:
 		t.Fatalf("%s: %v", out, err)
 	}
 	b, _ := json.Marshal(got.Routes)
-	want := `[{"id":"","view":"session"},{"id":"","view":"session"},{"id":"abc","view":"session"},{"view":"projects"},{"view":"profiles"},{"isNew":true,"name":"","view":"profile"},{"isNew":false,"name":"deep seek","view":"profile"},{"id":"","view":"session"}]`
+	want := `[{"id":"","view":"session"},{"id":"","view":"session"},{"id":"abc","view":"session"},{"view":"projects"},{"view":"profiles"},{"isNew":true,"name":"","view":"profile"},{"field":"","isNew":false,"name":"deep seek","view":"profile"},{"id":"","view":"session"}]`
 	if string(b) != want || got.Landing != "new" || got.None != nil {
 		t.Fatalf("routes %s, landing %q, none %v", b, got.Landing, got.None)
 	}
