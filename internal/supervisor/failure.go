@@ -3,22 +3,20 @@ package supervisor
 import (
 	"encoding/json"
 	"fmt"
-	"html"
 	"net/http"
-	"regexp"
-	"strings"
 
 	"github.com/Hoper-J/ccwrap/internal/model"
 	"github.com/Hoper-J/ccwrap/internal/modelalias"
 	"github.com/Hoper-J/ccwrap/internal/preflight"
 	"github.com/Hoper-J/ccwrap/internal/ui"
+	"github.com/Hoper-J/ccwrap/internal/upstreamerr"
 )
 
 // failureBodyCapBytes bounds how much of an error response ccwrap keeps.
 // Error bodies are small; the cap only guards against an HTML error page.
 const failureBodyCapBytes = 16 << 10
 
-// failureMessageMax bounds the message extracted from an error body.
+// failureMessageMax bounds the message of a failure ccwrap itself reports.
 const failureMessageMax = 300
 
 // failureContext is what the hint needs to know about the request.
@@ -41,9 +39,9 @@ func upstreamFailure(fc failureContext, body []byte, truncated, unmask bool) *mo
 	f := &model.RequestFailure{Source: "upstream", Truncated: truncated, Issue: failureIssue(fc)}
 	if len(body) > 0 {
 		f.Body = maskFailureBody(body, unmask)
-		f.Type, f.Message = errorBodyMessage(body)
+		f.Type, f.Message = upstreamerr.Message(body)
 		if !unmask {
-			f.Message = maskKeyLikeTokens(f.Message)
+			f.Message = upstreamerr.MaskKeys(f.Message)
 		}
 	}
 	f.Hint = failureHint(fc, f)
@@ -54,62 +52,6 @@ func upstreamFailure(fc failureContext, body []byte, truncated, unmask bool) *mo
 // response.
 func ccwrapFailure(summary, hint, issue string) *model.RequestFailure {
 	return &model.RequestFailure{Source: "ccwrap", Message: truncateRunes(summary, failureMessageMax), Hint: hint, Issue: issue}
-}
-
-// errorBodyMessage pulls the error type and message out of the shapes error
-// bodies come in: Anthropic and OpenAI style JSON, RFC 9457 problem JSON
-// (Cloudflare), an HTML page's title, or plain text.
-func errorBodyMessage(body []byte) (typ, msg string) {
-	trimmed := strings.TrimSpace(string(body))
-	if trimmed == "" {
-		return "", ""
-	}
-	if strings.HasPrefix(trimmed, "{") {
-		var doc struct {
-			Type    string          `json:"type"`
-			Message string          `json:"message"`
-			Title   string          `json:"title"`
-			Detail  string          `json:"detail"`
-			Error   json.RawMessage `json:"error"`
-		}
-		if json.Unmarshal([]byte(trimmed), &doc) == nil {
-			var inner struct {
-				Type    string `json:"type"`
-				Message string `json:"message"`
-				Code    any    `json:"code"`
-			}
-			var errString string
-			switch {
-			case len(doc.Error) > 0 && json.Unmarshal(doc.Error, &inner) == nil && (inner.Message != "" || inner.Type != ""):
-				typ, msg = inner.Type, inner.Message
-			case len(doc.Error) > 0 && json.Unmarshal(doc.Error, &errString) == nil:
-				msg = errString
-			case doc.Message != "":
-				msg = doc.Message
-			case doc.Title != "" || doc.Detail != "":
-				msg = strings.TrimSpace(strings.TrimSuffix(doc.Title, ".") + ": " + doc.Detail)
-				msg = strings.Trim(msg, ": ")
-			}
-			if typ == "" && doc.Type != "error" && !strings.Contains(doc.Type, "://") {
-				typ = doc.Type
-			}
-			return typ, truncateRunes(strings.TrimSpace(msg), failureMessageMax)
-		}
-	}
-	if m := htmlTitle.FindStringSubmatch(trimmed); m != nil {
-		return "", truncateRunes(strings.TrimSpace(html.UnescapeString(m[1])), failureMessageMax)
-	}
-	line, _, _ := strings.Cut(trimmed, "\n")
-	return "", truncateRunes(strings.TrimSpace(line), failureMessageMax)
-}
-
-var htmlTitle = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
-
-// keyLikeToken matches API-key-shaped strings an error body may echo back.
-var keyLikeToken = regexp.MustCompile(`\b(sk-[A-Za-z0-9_-]{2})[A-Za-z0-9_-]{6,}`)
-
-func maskKeyLikeTokens(s string) string {
-	return keyLikeToken.ReplaceAllString(s, "$1…")
 }
 
 // maskFailureBody masks credentials in an error body: JSON credential fields
@@ -123,7 +65,7 @@ func maskFailureBody(body []byte, unmask bool) string {
 	if json.Valid(body) {
 		body = redactJSONBody(body, false)
 	}
-	return maskKeyLikeTokens(string(body))
+	return upstreamerr.MaskKeys(string(body))
 }
 
 // failureIssue is the session issue an upstream error status counts toward.
