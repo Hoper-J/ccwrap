@@ -3,8 +3,8 @@
 
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 12px 16px; margin: 0 0 16px; }
 .page-head-text { min-width: 0; }
-/* Wrapped under the title, the picker stays right, where its list opens. */
-.page-head > .term-wrap { margin-left: auto; }
+/* Wrapped under the title, the controls stay right, where their menus open. */
+.page-head > .term-wrap, .page-head-acts { margin-left: auto; }
 .page-head .page-title { margin: 0 0 6px; }
 .page-sub { margin: 0; font-size: 13px; color: var(--text-muted); overflow-wrap: anywhere; }
 .btn-xs { height: 26px; padding: 0 10px; font-size: 12px; }
@@ -115,3 +115,121 @@
 .proj-empty p { margin: 0 auto; max-width: 470px; font-size: 13px; line-height: 1.6; color: var(--text-secondary); }
 .proj-empty code { font-family: var(--font-mono); font-size: 12px; color: var(--text); }
 .proj-empty .proj-empty-src { margin-top: 10px; font-size: 11px; color: var(--text-muted); }
+
+/* ---- Buttons used by the profile pages ------------------------------------ */
+.btn-danger { border-color: var(--danger-solid); background: var(--danger-solid); color: #fff; font-weight: 600; }
+.btn-danger:hover { background: var(--danger-solid-hover); }
+.btn-danger-outline { border-color: var(--fill-danger-border); background: transparent; color: var(--danger); }
+.btn-danger-outline:hover { background: var(--fill-danger-bg); }
+.btn-danger-outline .icon { color: var(--danger); }
+.icon-btn-xs { width: 26px; height: 26px; border-radius: 6px; }
+.icon-btn-xs .icon { width: 13px; height: 13px; }
+.page-head-acts { display: flex; gap: 8px; }
+.muted { color: var(--text-muted); font-size: 12px; }
+.default-pill { display: inline-block; margin-left: 8px; vertical-align: middle; padding: 0 7px; font-size: 10px; font-weight: 700; line-height: 16px; border-radius: var(--r-pill); border: 1px solid var(--fill-ok-border); background: var(--fill-ok-bg); color: var(--accent); }
+.test-chip { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 4px; font-size: 10.5px; font-weight: 700; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-muted); cursor: help; }
+.test-chip[data-status="OK"] { background: var(--fill-ok-bg); color: var(--accent); border-color: var(--fill-ok-border); }
+.test-chip[data-status="AUTH_FAIL"], .test-chip[data-status="HTTP_5XX"], .test-chip[data-status="TIMEOUT"], .test-chip[data-status="NET_FAIL"] { background: var(--fill-danger-bg); color: var(--danger); border-color: var(--fill-danger-border); }
+.test-chip[data-status="MODEL_404"], .test-chip[data-status="HTTP_4XX"] { background: var(--fill-warn-bg); color: var(--warn); border-color: var(--fill-warn-border); }
+
+/* ---- Profile list ----------------------------------------------------------
+   Wide (content ≥ 940): name · provider · host · auth · aliases · sessions ·
+   last test · actions. Narrow: name with a second line · last test · actions.
+   The design says 900, but its wide columns, gaps and padding need 940. */
+.prof-table { border: 1px solid var(--border); border-radius: var(--r-xl); }
+.prof-row { display: grid; grid-template-columns: minmax(0, 1fr) 140px 62px; gap: 12px; align-items: center; padding: 11px 16px; border-top: 1px solid var(--line); cursor: pointer; }
+.prof-row:hover { background: var(--row-hover); }
+.prof-head { padding: 9px 16px; border-top: 0; background: var(--surface-2); border-radius: var(--r-xl) var(--r-xl) 0 0; color: var(--text-muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; font-weight: 700; cursor: default; }
+.prof-head:hover { background: var(--surface-2); }
+.prof-row:last-child { border-radius: 0 0 var(--r-xl) var(--r-xl); }
+.prof-wide { display: none; min-width: 0; font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prof-narrow { flex-basis: 100%; margin-top: 3px; font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@container content (max-width: 559px) { .prof-row { grid-template-columns: minmax(0, 1fr) 96px 62px; } }
+@container content (min-width: 940px) {
+  /* The design gives aliases 52px; its uppercase head needs 60. */
+  .prof-row { grid-template-columns: minmax(110px, 1fr) 92px minmax(130px, 1fr) 136px 60px 100px 140px 62px; }
+  .prof-wide { display: block; }
+  .prof-wide.prof-sessions { display: flex; }
+  .prof-narrow { display: none; }
+}
+/* A long name wraps from the left, the default pill after it. */
+.prof-name-cell { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; min-width: 0; }
+.prof-name-cell .default-pill { margin-left: 0; }
+.prof-name { padding: 0; border: 0; background: none; color: var(--text); font-size: 14px; font-weight: 600; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.prof-name:hover { color: var(--accent); }
+.prof-sessions { align-items: center; gap: 4px; }
+.prof-sessions .dot { width: 7px; height: 7px; }
+.prof-sessions > span:last-child { margin-left: 4px; }
+.prof-acts { display: flex; justify-content: flex-end; gap: 6px; }
+
+/* ---- Profile page ---------------------------------------------------------- */
+.profile-page { max-width: 820px; padding-bottom: 4px; }
+.back-link { display: inline-flex; align-items: center; gap: 5px; margin-bottom: 10px; font-size: 12px; color: var(--text-muted); }
+.back-link:hover { color: var(--text); text-decoration: none; }
+.back-link .icon { width: 12px; height: 12px; }
+.pf-head { margin-bottom: 18px; }
+.pf-title-row { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; }
+.pf-title-text { min-width: 0; }
+.pf-title-row .page-title { margin: 0 0 4px; }
+.pf-meta { margin: 0; font-size: 12px; color: var(--text-muted); }
+.pf-test { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pf-test-text { font-size: 12px; color: var(--text-secondary); }
+.pf-card { margin: 0 0 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-xl); }
+.pf-card-label { padding: 12px 16px 0; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; color: var(--text-muted); }
+.pf-card-body { padding: 12px 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+.pf-field { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 4px 12px; align-items: start; }
+@container content (max-width: 759px) { .pf-field { grid-template-columns: 116px minmax(0, 1fr); } }
+/* Under 520 each label goes above its field. */
+@container content (max-width: 519px) {
+  .pf-field { grid-template-columns: minmax(0, 1fr); }
+  .pf-label { padding-top: 0; }
+}
+.pf-label { padding-top: 8px; font-size: 12px; color: var(--text-muted); }
+.pf-control { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.pf-input, .pf-select { height: 32px; width: 100%; padding: 0 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-dim); font-size: 13px; outline: none; }
+.pf-select { cursor: pointer; }
+.pf-input:focus, .pf-select:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.pf-input.invalid { border-color: var(--danger); }
+.pf-input.advisory { border-color: var(--warn); }
+.pf-input:disabled { opacity: .5; cursor: not-allowed; }
+.pf-hint { font-size: 12px; color: var(--text-muted); }
+.pf-error { font-size: 12px; color: var(--danger); }
+.pf-warn { font-size: 12px; color: var(--warn); }
+.pf-joined { display: flex; align-items: center; gap: 0; min-width: 0; }
+.pf-joined > .pf-input, .pf-joined > .pf-select { border-radius: 0; }
+.pf-joined > :first-child { border-radius: 6px 0 0 6px; }
+.pf-joined > :last-child { border-radius: 0 6px 6px 0; }
+.pf-joined > :only-child { border-radius: 6px; }
+.pf-joined > * + * { margin-left: -1px; }
+.pf-joined .joined-left { flex: none; width: 96px; background: var(--surface-2); }
+.pf-joined .btn { flex: none; margin-left: 8px; height: 32px; border-radius: var(--r-lg); }
+.pf-reveal { flex: none; width: 34px; height: 32px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-secondary); cursor: pointer; }
+.pf-reveal .icon { width: 14px; height: 14px; }
+.alias-head { display: grid; grid-template-columns: minmax(0, 1fr) 16px minmax(0, 1fr) 30px; gap: 8px; font-size: 11px; color: var(--text-muted); }
+.alias-edit-row { display: grid; grid-template-columns: minmax(0, 1fr) 16px minmax(0, 1fr) 30px; gap: 8px; align-items: center; }
+.alias-edit-row .pf-input { height: 30px; font-family: var(--font-mono); font-size: 12px; }
+.alias-edit-row .alias-target { color: var(--accent); }
+.alias-remove { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text-muted); cursor: pointer; }
+.alias-remove:hover { color: var(--danger); border-color: var(--fill-danger-border); }
+.alias-remove .icon { width: 13px; height: 13px; }
+.alias-add { align-self: flex-start; padding: 5px 12px; border: 1px dashed var(--border); border-radius: 6px; background: none; color: var(--text-secondary); font-size: 12px; cursor: pointer; }
+.alias-add:hover { color: var(--text); border-color: var(--text-muted); }
+.pf-egress-result { font-size: 12px; overflow-wrap: anywhere; }
+.pf-egress-result.ok { color: var(--accent); }
+.pf-egress-result.fail { color: var(--danger); }
+.pf-delete { margin: 4px 0 12px; padding: 12px 16px; border: 1px solid var(--border); border-radius: var(--r-xl); background: var(--surface); font-size: 13px; color: var(--text-secondary); }
+.pf-delete.danger { border-color: var(--fill-danger-border); background: var(--fill-danger-bg); }
+.pf-delete p { margin: 0 0 6px; }
+.pf-delete-title { color: var(--text); font-weight: 600; }
+.pf-delete-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+/* The footer spans the main column; its row lines up with the form. */
+.pf-footer { position: sticky; bottom: 0; z-index: 5; padding: 12px var(--content-pad); background: var(--bg); border-top: 1px solid var(--line); }
+.pf-footer-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; max-width: calc(820px - 2 * var(--content-pad)); }
+/* A field scrolled or tabbed to near the bottom stays clear of the footer. */
+.main:has(> .pf-footer) { scroll-padding-bottom: 112px; }
+.pf-status { font-size: 12px; color: var(--text-muted); }
+.pf-status.warn { color: var(--warn); }
+.pf-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); cursor: pointer; }
+.pf-check input { accent-color: var(--accent); }
+.pf-default-static { font-size: 12px; color: var(--text-muted); }
+.prof-head .prof-wide { overflow: visible; }

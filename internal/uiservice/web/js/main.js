@@ -11,6 +11,8 @@ import { createToasts } from './shell/toast.js';
 import { renderEmpty, launchProfile } from './views/empty.js';
 import { mountSession } from './session/view.js';
 import { mountProjects, settleLaunches, LAUNCH_TIMEOUT_MS } from './projects.js';
+import { mountProfiles } from './profiles/list.js';
+import { mountProfileForm } from './profiles/form.js';
 
 const boot = bootstrap(document.body.dataset);
 const api = createApi(boot.token);
@@ -189,14 +191,22 @@ function renderMain(st) {
     })).update(st);
     return;
   }
-  unmount();
-  if (r.view === 'profiles') return placeholder('Profiles', 'The Profiles page comes next.');
-  return placeholder(r.isNew ? 'New profile' : r.name, 'The profile page comes next.');
+  if (r.view === 'profiles') {
+    mount('profiles', '', () => mountProfiles(main, { api, toast, go, sessions: () => store.get().sessions }));
+    return;
+  }
+  mount('profile', (r.isNew ? '+new' : r.name) + '|' + (r.field || ''), () => mountProfileForm(main, {
+    api, toast, go, name: r.isNew ? '' : r.name, field: r.field || '',
+    sessions: () => store.get().sessions,
+    onSaved: reloadProfiles,
+  }));
 }
 
-function placeholder(title, text) {
-  show(main, h('div', { class: 'main-inner' }, h('section', { class: 'placeholder' },
-    h('h1', { class: 'page-title' }, title), h('p', { class: 'lede' }, text))));
+async function reloadProfiles() {
+  try {
+    const p = await api.get('/profiles');
+    store.set({ profiles: { names: (p.profiles || []).map((x) => x.name), default: p.default || '' } });
+  } catch (_) { /* the next full load catches up */ }
 }
 
 // ---- Launches ---------------------------------------------------------------
@@ -251,6 +261,10 @@ let lastKey = '';
 store.subscribe((st) => {
   renderShell(st);
   if (mounted && mounted.kind === 'projects' && st.route.view === 'projects') {
+    mounted.handle.update(st);
+    return;
+  }
+  if (mounted && mounted.kind === 'profiles' && st.route.view === 'profiles') {
     mounted.handle.update(st);
     return;
   }

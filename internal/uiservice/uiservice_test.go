@@ -789,4 +789,14 @@ func TestProfileTests(t *testing.T) {
 	if status, _ := r.write(t, "POST", "/api/v1/profiles/gw/test-egress", ""); status != 200 || egressProbed.Egress.Mode != "" {
 		t.Fatalf("saved egress: %d %+v", status, egressProbed)
 	}
+	// A new profile's form tests its egress before there is a profile.
+	if status, out := r.write(t, "POST", "/api/v1/egress-test", ""); status != 400 || code(out) != "usage" {
+		t.Fatalf("draft without egress: %d %v", status, out)
+	}
+	if status, _ := r.write(t, "POST", "/api/v1/egress-test", `{"egress":{"mode":"socks5","url":"socks5://127.0.0.1:1080"}}`); status != 200 || egressProbed.Egress.URL != "socks5://127.0.0.1:1080" || egressProbed.Name != "" {
+		t.Fatalf("draft egress: %d %+v", status, egressProbed)
+	}
+	if _, list := r.http(t, "GET", "/api/v1/profiles", "", nil); list["display_path"] == nil {
+		t.Fatalf("list has no display_path: %v", list)
+	}
 }

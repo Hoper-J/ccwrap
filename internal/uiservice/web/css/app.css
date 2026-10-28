@@ -36,7 +36,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .main { flex: 1; min-width: 0; overflow: auto; position: relative; container: main / inline-size; }
 .main:focus { outline: none; }
 .main-inner { max-width: calc(var(--content-max) + 2 * var(--content-pad)); padding: 24px var(--content-pad) 48px; }
-@container main (max-width: 799px) { .main-inner { padding-left: 20px; padding-right: 20px; } }
+@container main (max-width: 799px) { .main-inner, .pf-footer { --content-pad: 20px; } }
 
 /* ---- Buttons -------------------------------------------------------------- */
 .btn { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 14px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); color: var(--text); font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }

@@ -277,6 +277,62 @@ console.log(JSON.stringify({
 	}
 }
 
+// The profile form saves only what changed, keeps stored keys when the key
+// is left blank, and gates saving the way the session page's editor did.
+func TestProfileForm(t *testing.T) {
+	out := runModule(t, `
+import { aliasDefaultChoices, fallbackDefault, draftFrom, aliasMap, problems, editPayload, addPayload } from '$JS/profiles/form.js';
+import { authLabel, aliasCount } from '$JS/profiles/list.js';
+const orig = { name: 'ds', provider: 'DeepSeek', base_url: 'https://api.deepseek.com/anthropic', auth: { mode: 'ccwrap_bearer', has_key_env: true },
+  model_aliases: { 'claude-sonnet-5-5': 'v4', '*': 'v4' }, egress_mode: 'inherit', egress_url: '' };
+const d = draftFrom(orig);
+const same = editPayload(orig, d);
+const e1 = { ...draftFrom(orig), provider: 'DS', key: 'NEW_ENV' };
+const e2 = { ...draftFrom(orig), auth_mode: 'passthrough' };
+const e3 = { ...draftFrom(orig), key_source: 'inline' };
+const e4 = { ...draftFrom(orig), egress_mode: 'http', egress_url: 'http://p:8080', other: '*' };
+const fresh = { ...draftFrom(null), name: 'glm', base_url: 'https://x.example/v1', key: 'sk-1', aliases: [{ from: 'claude-opus-5-5', to: 'glm-5' }, { from: '', to: '' }], other: 'glm-5' };
+console.log(JSON.stringify({
+  choicesNew: aliasDefaultChoices(['glm-5'], '', true, false),
+  choicesEdit: aliasDefaultChoices(['a', 'b'], 'gone', false, false).options.map((o) => o[0]),
+  suggested: aliasDefaultChoices(['a'], '', false, false).options[1][1],
+  fallback: [fallbackDefault(['official', 'zeta', 'ds'], 'ds'), fallbackDefault(['zeta', 'ds'], 'ds'), fallbackDefault(['ds'], 'ds')],
+  draft: { auth: d.auth_mode, src: d.key_source, aliases: d.aliases, other: d.other },
+  same, e1: editPayload(orig, e1), e2: editPayload(orig, e2), e3: problems(e3, orig, []).errs, e4: editPayload(orig, e4),
+  fresh: problems(fresh, null, ['glm']), add: addPayload({ ...fresh, name: 'glm2' }),
+  aliasMap: aliasMap({ aliases: [{ from: ' a ', to: ' b ' }, { from: 'c', to: '' }], other: '__custom', otherCustom: ' m ' }),
+  auth: [authLabel(null), authLabel({ mode: 'ccwrap_bearer', has_key_env: true }), authLabel({ mode: 'ccwrap_x_api_key', has_inline_key: true })],
+  count: aliasCount(orig),
+}));
+`)
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("%s: %v", out, err)
+	}
+	want := map[string]string{
+		"choicesNew":  `{"options":[["","not set"],["glm-5","glm-5"],["*","keep their Claude names"],["__custom","other model…"]],"value":"glm-5"}`,
+		"choicesEdit": `["","a","b","gone","*","__custom"]`,
+		"suggested":   `"a (suggested)"`,
+		"fallback":    `["official","zeta","inherit-env"]`,
+		"draft":       `{"auth":"ccwrap_bearer","src":"env_var","aliases":[{"from":"claude-sonnet-5-5","to":"v4"}],"other":"v4"}`,
+		"same":        `{}`,
+		"e1":          `{"provider":"DS","auth":{"key_source":"env_var","key_env":"NEW_ENV"}}`,
+		"e2":          `{"auth":null}`,
+		"e3":          `{"key":"Paste the key."}`,
+		"e4":          `{"model_aliases":{"claude-sonnet-5-5":"v4","*":"*"},"egress":{"mode":"http","url":"http://p:8080"}}`,
+		"fresh":       `{"errs":{"name":"A profile with this name exists."},"warns":{"base_url":"Claude Code adds /v1 itself, so this would send requests to /v1/v1/messages. Drop the /v1."}}`,
+		"add":         `{"name":"glm2","provider":"","base_url":"https://x.example/v1","auth":{"mode":"ccwrap_bearer","key":"sk-1"},"egress":{"mode":"inherit","url":""},"model_aliases":{"claude-opus-5-5":"glm-5","*":"glm-5"},"set_default":false}`,
+		"aliasMap":    `{"a":"b","*":"m"}`,
+		"auth":        `["passthrough","bearer · env","x-api-key · inline"]`,
+		"count":       `2`,
+	}
+	for k, w := range want {
+		if string(got[k]) != w {
+			t.Errorf("%s:\n got  %s\n want %s", k, got[k], w)
+		}
+	}
+}
+
 // The posture sentence bolds the upstream host and the alias count.
 func TestSessionPostureEmphasis(t *testing.T) {
 	out := runModule(t, `
@@ -284,6 +340,19 @@ import { emphasisParts } from '$JS/session/header.js';
 console.log(JSON.stringify(emphasisParts('Routing Claude Code through api.deepseek.com. CCWRAP holds your gateway credentials and applies 2 model aliases; Claude Code only sees logical names.', ['api.deepseek.com', ''])));
 `)
 	want := `[{"text":"Routing Claude Code through ","bold":false},{"text":"api.deepseek.com","bold":true},{"text":". CCWRAP holds your gateway credentials and applies ","bold":false},{"text":"2 model aliases","bold":true},{"text":"; Claude Code only sees logical names.","bold":false}]`
+	if strings.TrimSpace(out) != want {
+		t.Fatalf("got  %s\nwant %s", strings.TrimSpace(out), want)
+	}
+}
+
+// Test connectivity tests the saved profile, so it waits until a new
+// profile or unsaved changes are saved instead of testing what was there.
+func TestProfileFormTestButton(t *testing.T) {
+	out := runModule(t, `
+import { testButton } from '$JS/profiles/form.js';
+console.log(JSON.stringify([testButton(true, false, false), testButton(false, true, false), testButton(false, false, true), testButton(false, false, false)]));
+`)
+	want := `[{"disabled":true,"title":"Save the profile to test it"},{"disabled":true,"title":"Save your changes to test them"},{"disabled":true,"title":"Send one small model request with this profile"},{"disabled":false,"title":"Send one small model request with this profile"}]`
 	if strings.TrimSpace(out) != want {
 		t.Fatalf("got  %s\nwant %s", strings.TrimSpace(out), want)
 	}

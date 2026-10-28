@@ -18,6 +18,8 @@ import (
 	"github.com/Hoper-J/ccwrap/internal/profileapi"
 	"github.com/Hoper-J/ccwrap/internal/profiles"
 	"github.com/Hoper-J/ccwrap/internal/profiletest"
+	"github.com/Hoper-J/ccwrap/internal/ui"
+	"github.com/Hoper-J/ccwrap/internal/unmapped"
 )
 
 // The Profiles page's API. Edits go through profileapi, the same code a
@@ -35,6 +37,9 @@ type profileView struct {
 	IsDefault bool      `json:"is_default"`
 	Sessions  []string  `json:"sessions"`
 	LastTest  *lastTest `json:"last_test,omitempty"`
+	// Unaliased is the Claude models sessions on this profile sent with no
+	// alias (GET /profiles/{name} only): suggestions for new alias rows.
+	Unaliased []string `json:"unaliased,omitempty"`
 }
 
 // lastTest is a profile's latest connection test. Kept in memory only: a
@@ -150,7 +155,7 @@ func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "internal", sanitizeLoadError(err))
 		return
 	}
-	out := map[string]any{"default": "", "path": s.profiles.Path(), "profiles": []profileView{}}
+	out := map[string]any{"default": "", "path": s.profiles.Path(), "display_path": ui.DisplayDir(s.profiles.Path()), "profiles": []profileView{}}
 	if f != nil {
 		on := s.sessionsOn()
 		items := make([]profileView, 0, len(f.Profiles))
@@ -187,7 +192,9 @@ func (s *Server) handleGetProfile(w http.ResponseWriter, r *http.Request) {
 	if f != nil {
 		def = f.Default
 	}
-	writeJSON(w, s.view(p, def, s.sessionsOn()))
+	v := s.view(p, def, s.sessionsOn())
+	v.Unaliased = unmapped.Models(s.opts.Paths.StateDir, p.Name)
+	writeJSON(w, v)
 }
 
 func (s *Server) handleAddProfile(w http.ResponseWriter, r *http.Request) {
@@ -350,15 +357,28 @@ var (
 // handleTestEgress reports where the profile's traffic exits. The body may
 // carry an egress to test instead of the saved one (a form not saved yet).
 func (s *Server) handleTestEgress(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
+	s.testEgress(w, r, r.PathValue("name"))
+}
+
+// handleTestDraftEgress tests an egress that belongs to no saved profile
+// yet: a new profile's form. The body must carry it.
+func (s *Server) handleTestDraftEgress(w http.ResponseWriter, r *http.Request) {
+	s.testEgress(w, r, "")
+}
+
+func (s *Server) testEgress(w http.ResponseWriter, r *http.Request, name string) {
 	var req struct {
 		Egress *profiles.EgressSpec `json:"egress"`
 	}
 	if !decodeBody(w, r, &req, true) {
 		return
 	}
+	if name == "" && req.Egress == nil {
+		writeAPIError(w, http.StatusBadRequest, "usage", "egress is required")
+		return
+	}
 	p := profiles.Profile{Name: name}
-	if name != profiles.InheritEnv {
+	if name != "" && name != profiles.InheritEnv {
 		saved, e := s.profiles.Get(name)
 		if e != nil {
 			writeStoreError(w, e)

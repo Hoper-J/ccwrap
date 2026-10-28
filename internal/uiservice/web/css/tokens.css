@@ -139,6 +139,7 @@ code, .mono { font-family: var(--font-mono); }
   /* --bp-proj-wide:  960px   project rows show the conversation column   */
   /* --bp-proj-stack: 700px   below: profile and actions under the project */
   /* --bp-prof-wide:  900px   profile list shows all columns              */
+  /* --bp-form-stack: 520px   below: profile form labels above the fields */
 
   /* ---- Health (sidebar dot, header rule, state pill, tray badge) ------- */
   --health-ok:    var(--accent);

@@ -33,11 +33,13 @@ func (s *Server) apiMux() http.Handler {
 	mux.HandleFunc("POST /api/v1/profiles/{name}/default", s.handleSetDefaultProfile)
 	mux.HandleFunc("POST /api/v1/profiles/{name}/test", s.handleTestProfile)
 	mux.HandleFunc("POST /api/v1/profiles/{name}/test-egress", s.handleTestEgress)
+	mux.HandleFunc("POST /api/v1/egress-test", s.handleTestDraftEgress)
 	// The catch-all also wins over a method mismatch, so it tells the two
 	// apart itself.
 	known := map[string]string{
 		"/api/v1/meta": "GET", "/api/v1/sessions": "GET", "/api/v1/events": "GET", "/api/v1/projects": "GET",
 		"/api/v1/projects/launch": "POST", "/api/v1/settings/terminal": "GET, PUT", "/api/v1/profiles": "GET, POST",
+		"/api/v1/egress-test": "POST",
 	}
 	mux.HandleFunc("/api/v1/", func(w http.ResponseWriter, r *http.Request) {
 		allow, ok := known[r.URL.Path]
