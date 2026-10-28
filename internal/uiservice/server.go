@@ -38,6 +38,9 @@ type Options struct {
 	IdleTimeout time.Duration
 	// PollInterval is how often sessions are rediscovered; 0 means 2s.
 	PollInterval time.Duration
+	// EndedRetention is how long an ended session stays listed; 0 means
+	// 60s.
+	EndedRetention time.Duration
 }
 
 // PortEnv fixes the HTTP port (for remote use through a forwarded port).
@@ -76,6 +79,9 @@ func New(opts Options) *Server {
 	}
 	if opts.PollInterval == 0 {
 		opts.PollInterval = 2 * time.Second
+	}
+	if opts.EndedRetention == 0 {
+		opts.EndedRetention = 60 * time.Second
 	}
 	s := &Server{opts: opts, dir: Dir(opts.Paths), allowed: webguard.AllowedHostsFromEnv(), stop: make(chan struct{})}
 	s.hub = newHub(s)

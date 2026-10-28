@@ -136,6 +136,29 @@ func TestCovers(t *testing.T) {
 	}
 }
 
+func TestUnmaps(t *testing.T) {
+	explicit := mustNew(t, map[string]string{"claude-opus-5-5": "gpt-6"})
+	withDefault := mustNew(t, map[string]string{"claude-opus-5-5": "gpt-6", DefaultKey: "gpt-6"})
+	keepNames := mustNew(t, map[string]string{"claude-opus-5-5": "gpt-6", DefaultKey: KeepName})
+	cases := []struct {
+		cfg   Config
+		model string
+		want  bool
+	}{
+		{explicit, "claude-fable-5-1", true},
+		{explicit, "claude-opus-5-5", false},
+		{explicit, "gpt-6", false}, // not a Claude model
+		{withDefault, "claude-fable-5-1", false},
+		{keepNames, "claude-fable-5-1", false},
+		{Config{}, "claude-fable-5-1", false}, // no aliases: names pass by design
+	}
+	for _, tc := range cases {
+		if got := tc.cfg.Unmaps(tc.model); got != tc.want {
+			t.Errorf("Unmaps(%q) with %v = %v, want %v", tc.model, tc.cfg.Forward, got, tc.want)
+		}
+	}
+}
+
 // Routes without aliases still report the request's model for the inspector,
 // and leave the body intact.
 func TestRewriteRequestNotesModelWithoutAliases(t *testing.T) {

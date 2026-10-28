@@ -231,6 +231,18 @@ func (c Config) Covers(model string) bool {
 	}
 	return false
 }
+
+// Unmaps reports whether a request for model goes upstream unaliased: a
+// Claude model with no alias of its own and no default, on a route whose
+// aliases map other models. Context.Unmapped marks such a request.
+func (c Config) Unmaps(model string) bool {
+	if !c.Enabled() || c.Default() != "" || c.KeepsNames() || !isClaudeModel(model) {
+		return false
+	}
+	_, ok := c.Forward[model]
+	return !ok
+}
+
 func (c Config) Mode() string {
 	if c.Enabled() {
 		return ModeRewrite
@@ -667,7 +679,7 @@ func RewriteJSONRequestBody(path string, body []byte, cfg Config) ([]byte, *Cont
 	ctx.LogicalModel = logical
 	ctx.UpstreamModel = provider
 	if !changed {
-		ctx.Unmapped = cfg.Enabled() && !cfg.KeepsNames() && isClaudeModel(logical)
+		ctx.Unmapped = cfg.Unmaps(logical)
 		return body, ctx, nil
 	}
 	// Strip Claude Code identity envelope when forwarding to non-claude-* upstream.

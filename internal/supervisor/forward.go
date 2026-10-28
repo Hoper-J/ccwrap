@@ -228,7 +228,7 @@ func (sp *sessionProxy) forwardToUpstream(w http.ResponseWriter, r *http.Request
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			summary := err.Error()
 			errClass := classifyUpstreamError(err, "upstream_unreachable")
-			tap.noUpstream(summary, routeSuggestion(errClass))
+			tap.noUpstream(summary, routeSuggestion(errClass), issueForError(errClass, t.upstreamHost))
 			sp.supervisor.recordError(sp.session.public.ID, model.ErrorRecord{
 				Timestamp:       time.Now(),
 				SessionID:       sp.session.public.ID,

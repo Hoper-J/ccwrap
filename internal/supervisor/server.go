@@ -145,13 +145,10 @@ type sessionState struct {
 	// Guarded by helloMu, as are each stack's usage fields.
 	helloMu     sync.Mutex
 	helloStacks []*helloStack
-	// nativeTLSBlocked is the live native-TLS block flag, written by
-	// recordNativeTLS under sess.mu: true while the most recent dial BLOCKED the
-	// request (fail-closed — the fingerprint could not be mirrored, so no request
-	// was sent rather than a de-anonymizing one), false once a mirror dial
-	// succeeds again. Source of truth for the error-level Health contribution
-	// recordNativeTLS sets and for recordRequest's heal-to-ok gate; guarded by sess.mu.
-	nativeTLSBlocked bool
+	// issues are the session's issues in the order they first opened
+	// (issues.go), projected onto public.Issues and public.Health. Guarded
+	// by mu.
+	issues []*issueEntry
 	// nativeTLSHelloLoaded is true when mirroredHelloRaw was PRE-SEEDED from a
 	// loaded hello (CCWRAP_NATIVE_TLS_HELLO) rather than captured live; guarded
 	// by sess.mu. Sticky — never reset by a later nil-hello profile-switch setRoute.
@@ -735,6 +732,8 @@ func (s *Supervisor) createSession(req model.SessionCreateRequest) (model.Sessio
 		// credential in APIBaseURL.
 		sess.appendTraceLocked(model.TraceRecord{Timestamp: now, SessionID: id, Category: "route", Summary: "session route configured", Detail: p.r.display.apiBaseURL})
 		p.deriveInto(&sess.public, sess.currentDialStateLocked())
+		sess.notePostureLocked(&posture{}, &p)
+		sess.projectIssuesLocked()
 		sess.mu.Unlock()
 		s.touch()
 		s.broadcast("session_updated", id, sess.snapshot())
@@ -823,6 +822,7 @@ func (s *Supervisor) setRoute(id string, req model.SessionRouteRequest) error {
 		sess.mirroredHelloRaw.Store(&cp)
 		sess.nativeTLSHelloLoaded = true
 	}
+	old := sess.active.Load()
 	sess.active.Store(&p)
 	if sess.public.State == model.StateCreated {
 		sess.public.State = model.StateLaunching
@@ -830,6 +830,8 @@ func (s *Supervisor) setRoute(id string, req model.SessionRouteRequest) error {
 	sess.public.UpdatedAt = now
 	sess.appendTraceLocked(model.TraceRecord{Timestamp: now, SessionID: id, Category: "route", Summary: "session route configured", Detail: p.r.display.apiBaseURL})
 	p.deriveInto(&sess.public, sess.currentDialStateLocked())
+	sess.notePostureLocked(old, &p)
+	sess.projectIssuesLocked()
 	sess.mu.Unlock()
 	s.touch()
 	s.broadcast("session_updated", id, sess.snapshot())
@@ -1128,25 +1130,25 @@ func (s *Supervisor) recordRequest(id string, record model.RequestRecord) {
 	if newUnmapped {
 		sess.public.UnmappedModels = append(sess.public.UnmappedModels, record.Model)
 	}
-	// A successful request heals Health to ok — EXCEPT while native-TLS is
-	// blocked. While blocked, new dials fail-closed; a request that completes over
-	// a still-pooled good conn must NOT heal away the error before a mirror dial
-	// resumes, or the user never sees that new connections are being blocked.
-	// nativeTLSBlocked (set under this same sess.mu by recordNativeTLS) holds the
-	// error until a mirror dial resumes.
-	// A failed model request leaves Health where its error put it.
-	if sess.public.State != model.StateEnded && !sess.nativeTLSBlocked && !failed {
-		sess.public.Health = model.HealthOK
+	now := time.Now()
+	issuesChanged := false
+	// Ended is terminal: its issues and Health stay as they were.
+	if sess.public.State != model.StateEnded {
+		sess.noteRequestLocked(record, now)
+		issuesChanged = sess.projectIssuesLocked()
 	}
-	sess.public.UpdatedAt = time.Now()
+	sess.noteActivityLocked(record.Timestamp)
+	sess.public.UpdatedAt = now
 	sess.mu.Unlock()
 	if hasEvicted {
 		evictBodyFiles(store, evicted)
 	}
 	s.touch()
 	s.broadcast("request", id, record)
-	if newUnmapped {
+	if newUnmapped || issuesChanged {
 		s.broadcast("session_updated", id, sess.snapshot())
+	}
+	if newUnmapped {
 		if err := unmapped.Record(s.paths.StateDir, record.ActiveProfileName, record.Model, time.Now()); err != nil {
 			s.logger.Printf("remember unmapped model %s: %v", record.Model, err)
 		}
@@ -1184,10 +1186,10 @@ func (s *Supervisor) recordError(id string, record model.ErrorRecord) {
 	if sess == nil {
 		return
 	}
-	sev, health := severityForClass(record.ErrorClass)
 	if record.Severity == "" {
-		record.Severity = sev
+		record.Severity, _ = severityForClass(record.ErrorClass)
 	}
+	now := time.Now()
 	sess.mu.Lock()
 	// Claude Code retries a failed request several times; the same error
 	// back to back folds into one entry with a count.
@@ -1198,12 +1200,14 @@ func (s *Supervisor) recordError(id string, record model.ErrorRecord) {
 		sess.errors = appendCapped(sess.errors, record, maxSessionErrors)
 	}
 	sess.public.RecentErrorCount = len(sess.errors)
-	// Health reflects the most-recent activity result; lifecycle State is
-	// untouched (the two dimensions are orthogonal). Ended is terminal.
+	// The error counts toward an issue, which sets Health; lifecycle State
+	// is untouched (the two dimensions are orthogonal). Ended is terminal.
 	if sess.public.State != model.StateEnded {
-		sess.public.Health = health
+		sess.noteErrorLocked(record, now)
+		sess.projectIssuesLocked()
 	}
-	sess.public.UpdatedAt = time.Now()
+	sess.noteActivityLocked(record.Timestamp)
+	sess.public.UpdatedAt = now
 	sess.mu.Unlock()
 	s.touch()
 	s.broadcast("proxy_error", id, record)
@@ -1222,6 +1226,7 @@ func (s *Supervisor) recordTrace(id string, record model.TraceRecord) {
 	}
 	sess.mu.Lock()
 	sess.appendTraceLocked(record)
+	sess.noteActivityLocked(record.Timestamp)
 	sess.public.UpdatedAt = time.Now()
 	sess.mu.Unlock()
 	s.touch()
@@ -1622,6 +1627,17 @@ func (ss *sessionState) currentDialStateLocked() dialState {
 
 func (ss *sessionState) appendTraceLocked(record model.TraceRecord) {
 	ss.trace = appendCapped(ss.trace, record, maxSessionTrace)
+}
+
+// noteActivityLocked moves LastActivityAt up to at. A new pointer each
+// time: snapshots share the old one.
+func (ss *sessionState) noteActivityLocked(at time.Time) {
+	if at.IsZero() {
+		return
+	}
+	if cur := ss.public.LastActivityAt; cur == nil || at.After(*cur) {
+		ss.public.LastActivityAt = &at
+	}
 }
 
 // matchProfileToken returns true iff candidate equals ss.profileToken under

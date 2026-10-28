@@ -33,17 +33,24 @@ func TestRecordError_SetsHealthNotState(t *testing.T) {
 		}
 	})
 
-	t.Run("ccwrap_auth_missing maps to HealthWarn", func(t *testing.T) {
+	t.Run("ccwrap_auth_missing counts toward the route's auth_missing issue", func(t *testing.T) {
 		sv, sess := newTestSessionForCreate(t)
 
+		// The route alone opens the issue; a refusal without it opens nothing.
 		sv.recordError(sess.public.ID, model.ErrorRecord{ErrorClass: "ccwrap_auth_missing"})
-
-		sess.mu.RLock()
-		health := sess.public.Health
-		sess.mu.RUnlock()
-
-		if health != model.HealthWarn {
-			t.Errorf("Health = %q after recordError(ccwrap_auth_missing), want %q", health, model.HealthWarn)
+		if got := sess.snapshot().Health; got != model.HealthOK {
+			t.Fatalf("Health = %q after a refusal on a route with credentials, want ok", got)
+		}
+		if err := sv.setRoute(sess.public.ID, model.SessionRouteRequest{APIBaseURL: "https://gw.example/", RouteClass: model.RouteClassThirdPartyHidden, AuthBootstrap: model.AuthBootstrapMissing, ActiveProfileName: "gw", MissingAuthEnv: "GW_KEY"}); err != nil {
+			t.Fatal(err)
+		}
+		if got := sess.snapshot().Health; got != model.HealthWarn {
+			t.Fatalf("Health = %q on a route without credentials, want %q", got, model.HealthWarn)
+		}
+		sv.recordError(sess.public.ID, model.ErrorRecord{ErrorClass: "ccwrap_auth_missing"})
+		got := sess.snapshot()
+		if got.Health != model.HealthWarn || len(got.Issues) != 1 || got.Issues[0].Evidence != "1 request refused" {
+			t.Errorf("after a refusal: Health = %q, issues = %+v", got.Health, got.Issues)
 		}
 	})
 }

@@ -277,11 +277,10 @@ func (sp *sessionProxy) nativeTLSDialHello(eg model.EgressConfig, hello []byte) 
 // It mirrors the SetCaptureTelemetry public-field discipline: one sess.mu
 // critical section, a change-guard so the (potentially high-frequency) dial path
 // does not churn touch()/broadcast on a steady state, and a snapshot/broadcast
-// emitted only on an actual transition. A block drives session Health to error
-// — the same direct-write Health discipline recordError uses (Health is
-// last-activity-wins; there is no central compute() to OR into). The error write
-// is gated so it never mutates an ended session; nativeTLSBlocked holds the live
-// flag as the source of truth (it gates recordRequest's heal-to-ok).
+// emitted only on an actual transition. A block opens the native_tls_blocked
+// issue, which holds Health at error until a mirror dial resolves it — a
+// request that completes over a still-pooled good conn does not. An ended
+// session's issues are left as they are.
 func (sp *sessionProxy) recordNativeTLS(active bool, reason string) {
 	sess := sp.session
 	if sess == nil {
@@ -291,26 +290,24 @@ func (sp *sessionProxy) recordNativeTLS(active bool, reason string) {
 	if !active {
 		want = "blocked: " + reason
 	}
+	now := time.Now()
 	sess.mu.Lock()
 	changed := sess.public.NativeTLS != want
+	// Count block EPISODES, not blocked dials: increment only on a transition
+	// into a (distinct) blocked state. A persistent outage that blocks many
+	// dials with the same reason is ONE episode, not an inflated per-dial tally.
+	if !active && changed {
+		sess.public.NativeTLSFallbacks++
+	}
 	sess.public.NativeTLS = want
-	sess.nativeTLSBlocked = !active
-	if !active {
-		// Count block EPISODES, not blocked dials: increment only on a transition
-		// into a (distinct) blocked state. A persistent outage that blocks many
-		// dials with the same reason is ONE episode, not an inflated per-dial tally.
-		if changed {
-			sess.public.NativeTLSFallbacks++
-		}
-		// Drive Health to error: the request was BLOCKED (fail-closed) rather
-		// than de-anonymized. Mirror recordError's direct last-activity-wins
-		// write; never mutate a terminal (ended) session.
-		if sess.public.State != model.StateEnded {
-			sess.public.Health = model.HealthError
+	if sess.public.State != model.StateEnded {
+		sess.noteNativeTLSLocked(!active, reason, now)
+		if sess.projectIssuesLocked() {
+			changed = true
 		}
 	}
 	if changed {
-		sess.public.UpdatedAt = time.Now()
+		sess.public.UpdatedAt = now
 	}
 	sess.mu.Unlock()
 	// Emit the activity touch + session_updated only on a real transition AND

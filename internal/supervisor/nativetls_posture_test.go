@@ -110,15 +110,14 @@ func TestRecordNativeTLSPosture(t *testing.T) {
 // later successful request (recordRequest) — e.g. one reusing a still-pooled good
 // conn — otherwise the error never sticks and the user never SEES that new
 // connections are being blocked. When mirroring resumes (recordNativeTLS(true,"")),
-// the next successful request restores Health=ok. This wires the
-// sess.nativeTLSBlocked flag.
+// Health is ok again. The native_tls_blocked issue carries this.
 func TestNativeTLSErrorPersistsAcrossSuccessfulRequest(t *testing.T) {
 	// A real, registered session so the supervisor's recordRequest path mutates
 	// the same *sessionState recordNativeTLS writes (both key off this session).
 	srv, sess := newTestSessionForCreate(t)
 	sp := &sessionProxy{supervisor: srv, session: sess}
 
-	// Block -> Health=error and nativeTLSBlocked=true.
+	// Block -> Health=error, the native_tls_blocked issue open.
 	sp.recordNativeTLS(false, "handshake failed")
 	if got := sess.snapshot().Health; got != model.HealthError {
 		t.Fatalf("after block: Health=%q want error", got)

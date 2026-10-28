@@ -442,6 +442,8 @@ type sessionDisplay struct {
 	ModelsState  string `json:"models_state"`
 	// HeroSentence is the posture line under the hero state word.
 	HeroSentence string `json:"hero_sentence"`
+	// Badge sums up the open issues for a session list (issueBadge).
+	Badge string `json:"badge,omitempty"`
 	// ModelFix backs the Models popover's fix for unaliased models; nil
 	// when there is nothing to fix.
 	ModelFix *modelFixDisplay `json:"model_fix,omitempty"`
@@ -463,6 +465,7 @@ func sessionWithDisplay(sess model.Session) sessionForWire {
 	w.Display.AuthValue, w.Display.AuthDetail, w.Display.AuthState = authCellPresentation(sess)
 	w.Display.ModelsValue, w.Display.ModelsDetail, w.Display.ModelsState = modelsCellPresentation(sess)
 	w.Display.HeroSentence = ui.SessionPosture(&sess)
+	w.Display.Badge = issueBadge(sess)
 	if len(sess.UnmappedModels) > 0 {
 		_, targets := modelalias.Config{Forward: sess.ModelAliasForward}.SuggestedDefault()
 		w.Display.ModelFix = &modelFixDisplay{Models: sess.UnmappedModels, Profile: sess.ActiveProfileName, Targets: targets}

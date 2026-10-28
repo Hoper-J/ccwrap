@@ -100,11 +100,17 @@ func getJSON(ctx context.Context, socket, path string, v any) error {
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("%s: %w", path, errNotFound)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("%s: %s", path, resp.Status)
 	}
 	return json.NewDecoder(resp.Body).Decode(v)
 }
+
+// errNotFound is a 404 from getJSON.
+var errNotFound = errors.New("not found")
 
 // Stop asks a running service to exit and waits up to wait for it.
 func Stop(ctx context.Context, paths app.Paths, wait time.Duration) (bool, error) {

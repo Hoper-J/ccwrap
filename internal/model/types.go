@@ -38,17 +38,87 @@ const (
 	StateEnded     SessionState = "ended"
 )
 
-// SessionHealth is the orthogonal "is recent activity healthy" dimension,
-// independent of lifecycle State. It reflects the result of the MOST RECENT
-// activity: ok = last request succeeded; warn = last activity was a deliberate
-// policy refusal (e.g. ccwrap_auth_missing); error = last activity was a real
-// upstream/transport/config failure. Empty string is treated as ok at render.
+// SessionHealth is the orthogonal "is the session healthy" dimension,
+// independent of lifecycle State: the severity of the worst open Issue, or ok
+// when none is open. Empty string is treated as ok at render.
 type SessionHealth string
 
 const (
 	HealthOK    SessionHealth = "ok"
 	HealthWarn  SessionHealth = "warn"
 	HealthError SessionHealth = "error"
+)
+
+// Issue is a problem the session ran into, worded for the user, with the
+// fixes a UI can offer. A session keeps one per ID: it opens when the
+// problem shows up and turns resolved when the problem goes away, staying in
+// the list until the session ends; it opens again if the problem comes back.
+type Issue struct {
+	ID       string        `json:"id"`
+	State    IssueState    `json:"state"`
+	Severity SessionHealth `json:"severity"`
+	Title    string        `json:"title"`
+	// TitleCode is the leading part of Title that names a model or host,
+	// for showing as code; empty when there is none.
+	TitleCode string `json:"title_code,omitempty"`
+	Detail    string `json:"detail"`
+	// Evidence is what ccwrap saw since the issue opened: the latest error
+	// and how many requests it hit (Count). LastSeenAt is when it last
+	// happened.
+	Evidence   string     `json:"evidence,omitempty"`
+	Count      int        `json:"count,omitempty"`
+	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
+	// Fixes and Note are offered while the issue is open.
+	Fixes []IssueFix `json:"fixes,omitempty"`
+	Note  string     `json:"note,omitempty"`
+	// Resolution says how a resolved issue went away.
+	Resolution string `json:"resolution,omitempty"`
+}
+
+type IssueState string
+
+const (
+	IssueOpen     IssueState = "open"
+	IssueResolved IssueState = "resolved"
+)
+
+// Issue IDs.
+const (
+	IssueUnaliasedModel      = "unaliased_model"
+	IssueCredentialsRejected = "credentials_rejected"
+	IssueBaseURLV1           = "base_url_v1"
+	IssueRateLimited         = "rate_limited"
+	IssueAuthMissing         = "auth_missing"
+	IssueNativeTLSBlocked    = "native_tls_blocked"
+	IssueUpstreamUnreachable = "upstream_unreachable"
+	// IssueRequestsFailing collects the failures no other issue covers.
+	IssueRequestsFailing = "requests_failing"
+)
+
+// IssueFix is one button on an issue.
+type IssueFix struct {
+	Label  string `json:"label"`
+	Action string `json:"action"`
+	// Value is the action's argument: the model_default target, the
+	// open_profile profile name, or the show_activity filter.
+	Value string `json:"value,omitempty"`
+	// Field is the profile field open_profile points at: "key" or
+	// "base_url".
+	Field string `json:"field,omitempty"`
+	// At is the timestamp of the activity row show_activity reveals.
+	At      *time.Time `json:"at,omitempty"`
+	Primary bool       `json:"primary,omitempty"`
+}
+
+// IssueFix actions.
+const (
+	// FixModelDefault sets the profile's "*" alias to Value and applies it
+	// (POST model-default).
+	FixModelDefault = "model_default"
+	// FixOpenProfile opens profile Value for editing, at Field.
+	FixOpenProfile = "open_profile"
+	// FixShowActivity shows the Activity filter Value, at row At.
+	FixShowActivity = "show_activity"
 )
 
 const (
@@ -165,10 +235,12 @@ type Session struct {
 	ID   string `json:"id"`
 	Name string `json:"name,omitempty"`
 	// ProjectDir is the working directory Claude Code was launched in.
-	ProjectDir                         string            `json:"project_dir,omitempty"`
-	CreatedAt                          time.Time         `json:"created_at"`
-	UpdatedAt                          time.Time         `json:"updated_at"`
-	EndedAt                            *time.Time        `json:"ended_at,omitempty"`
+	ProjectDir string     `json:"project_dir,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+	EndedAt    *time.Time `json:"ended_at,omitempty"`
+	// LastActivityAt is the newest request, error or trace entry's time.
+	LastActivityAt                     *time.Time        `json:"last_activity_at,omitempty"`
 	State                              SessionState      `json:"state"`
 	Health                             SessionHealth     `json:"session_health"`
 	SupervisorPID                      int               `json:"supervisor_pid,omitempty"`
@@ -208,11 +280,15 @@ type Session struct {
 	// the recent ones that ended with an error status.
 	RecentFailedCount int `json:"recent_failed_count"`
 	// UnmappedModels are the Claude models this session sent with no alias
-	// on its current route (cleared when the route changes), first seen
-	// first.
+	// on its current route, first seen first. A route change keeps only the
+	// ones the new route still leaves unaliased.
 	UnmappedModels        []string `json:"unmapped_models,omitempty"`
 	ActiveProfileName     string   `json:"active_profile_name,omitempty"`
 	ActiveProfileProvider string   `json:"active_profile_provider,omitempty"`
+	// Issues are the problems the session ran into, in the order they first
+	// opened; Health is the worst open one's severity. Never modified in
+	// place: the supervisor replaces the slice.
+	Issues []Issue `json:"issues,omitempty"`
 	// CaptureBodies mirrors the per-session captureBodies routing flag so the
 	// inspect-web ribbon can render a "Bodies: on/off" cell and the runtime
 	// /capture/bodies toggle has a state to report. Launch-time initial value
@@ -420,6 +496,9 @@ type RequestFailure struct {
 	Truncated bool   `json:"truncated,omitempty"`
 	// Hint is ccwrap's suggestion for the user.
 	Hint string `json:"hint,omitempty"`
+	// Issue is the session issue this failure counts toward. Set in the
+	// supervisor and read there only, so it is not on the wire.
+	Issue string `json:"-"`
 }
 
 // RequestBodyRef is the in-ring reference to a request body spilled to a
@@ -449,16 +528,22 @@ func (r RequestRecord) MethodLabel() string {
 	return r.Method
 }
 
-// FailedModelRequest reports a model request (POST /v1/messages) that ended
-// with an error status — what Session.RecentFailedCount counts. Other API
-// calls can fail harmlessly (a gateway without count_tokens, say), so they
-// show their status but are not counted.
-func (r RequestRecord) FailedModelRequest() bool {
-	if r.Synthetic || r.StatusCode < 400 || !strings.EqualFold(r.Method, http.MethodPost) {
+// ModelRequest reports a request Claude Code sent for a model turn: POST
+// /v1/messages, not one ccwrap answered itself.
+func (r RequestRecord) ModelRequest() bool {
+	if r.Synthetic || !strings.EqualFold(r.Method, http.MethodPost) {
 		return false
 	}
 	path, _, _ := strings.Cut(r.Path, "?")
 	return strings.TrimRight(path, "/") == "/v1/messages"
+}
+
+// FailedModelRequest reports a model request that ended with an error
+// status — what Session.RecentFailedCount counts. Other API calls can fail
+// harmlessly (a gateway without count_tokens, say), so they show their
+// status but are not counted.
+func (r RequestRecord) FailedModelRequest() bool {
+	return r.StatusCode >= 400 && r.ModelRequest()
 }
 
 type ErrorRecord struct {

@@ -191,8 +191,8 @@ func TestHTTPGuards(t *testing.T) {
 }
 
 // startSession runs a real session supervisor registered under paths, as a
-// launch would, in projectDir.
-func startSession(t *testing.T, paths app.Paths, id, projectDir string) {
+// launch would, in projectDir. stop ends its process.
+func startSession(t *testing.T, paths app.Paths, id, projectDir string) (stop func()) {
 	t.Helper()
 	sp := paths.SessionPaths(id)
 	if err := os.MkdirAll(sp.RuntimeDir, 0o700); err != nil {
@@ -205,7 +205,8 @@ func startSession(t *testing.T, paths app.Paths, id, projectDir string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { _ = srv.Run(ctx); close(done) }()
-	t.Cleanup(func() { cancel(); <-done })
+	stop = func() { cancel(); <-done }
+	t.Cleanup(stop)
 	client := control.NewClient(sp.SocketPath)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -231,6 +232,7 @@ func startSession(t *testing.T, paths app.Paths, id, projectDir string) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	return stop
 }
 
 // Sessions are listed from discovery, their API is reachable through the
@@ -249,7 +251,7 @@ func TestSessionsAndEvents(t *testing.T) {
 	}
 	first := list[0].(map[string]any)
 	disp := first["display"].(map[string]any)
-	if first["api"] != "v1" || first["project_dir"] != proj || disp["title"] != filepath.Base(proj) || !strings.HasPrefix(disp["subtitle"].(string), "no profile") {
+	if first["project_dir"] != proj || first["health"] != "ok" || disp["title"] != filepath.Base(proj) || disp["subtitle"] != "no profile" {
 		t.Fatalf("summary = %v", first)
 	}
 	if status, sess := r.http(t, "GET", "/api/v1/sessions/aaaa000000000001/session", "", nil); status != 200 || sess["project_dir"] != proj {
@@ -310,6 +312,12 @@ func TestSessionsAndEvents(t *testing.T) {
 		t.Fatalf("capture: %d", status)
 	}
 	waitFor("session.updated", `"capture_telemetry":true`)
+	// Its end reaches the page with its final state, and the list greys it.
+	if err := control.NewClient(paths.SessionPaths("bbbb000000000002").SocketPath).CloseSession(context.Background(), "bbbb000000000002", model.SessionCloseRequest{Reason: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor("session.ended", `"state":"ended"`)
+	waitFor("sessions.changed", `"state":"ended"`)
 }
 
 // Projects come from Claude Code's history; a launch runs this ccwrap in a
@@ -506,5 +514,125 @@ func TestEnsureReusesMatchingService(t *testing.T) {
 	info, err := Ensure(context.Background(), paths, link, "test", time.Second)
 	if err != nil || info.InstanceID != srv.Info().InstanceID {
 		t.Fatalf("Ensure = %+v, %v; want the running instance %s", info, err, srv.Info().InstanceID)
+	}
+}
+
+// startLegacySession registers a session whose supervisor predates /api/v1:
+// it answers the control status but nothing under /api/v1.
+func startLegacySession(t *testing.T, paths app.Paths, id string) {
+	t.Helper()
+	sp := paths.SessionPaths(id)
+	if err := os.MkdirAll(sp.RuntimeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("unix", sp.SocketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/status", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(model.StatusResponse{SessionID: id, SocketPath: sp.SocketPath})
+	})
+	srv := &http.Server{Handler: mux}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+	token, err := procmeta.CurrentStartToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.Write(manifest.Path(sp.RuntimeDir), model.SessionManifest{
+		SessionID: id, CreatedAt: time.Now(), State: model.StateActive, SupervisorPID: os.Getpid(), SupervisorStartToken: token,
+		ControlSocket: sp.SocketPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// listed polls the session list until match accepts it.
+func (r *running) listed(t *testing.T, what string, match func(map[string]map[string]any) bool) map[string]map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		_, out := r.http(t, "GET", "/api/v1/sessions", "", nil)
+		byID := map[string]map[string]any{}
+		list, _ := out["sessions"].([]any)
+		for _, v := range list {
+			sum := v.(map[string]any)
+			byID[sum["id"].(string)] = sum
+		}
+		if match(byID) {
+			return byID
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: sessions = %v", what, byID)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// Legacy sessions are not listed. An ended session stays, greyed out, for
+// EndedRetention — whether it says it ended or its process went away — and
+// is then dropped.
+func TestSessionListHidesLegacyAndKeepsEndedForAWhile(t *testing.T) {
+	paths := testutil.ShortAppPaths(t, "ui.sock")
+	startLegacySession(t, paths, "cccc000000000003")
+	stopA := startSession(t, paths, "aaaa000000000001", t.TempDir())
+	_ = startSession(t, paths, "bbbb000000000002", t.TempDir())
+	srv := New(Options{
+		Paths: paths, Version: "test", Exe: "/usr/local/bin/ccwrap", Logger: log.New(io.Discard, "", 0),
+		IdleTimeout: time.Hour, PollInterval: 30 * time.Millisecond, EndedRetention: 600 * time.Millisecond,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { _ = srv.Serve(ctx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+	var r *running
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if info, ok := Running(context.Background(), paths); ok {
+			r = &running{srv: srv, info: info, done: done}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("ui service did not start")
+		}
+	}
+
+	byID := r.listed(t, "both sessions", func(m map[string]map[string]any) bool { return len(m) == 2 })
+	if _, ok := byID["cccc000000000003"]; ok {
+		t.Fatal("a legacy session is listed")
+	}
+
+	// A session that says it ended.
+	if err := control.NewClient(paths.SessionPaths("bbbb000000000002").SocketPath).CloseSession(context.Background(), "bbbb000000000002", model.SessionCloseRequest{Reason: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	// A session whose process went away.
+	stopA()
+	byID = r.listed(t, "both ended", func(m map[string]map[string]any) bool {
+		return m["aaaa000000000001"]["state"] == "ended" && m["bbbb000000000002"]["state"] == "ended"
+	})
+	for id, sum := range byID {
+		if sum["ended_at"] == nil || sum["display"].(map[string]any)["badge"] != nil {
+			t.Errorf("%s ended: %v", id, sum)
+		}
+	}
+	r.listed(t, "ended sessions dropped", func(m map[string]map[string]any) bool { return len(m) == 0 })
+}
+
+// A session's health and badge come from its open issues.
+func TestSessionSummaryShowsIssues(t *testing.T) {
+	paths := testutil.ShortAppPaths(t, "ui.sock")
+	startSession(t, paths, "aaaa000000000001", t.TempDir())
+	client := control.NewClient(paths.SessionPaths("aaaa000000000001").SocketPath)
+	if err := client.SetRoute(context.Background(), "aaaa000000000001", model.SessionRouteRequest{
+		APIBaseURL: "https://gw.example/", RouteClass: model.RouteClassThirdPartyHidden, AuthBootstrap: model.AuthBootstrapMissing,
+		ActiveProfileName: "gw", MissingAuthEnv: "GW_KEY", FailPolicy: model.FailClosed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	r := startUI(t, paths, nil, time.Hour)
+	sum := r.listed(t, "the session", func(m map[string]map[string]any) bool { return len(m) == 1 })["aaaa000000000001"]
+	if sum["health"] != "warn" || sum["profile"] != "gw" || sum["display"].(map[string]any)["badge"] != "1 issue" || sum["display"].(map[string]any)["subtitle"] != "gw" {
+		t.Fatalf("summary = %v", sum)
 	}
 }

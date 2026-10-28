@@ -4,13 +4,13 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,19 +21,18 @@ import (
 	"github.com/Hoper-J/ccwrap/internal/ui"
 )
 
-// SessionSummary is one session in the sidebar.
+// SessionSummary is one session in the sidebar. The page shows the times as
+// they pass: how long it has run, how long ago it ended.
 type SessionSummary struct {
-	ID         string    `json:"id"`
-	ProjectDir string    `json:"project_dir,omitempty"`
-	Profile    string    `json:"profile"`
-	State      string    `json:"state"`
-	Health     string    `json:"health"`
-	StartedAt  time.Time `json:"started_at"`
-	// API is "v1", or "legacy" for a session from a ccwrap without /api/v1:
-	// it shows only what its manifest says, with a link to its own page.
-	API       string `json:"api"`
-	LegacyURL string `json:"legacy_url,omitempty"`
-	Display   struct {
+	ID             string     `json:"id"`
+	ProjectDir     string     `json:"project_dir,omitempty"`
+	Profile        string     `json:"profile"`
+	State          string     `json:"state"`
+	Health         string     `json:"health"`
+	StartedAt      time.Time  `json:"started_at"`
+	EndedAt        *time.Time `json:"ended_at,omitempty"`
+	LastActivityAt *time.Time `json:"last_activity_at,omitempty"`
+	Display        struct {
 		Title    string `json:"title"`
 		Subtitle string `json:"subtitle"`
 		Badge    string `json:"badge,omitempty"`
@@ -57,32 +56,38 @@ func (s *Server) liveSessions() []liveSession {
 	return out
 }
 
-// summarize asks the session for its state; a session without /api/v1 is
-// described from its manifest.
-func (s *Server) summarize(ctx context.Context, ls liveSession) SessionSummary {
+// summaryResult is how asking a session for its summary went.
+type summaryResult int
+
+const (
+	summaryOK summaryResult = iota
+	// summaryLegacy: a session from a ccwrap without /api/v1. Not listed.
+	summaryLegacy
+	// summaryFailed: it did not answer this time.
+	summaryFailed
+)
+
+// summarize asks the session for its state.
+func (s *Server) summarize(ctx context.Context, ls liveSession) (SessionSummary, summaryResult) {
 	m := ls.manifest
-	sum := SessionSummary{ID: m.SessionID, ProjectDir: m.ProjectDir, State: string(m.State), StartedAt: m.CreatedAt, socket: m.ControlSocket, LegacyURL: "http://" + m.ProxyListenAddr + "/"}
 	var sess struct {
 		model.Session
 		Display struct {
-			HeroSentence string `json:"hero_sentence"`
+			Badge string `json:"badge"`
 		} `json:"display"`
 	}
-	if err := getJSON(ctx, m.ControlSocket, "/api/v1/session", &sess); err == nil {
-		sum.API = "v1"
-		sum.ProjectDir = sess.ProjectDir
-		sum.Profile = sess.ActiveProfileName
-		sum.State = string(sess.State)
-		sum.Health = string(sess.Health)
-		sum.StartedAt = sess.CreatedAt
-		switch {
-		case sess.RecentFailedCount > 0:
-			sum.Display.Badge = plural(sess.RecentFailedCount, "failed request", "failed requests")
-		case sess.RecentErrorCount > 0:
-			sum.Display.Badge = plural(sess.RecentErrorCount, "issue", "issues")
-		}
-	} else {
-		sum.API = "legacy"
+	if err := getJSON(ctx, m.ControlSocket, "/api/v1/session", &sess); errors.Is(err, errNotFound) {
+		return SessionSummary{}, summaryLegacy
+	} else if err != nil {
+		return SessionSummary{}, summaryFailed
+	}
+	sum := SessionSummary{
+		ID: m.SessionID, ProjectDir: sess.ProjectDir, Profile: sess.ActiveProfileName,
+		State: string(sess.State), Health: string(sess.Health), StartedAt: sess.CreatedAt,
+		EndedAt: sess.EndedAt, LastActivityAt: sess.LastActivityAt, socket: m.ControlSocket,
+	}
+	if sum.Health == "" {
+		sum.Health = string(model.HealthOK)
 	}
 	switch {
 	case sum.ProjectDir != "":
@@ -92,42 +97,16 @@ func (s *Server) summarize(ctx context.Context, ls liveSession) SessionSummary {
 	default:
 		sum.Display.Title = ui.ShortID(m.SessionID)
 	}
-	profile := sum.Profile
-	if profile == "" {
-		profile = "no profile"
+	sum.Display.Subtitle = sum.Profile
+	if sum.Display.Subtitle == "" {
+		sum.Display.Subtitle = "no profile"
 	}
-	sum.Display.Subtitle = profile
-	if up := ui.Uptime(sum.StartedAt); up != "" {
-		sum.Display.Subtitle += " · " + up
-	}
-	return sum
-}
-
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return "1 " + one
-	}
-	return strconv.Itoa(n) + " " + many
-}
-
-func (s *Server) sessionSummaries(ctx context.Context) []SessionSummary {
-	live := s.liveSessions()
-	out := make([]SessionSummary, len(live))
-	var wg sync.WaitGroup
-	for i, ls := range live {
-		wg.Add(1)
-		go func(i int, ls liveSession) {
-			defer wg.Done()
-			out[i] = s.summarize(ctx, ls)
-		}(i, ls)
-	}
-	wg.Wait()
-	sort.Slice(out, func(i, j int) bool { return out[i].StartedAt.Before(out[j].StartedAt) })
-	return out
+	sum.Display.Badge = sess.Display.Badge
+	return sum, summaryOK
 }
 
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]any{"sessions": s.sessionSummaries(r.Context())})
+	writeJSON(w, map[string]any{"sessions": s.hub.refresh(r.Context())})
 }
 
 // handleSessionAPI forwards /api/v1/sessions/{id}/<rest> to that session's
@@ -166,15 +145,20 @@ func (s *Server) handleSessionAPI(w http.ResponseWriter, r *http.Request) {
 	proxy.ServeHTTP(w, r)
 }
 
-// hub follows every session's event stream and fans the events out to the
-// pages, with sessions.changed when the set of sessions changes.
+// hub keeps the session list and follows every session's event stream,
+// fanning the events out to the pages, with sessions.changed when the list
+// changes.
 type hub struct {
-	s        *Server
-	mu       sync.Mutex
-	clients  map[chan hubEvent]string // channel → session filter ("" = all)
-	known    map[string]bool          // sessions announced to pages
-	follows  map[string]*follower     // event streams being relayed
-	sessions []SessionSummary
+	s *Server
+	// ctx is the hub's run context, which follows run under; nil before run.
+	ctx context.Context
+	// refreshMu makes refreshes take turns, so an older one never overwrites
+	// a newer list.
+	refreshMu sync.Mutex
+	mu        sync.Mutex
+	clients   map[chan hubEvent]string // channel → session filter ("" = all)
+	follows   map[string]*follower     // event streams being relayed
+	sessions  []SessionSummary         // the list pages were last told
 }
 
 type follower struct{ cancel context.CancelFunc }
@@ -186,16 +170,26 @@ type hubEvent struct {
 }
 
 func newHub(s *Server) *hub {
-	return &hub{s: s, clients: map[chan hubEvent]string{}, known: map[string]bool{}, follows: map[string]*follower{}}
+	return &hub{s: s, clients: map[chan hubEvent]string{}, follows: map[string]*follower{}}
 }
 
+// sessionCount is how many listed sessions are still running.
 func (h *hub) sessionCount() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return len(h.known)
+	n := 0
+	for _, sum := range h.sessions {
+		if sum.State != string(model.StateEnded) {
+			n++
+		}
+	}
+	return n
 }
 
 func (h *hub) run(ctx context.Context) {
+	h.mu.Lock()
+	h.ctx = ctx
+	h.mu.Unlock()
 	t := time.NewTicker(h.s.opts.PollInterval)
 	defer t.Stop()
 	for {
@@ -213,43 +207,109 @@ func (h *hub) run(ctx context.Context) {
 	}
 }
 
-// refresh rediscovers sessions, follows those not followed (new ones, and
-// ones whose stream dropped), and announces changes to the set.
-func (h *hub) refresh(ctx context.Context) {
-	sums := h.s.sessionSummaries(ctx)
-	live := map[string]bool{}
+// refresh rediscovers sessions and returns the new list: the sessions found,
+// by start, and for EndedRetention after they end, the ones that ended or
+// went away. A session that does not answer keeps its last summary. It
+// follows the sessions it reached that are not followed yet (new ones, and
+// ones whose stream dropped), and tells pages when the list changed.
+func (h *hub) refresh(ctx context.Context) []SessionSummary {
+	h.refreshMu.Lock()
+	defer h.refreshMu.Unlock()
+	live := h.s.liveSessions()
+	sums := make([]SessionSummary, len(live))
+	results := make([]summaryResult, len(live))
+	var wg sync.WaitGroup
+	for i, ls := range live {
+		wg.Add(1)
+		go func(i int, ls liveSession) {
+			defer wg.Done()
+			sums[i], results[i] = h.s.summarize(ctx, ls)
+		}(i, ls)
+	}
+	wg.Wait()
+	now := time.Now()
+
 	h.mu.Lock()
-	changed := false
-	for _, sum := range sums {
-		live[sum.ID] = true
-		if !h.known[sum.ID] {
-			h.known[sum.ID] = true
-			changed = true
+	prev := map[string]SessionSummary{}
+	for _, sum := range h.sessions {
+		prev[sum.ID] = sum
+	}
+	next := map[string]SessionSummary{}
+	found := map[string]bool{}
+	for i, ls := range live {
+		id := ls.manifest.SessionID
+		found[id] = true
+		switch results[i] {
+		case summaryOK:
+			next[id] = sums[i]
+			if h.follows[id] == nil && h.ctx != nil {
+				fctx, cancel := context.WithCancel(h.ctx)
+				f := &follower{cancel: cancel}
+				h.follows[id] = f
+				go h.follow(fctx, sums[i], f)
+			}
+		case summaryFailed:
+			if p, ok := prev[id]; ok {
+				next[id] = p
+			}
 		}
-		if sum.API != "v1" || h.follows[sum.ID] != nil {
+	}
+	for id, p := range prev {
+		if _, ok := next[id]; ok {
 			continue
 		}
-		fctx, cancel := context.WithCancel(ctx)
-		f := &follower{cancel: cancel}
-		h.follows[sum.ID] = f
-		go h.follow(fctx, sum, f)
+		if p.State != string(model.StateEnded) {
+			p.State = string(model.StateEnded)
+			p.Display.Badge = ""
+		}
+		if p.EndedAt == nil {
+			t := now
+			p.EndedAt = &t
+		}
+		next[id] = p
 	}
-	for id := range h.known {
-		if !live[id] {
-			delete(h.known, id)
-			if f := h.follows[id]; f != nil {
-				f.cancel()
-				delete(h.follows, id)
-			}
-			changed = true
+	list := make([]SessionSummary, 0, len(next))
+	for _, sum := range next {
+		if sum.State == string(model.StateEnded) && sum.EndedAt != nil && now.Sub(*sum.EndedAt) >= h.s.opts.EndedRetention {
+			continue
+		}
+		list = append(list, sum)
+	}
+	sort.Slice(list, func(i, j int) bool {
+		if !list[i].StartedAt.Equal(list[j].StartedAt) {
+			return list[i].StartedAt.Before(list[j].StartedAt)
+		}
+		return list[i].ID < list[j].ID
+	})
+	for id, f := range h.follows {
+		if !found[id] {
+			f.cancel()
+			delete(h.follows, id)
 		}
 	}
-	h.sessions = sums
+	changed := !sameSessionStates(h.sessions, list)
+	h.sessions = list
 	h.mu.Unlock()
 	if changed {
-		data, _ := json.Marshal(map[string]any{"sessions": sums})
+		data, _ := json.Marshal(map[string]any{"sessions": list})
 		h.publish(hubEvent{typ: "sessions.changed", data: data})
 	}
+	return list
+}
+
+// sameSessionStates reports whether two lists hold the same sessions in the
+// same states: what a page's list needs sessions.changed for. Health and
+// badges change with session.updated.
+func sameSessionStates(a, b []SessionSummary) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].ID != b[i].ID || a[i].State != b[i].State || a[i].Profile != b[i].Profile {
+			return false
+		}
+	}
+	return true
 }
 
 // follow relays one session's /api/v1/events until it ends, then lets the

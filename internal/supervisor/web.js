@@ -674,10 +674,6 @@
     var shown = document.querySelectorAll('#activity-body .rows > .row').length;
     moreWrap.hidden = !(total > shown);
   }
-  function errorHealth(rec){
-    var sev = rec && rec.severity;
-    return (sev === 'warn' || (!sev && rec && rec.error_class === 'ccwrap_auth_missing')) ? 'warn' : 'error';
-  }
   function sameErrorRec(a, b){
     return !!(a && b) && a.error_class === b.error_class && a.summary === b.summary && a.upstream_host === b.upstream_host && a.suggested_action === b.suggested_action;
   }
@@ -687,7 +683,6 @@
     if (cls === 'error' && rec && rec.count > 1 && sameErrorRec(state.errors[0], rec)) {
       state.errors[0] = rec;
       rebuildActivityFromState();
-      if (state.session) { state.session.session_health = errorHealth(rec); updateHeroState(state.session); }
       syncMore();
       return;
     }
@@ -710,24 +705,13 @@
       prependRow(activityBody, activityRowData(rec, cls), LIMITS.activity);
     }
     refreshCounts();
+    // Health is the server's: it comes from the session's open issues, and
+    // every change to them arrives as a session_updated (patchSession).
     if (cls !== 'error' && cls !== 'trace') {
       updateTrafficCell();
-      // Mirror the server invariant (recordRequest): a successful request heals
-      // Health to ok EXCEPT while native-TLS is blocked. A request that
-      // completed over a still-pooled good conn must NOT heal away the block
-      // before a fresh mirror dial resumes, or the hero would show Active while
-      // new connections are being fail-closed. state.session.native_tls ===
-      // 'blocked' is the JS twin of sess.nativeTLSBlocked. A failed model
-      // request keeps the Health its error entry set.
-      if (state.session && state.session.native_tls !== 'blocked' && !failedReq) {
-        state.session.session_health = 'ok';
-        updateHeroState(state.session);
-      }
     } else if (cls === 'error' && state.session) {
       state.session.recent_error_count = (state.session.recent_error_count||0)+1;
       updateTrafficCell();
-      state.session.session_health = errorHealth(rec);
-      updateHeroState(state.session);
     }
     syncMore();
   }

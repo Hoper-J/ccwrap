@@ -4938,23 +4938,15 @@ func TestInlineScriptUpdatesHeroOnSSE(t *testing.T) {
 	)
 }
 
-// TestInlineScriptPatchActivityUpdatesHero pins the review-gap fix: the
-// normal request/error SSE flow (routed to patchActivity) must repaint the
-// hero live by updating state.session.session_health and calling
-// updateHeroState — mirroring backend Health so the live hero matches a
-// page reload. The error branch keys off rec.severity ('warn' vs 'error').
-func TestInlineScriptPatchActivityUpdatesHero(t *testing.T) {
-	var buf bytes.Buffer
-	renderWebPage(noopResponseWriter{header: http.Header{}, b: &buf}, webPageData{
-		Title: "CCWRAP Session", LiveEnabled: true,
-		BootstrapB64: bootstrapB64(pageBootstrap{EventsURL: "/events"}),
-	})
-	body := buf.String()
-	mustContainAllWeb(t, body,
-		"state.session.session_health",
-		"updateHeroState(state.session)",
-		"rec.severity",
-	)
+// TestInlineScriptLeavesHealthToServer pins that the live script never
+// derives Health itself: it comes from the session's open issues, and the
+// supervisor sends session_updated whenever they change, so a local guess
+// (heal on success, set on error) could only disagree with it.
+func TestInlineScriptLeavesHealthToServer(t *testing.T) {
+	js := inlineScript(t)
+	if regexp.MustCompile(`session_health\s*=[^=]`).MatchString(js) {
+		t.Error("the live script must not assign session_health; patchSession takes it from session_updated")
+	}
 }
 
 func TestWebTopbarBrandAndOverflow(t *testing.T) {
@@ -5161,17 +5153,6 @@ func TestWebRetainMirrorsServerCaps(t *testing.T) {
 		maxSessionRequests, maxSessionErrors, maxSessionTrace)
 	if !strings.Contains(js, want) {
 		t.Errorf("web RETAIN must mirror server retention caps; want substring:\n  %s", want)
-	}
-}
-
-// TestPatchActivityHealGatedOnNativeTLS guards the health fake-heal fix: a
-// successful request must NOT heal Health to ok while native-TLS is blocked
-// (the JS twin of server recordRequest's !nativeTLSBlocked gate). Otherwise the
-// hero shows Active while new connections are being fail-closed.
-func TestPatchActivityHealGatedOnNativeTLS(t *testing.T) {
-	js := inlineScript(t)
-	if !strings.Contains(js, "state.session.native_tls !== 'blocked'") {
-		t.Errorf("patchActivity must gate the health heal on native_tls !== 'blocked' (no fake-heal while blocked)")
 	}
 }
 

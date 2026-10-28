@@ -225,10 +225,16 @@ func TestSessionProxyRecordsModelsAndUpstreamFailures(t *testing.T) {
 				t.Fatalf("after failures: failed=%d health=%s", got.RecentFailedCount, got.Health)
 			}
 
+			// A later success does not alias the model: its issue stays open,
+			// and so does the warning.
 			send("claude-opus-5-5")
 			got, _ = client.GetSession(context.Background(), sess.ID)
-			if got.Health != model.HealthOK || got.RecentFailedCount != 2 {
+			if got.Health != model.HealthWarn || got.RecentFailedCount != 2 {
 				t.Fatalf("after success: failed=%d health=%s", got.RecentFailedCount, got.Health)
+			}
+			if len(got.Issues) != 1 || got.Issues[0].ID != model.IssueUnaliasedModel || got.Issues[0].State != model.IssueOpen ||
+				got.Issues[0].Evidence != "404 model not found: claude-fable-5-1 · 2 requests" {
+				t.Fatalf("issues = %+v", got.Issues)
 			}
 		})
 	}
