@@ -150,8 +150,8 @@ Launch flags:
 
 Management commands:
   ccwrap status     [--json] [--session ID]
-  ccwrap open       [--print] [SESSION-ID | PROJECT]  (open a session's web dashboard; picks the current session by default)
-  ccwrap ui         [status | stop]                   (the per-user app service; started on demand)
+  ccwrap open       [--print] [SESSION-ID | PROJECT]  (open a session in ccwrap ui; picks the current session by default)
+  ccwrap ui         [status | stop]                   (the per-user app; a launch starts it unless CCWRAP_NO_UI=1, CCWRAP_UI_PORT fixes its port)
   ccwrap dashboard  [--session ID] [--view overview|requests|errors|diagnostics]
   ccwrap doctor     [--json] [--verbose] [--session ID] [--profile NAME]
   ccwrap stop       [--session ID | --all]
@@ -365,6 +365,9 @@ func runClaude(paths app.Paths, args []string) error {
 	l := newSessionLauncher(paths, launch, pre, inspect, outOpts, cwd, newID())
 	defer l.rollback.run()
 	defer l.cancelCtx()
+	// ccwrap ui starts while the session does; the banner waits for it only
+	// briefly.
+	appStart := startUIInBackground(paths, os.Getenv, ui.IsTerminal(os.Stderr))
 
 	steps := []func() error{
 		l.ResolveClaudeBin,
@@ -381,6 +384,7 @@ func runClaude(paths app.Paths, args []string) error {
 			return err
 		}
 	}
+	l.appLink = appStart.sessionLink(l.sessionID, 300*time.Millisecond)
 	l.PrintSummary()
 	updHandle := startBackgroundUpdateCheck(l.ctx, l.pre.Egress, paths.StateDir, versionString(), launch.NoUpdateCheck, os.Getenv, time.Now)
 	code, err := l.Wait()

@@ -128,6 +128,8 @@ func TestClaudeDialogE2E_BearerPlaceholderSkipsApprovalDialog(t *testing.T) {
 			// A non-China TZ skips ccwrap's interactive timezone prompt.
 			"TZ=America/Los_Angeles",
 			"DISABLE_AUTOUPDATER=1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
+			// The test watches Claude Code's terminal, not the app.
+			"CCWRAP_NO_UI=1",
 		}, ccwrapBin)
 		tm.newSession("subject", script)
 		defer tm.killSession("subject")

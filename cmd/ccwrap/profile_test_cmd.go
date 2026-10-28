@@ -373,7 +373,7 @@ var (
 )
 
 // profileTestHelpText returns the long-form help text. It must mention
-// cost, no-auth-SKIPPED, and the "not in /recent" guarantee.
+// cost, no-auth-SKIPPED, and that probes stay out of session activity.
 func profileTestHelpText() string {
 	return `Usage: ccwrap profile test [name] [flags]
 
@@ -390,8 +390,8 @@ Profiles without an auth block are reported as SKIPPED (ccwrap does
 not own the credential, so the probe has nothing to inject; legacy
 auth.mode = passthrough data gets the same disposition).
 
-Probe traffic does not appear in ccwrap inspect web /recent — it is
-sent directly in-process, bypassing the proxy port.
+Probe traffic does not appear in any session's activity — it is sent
+directly in-process, bypassing the proxy port.
 
 Flags:
   --model <name>     Force the probe model (bypasses alias rewrite)

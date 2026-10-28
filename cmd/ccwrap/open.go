@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Hoper-J/ccwrap/internal/app"
 	"github.com/Hoper-J/ccwrap/internal/discovery"
@@ -21,9 +22,11 @@ import (
 	"github.com/Hoper-J/ccwrap/internal/ui"
 )
 
-// openCommand opens a session's dashboard in the browser. Without an
-// argument it picks the session it runs in, else the one whose project
-// folder holds the current directory, else the only running one.
+// openCommand opens a session in ccwrap ui, starting the app if needed —
+// even under CCWRAP_NO_UI=1, which only keeps launches from starting it.
+// Without an argument it picks the session it runs in, else the one whose
+// project folder holds the current directory, else the only running one;
+// with no session running it opens the app's Projects page.
 func openCommand(paths app.Paths, args []string) error {
 	fs := flag.NewFlagSet("open", flag.ContinueOnError)
 	printOnly := fs.Bool("print", false, "print the address instead of opening a browser")
@@ -50,19 +53,28 @@ func openCommand(paths app.Paths, args []string) error {
 		live = append(live, c)
 	}
 	cwd, _ := os.Getwd()
-	picked, err := pickOpenSession(live, fs.Arg(0), os.Getenv, cwd)
-	if err != nil {
-		return err
+	picked, pickErr := pickOpenSession(live, fs.Arg(0), os.Getenv, cwd)
+	// No session at all is not an error when the app is there: it opens on
+	// Projects, where sessions start.
+	noSession := pickErr != nil && len(live) == 0 && fs.Arg(0) == ""
+	if pickErr != nil && !noSession {
+		return pickErr
 	}
-	addr := picked.ds.Manifest.ProxyListenAddr
-	link := proxyInfoURL(addr)
+	info, err := ensureUI(paths, 3*time.Second)
+	if err != nil {
+		return fmt.Errorf("can't open ccwrap ui: %w", err)
+	}
+	link, what := info.URL()+"#/projects", "ccwrap ui"
+	if !noSession {
+		link, what = appSessionURL(info, picked.ds.Manifest.SessionID), picked.label()
+	}
 	if *printOnly {
 		fmt.Println(link)
 		return nil
 	}
-	fmt.Printf("Opening %s — %s\n", picked.label(), link)
+	fmt.Printf("Opening %s — %s\n", what, link)
 	if opened, err := openInBrowser(link, os.Getenv, runtime.GOOS, startCommand); !opened || err != nil {
-		printNoBrowserHint(os.Stdout, addr)
+		printNoBrowserHint(os.Stdout, info.HTTPAddr)
 	}
 	return nil
 }

@@ -349,7 +349,7 @@ func TestProfileTestHelp_MentionsCostAndSkipped(t *testing.T) {
 		"1-2 tokens",
 		"passthrough",
 		"SKIPPED",
-		"/recent",
+		"session's activity",
 	} {
 		if !strings.Contains(help, want) {
 			t.Errorf("help text missing %q", want)

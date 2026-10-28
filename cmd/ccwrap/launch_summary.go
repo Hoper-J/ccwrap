@@ -48,10 +48,11 @@ func authMissingRecoverHint(missingAuthEnv string) string {
 }
 
 // quietSummaryLine renders the one-line launch summary used by --quiet /
-// CCWRAP_QUIET: where traffic exits (host) plus the inspect URL, with the
-// profile name and a degraded marker when relevant. The full multi-row banner
-// is suppressed in quiet mode.
-func quietSummaryLine(pal ui.Palette, host, profileName string, degraded bool, proxyURL string) string {
+// CCWRAP_QUIET: where traffic exits (host) plus where to inspect the session
+// (its link in ccwrap ui, else `ccwrap open`), with the profile name and a
+// degraded marker when relevant. The full multi-row banner is suppressed in
+// quiet mode.
+func quietSummaryLine(pal ui.Palette, host, profileName string, degraded bool, inspectLink string) string {
 	line := pal.Bold("ccwrap") + " → " + host
 	if strings.TrimSpace(profileName) != "" {
 		line += " · " + profileName
@@ -59,11 +60,14 @@ func quietSummaryLine(pal ui.Palette, host, profileName string, degraded bool, p
 	if degraded {
 		line += " · " + pal.Status("degraded")
 	}
-	line += " · " + pal.Dim("inspect") + " " + proxyURL
+	if inspectLink == "" {
+		inspectLink = "ccwrap open"
+	}
+	line += " · " + pal.Dim("inspect") + " " + inspectLink
 	return line
 }
 
-func printLaunchSummary(sessionID, proxyURL, upstream string, routeSource model.RouteSource, routeClass model.RouteClass, authMode model.AuthMode, authSource model.AuthSource, authPolicy model.AuthPolicy, authBootstrap model.AuthBootstrap, authBootstrapKind model.AuthBootstrapKind, egressMode, egressSource, egressSummary string, alias modelalias.Config, headers upstreamheaders.Config, pid int, profileName, profileProvider, missingAuthEnv string) {
+func printLaunchSummary(sessionID, inspectLink, upstream string, routeSource model.RouteSource, routeClass model.RouteClass, authMode model.AuthMode, authSource model.AuthSource, authPolicy model.AuthPolicy, authBootstrap model.AuthBootstrap, authBootstrapKind model.AuthBootstrapKind, egressMode, egressSource, egressSummary string, alias modelalias.Config, headers upstreamheaders.Config, pid int, profileName, profileProvider, missingAuthEnv string) {
 	pal := ui.New(ui.IsTerminal(os.Stderr))
 
 	// Build a transient session so the hero sentence comes from the
@@ -136,8 +140,8 @@ func printLaunchSummary(sessionID, proxyURL, upstream string, routeSource model.
 	}
 	lines = append(lines, "",
 		"  "+pal.Dim("session")+"   "+pal.Cyan(ui.ShortID(sessionID))+" · "+fmt.Sprintf("pid %d", pid),
-		// No separate `proxy` row — the proxy endpoint IS the `inspect`
-		// endpoint (one row carries that URL, below).
+		// No `proxy` row: Claude Code is pointed at the proxy already, and
+		// the `inspect` row below says where to look at the session.
 		"  "+pal.Dim("upstream")+"  "+host+" · "+ui.HumanRouteClass(routeClass)+" · "+ui.HumanRouteSource(routeSource),
 	)
 	// When a profile is active, one extra row names it (name · Provider),
@@ -162,7 +166,7 @@ func printLaunchSummary(sessionID, proxyURL, upstream string, routeSource model.
 	if eg := ui.HumanEgress(egressMode, egressSource, egressSummary); eg != "Direct" {
 		lines = append(lines, "  "+pal.Dim("egress")+"    "+eg)
 	}
-	lines = append(lines, "  "+pal.Dim("inspect")+"   "+proxyURL+"  ·  ccwrap dashboard (open in browser)")
+	lines = append(lines, "  "+pal.Dim("inspect")+"   "+inspectText(inspectLink))
 	// When launch proceeds with missing auth, a one-time banner-bottom
 	// warning lists the concrete recovery options. Single blank line
 	// above for visual separation from the inspect row.
@@ -315,4 +319,15 @@ func theseNames(n int) string {
 		return "that name"
 	}
 	return "those names"
+}
+
+// inspectText is the banner's inspect row: the session's link in ccwrap ui
+// when the app was up in time, else how to open it there. The link carries
+// the full session ID, so the note stays short to keep the row within 80
+// columns.
+func inspectText(link string) string {
+	if link == "" {
+		return "ccwrap open  ·  opens this session in ccwrap ui"
+	}
+	return link + "  ·  ccwrap ui"
 }

@@ -99,14 +99,17 @@ type sessionLauncher struct {
 	ctx       context.Context
 	cancelCtx context.CancelFunc
 
-	ca               *certs.Manager
-	supervisor       *supervisor.Supervisor
-	supervisorErr    chan error
-	client           *control.Client
-	session          *model.Session
-	cmd              *exec.Cmd
-	stopSignals      func()
-	proxyURL         string
+	ca            *certs.Manager
+	supervisor    *supervisor.Supervisor
+	supervisorErr chan error
+	client        *control.Client
+	session       *model.Session
+	cmd           *exec.Cmd
+	stopSignals   func()
+	proxyURL      string
+	// appLink is the session in ccwrap ui, when the app was up in time for
+	// the banner; without it the banner says to run ccwrap open.
+	appLink          string
 	settingsFilePath string // inspection copy of the generated settings
 	settingsArg      string // what Claude Code receives as --settings
 	childEnv         []string
@@ -408,6 +411,12 @@ func (l *sessionLauncher) Attach() error {
 	return nil
 }
 
+// inspectLink is where the banner sends the user: the session in ccwrap ui,
+// or "" when the app was not up in time.
+func (l *sessionLauncher) inspectLink() string {
+	return l.appLink
+}
+
 // PrintSummary emits the launch banner. Called after Attach succeeds.
 func (l *sessionLauncher) PrintSummary() {
 	l.warnedModels = seenUnaliasedModels(l.pre, l.paths.StateDir)
@@ -418,7 +427,7 @@ func (l *sessionLauncher) PrintSummary() {
 			host = l.pre.APIBaseURL.String()
 		}
 		degraded := l.pre.RouteClass == model.RouteClassThirdPartyCompatible || l.pre.AuthPolicy == model.AuthPolicyUnsafePassthrough
-		line := quietSummaryLine(pal, host, l.pre.ActiveProfileName, degraded, l.proxyURL)
+		line := quietSummaryLine(pal, host, l.pre.ActiveProfileName, degraded, l.inspectLink())
 		_, quietMark, disclosure := updateBannerLines(l.paths.StateDir, versionString(), l.launch.NoUpdateCheck, os.Getenv, ui.IsTerminal(os.Stderr), pal)
 		if quietMark != "" {
 			line += " · " + quietMark
@@ -438,7 +447,7 @@ func (l *sessionLauncher) PrintSummary() {
 	}
 	printLaunchSummary(
 		l.sessionID,
-		l.proxyURL,
+		l.inspectLink(),
 		l.pre.APIBaseURL.String(),
 		l.pre.RouteSource,
 		l.pre.RouteClass,

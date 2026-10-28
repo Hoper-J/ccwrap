@@ -349,6 +349,10 @@ func TestQuietSummaryLine(t *testing.T) {
 	if got2 != want2 {
 		t.Errorf("quietSummaryLine(degraded) = %q, want %q", got2, want2)
 	}
+	// without the app: how to open the session there
+	if got3 := quietSummaryLine(pal, "api.anthropic.com", "", false, ""); got3 != "ccwrap → api.anthropic.com · inspect ccwrap open" {
+		t.Errorf("quietSummaryLine(no app) = %q", got3)
+	}
 }
 
 func TestParseLaunchArgsCaptureRequestBodies(t *testing.T) {
@@ -644,10 +648,11 @@ func longestVisibleLine(s string) int {
 }
 
 func TestPrintLaunchSummaryStructure(t *testing.T) {
+	const appLink = "http://127.0.0.1:47398/#/sessions/74c5fcaf812ff6d5"
 	out := captureStderr(t, func() {
 		printLaunchSummary(
 			"74c5fcaf812ff6d5",
-			"http://127.0.0.1:50094",
+			appLink,
 			"http://50.18.84.244:3000",
 			model.RouteSourceInheritedEnv,
 			model.RouteClassThirdPartyHidden,
@@ -669,10 +674,11 @@ func TestPrintLaunchSummaryStructure(t *testing.T) {
 		"session", "74c5fcaf", "pid 7374", // 8-char id + merged pid
 		"upstream", "Gateway", // HumanRouteClass
 		"auth", "CCWRAP-owned · fail-closed", "placeholder injected",
-		"inspect", "ccwrap dashboard",
+		"\n  inspect   "+appLink+"  ·  ccwrap ui\n",
 	)
-	mustNotContain(t, out, "74c5fcaf812ff6d5") // full id must not appear
-	mustNotContain(t, out, "trust")            // trust line removed
+	// The full id appears only inside the app link.
+	mustNotContain(t, strings.Replace(out, appLink, "", 1), "74c5fcaf812ff6d5")
+	mustNotContain(t, out, "trust") // trust line removed
 	mustNotContain(t, out, "third_party_hidden")
 	if n := longestVisibleLine(out); n > 80 {
 		t.Fatalf("hero must wrap: longest line %d runes (>80)\n%s", n, out)
@@ -692,6 +698,21 @@ func TestPrintLaunchSummaryStructure(t *testing.T) {
 		)
 	})
 	mustContainAll(t, out2, "2 aliases · a → x, +1 more")
+
+	// Without the app (not up in time, or CCWRAP_NO_UI=1) the row says how
+	// to open the session there.
+	out3 := captureStderr(t, func() {
+		printLaunchSummary(
+			"abc123def456", "", "http://h:1",
+			model.RouteSourceInheritedEnv, model.RouteClassThirdPartyHidden,
+			model.AuthModeOverrideBearer, model.AuthSourceAnthropicToken,
+			model.AuthPolicyCCWRAPOverrideFailClosed, model.AuthBootstrapPlaceholderActive,
+			model.AuthBootstrapKindBearer, "", "", "",
+			modelalias.Config{}, upstreamheaders.Config{}, 1,
+			"", "", "",
+		)
+	})
+	mustContainAll(t, out3, "\n  inspect   ccwrap open  ·  opens this session in ccwrap ui\n")
 
 	// --- launch-banner refinements: a single `inspect` row (no
 	// duplicate `proxy` URL row), auth de-dup + none-suppression + no

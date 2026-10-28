@@ -121,7 +121,7 @@ func runLiveChild(t *testing.T, sink *liveHeadSink, bin, home string, env []stri
 	cmd := exec.Command(bin, args...)
 	cmd.Env = append([]string{
 		"PATH=" + os.Getenv("PATH"), "HOME=" + home, "CLAUDE_CONFIG_DIR=" + filepath.Join(home, ".claude"),
-		"TMPDIR=" + os.TempDir(), "DISABLE_AUTOUPDATER=1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
+		"TMPDIR=" + os.TempDir(), "DISABLE_AUTOUPDATER=1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "CCWRAP_NO_UI=1",
 	}, env...)
 	cmd.Dir = home
 	// Own process group: killing ccwrap alone would orphan its claude child
