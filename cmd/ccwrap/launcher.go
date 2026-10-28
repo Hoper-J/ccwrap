@@ -118,6 +118,17 @@ type sessionLauncher struct {
 	rollback rollbackStack
 }
 
+// workingDir is the current folder with symlinks resolved, the form Claude
+// Code records folders in (projects.Canonical), so the session's project
+// folder and ccwrap's per-folder memory match Claude Code's; "" when unknown.
+func workingDir() string {
+	cwd, err := os.Getwd()
+	if err != nil || cwd == "" {
+		return ""
+	}
+	return projects.Canonical(cwd)
+}
+
 func newSessionLauncher(paths app.Paths, launch launchArgs, pre *preflight.Result, inspect *settings.InspectionResult, opts preflight.Options, cwd, sessionID string) *sessionLauncher {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &sessionLauncher{

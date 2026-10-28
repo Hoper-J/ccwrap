@@ -243,6 +243,40 @@ console.log(JSON.stringify({
 	}
 }
 
+// Projects: search, live running status, and which launches a new session
+// answers.
+func TestProjectsPage(t *testing.T) {
+	out := runModule(t, `
+import { matches, running, runningText, worstHealth, settleLaunches } from '$JS/projects.js';
+const now = Date.parse('2026-10-28T10:00:00Z');
+const p = { name: 'sub2api', path: '/Users/me/work/sub2api', display_path: '~/work/sub2api', git_branch: 'feat/tls', last_title: 'Port native TLS replay' };
+const sessions = [
+  { id: 'a', project_dir: '/Users/me/work/sub2api', state: 'active', profile: 'official', health: 'warn', started_at: '2026-10-28T09:48:00Z' },
+  { id: 'b', project_dir: '/Users/me/work/sub2api', state: 'ended', health: 'error', started_at: '2026-10-28T09:00:00Z' },
+  { id: 'c', project_dir: '/Users/me/other', state: 'active', health: 'error', started_at: '2026-10-28T09:59:00Z' },
+];
+const live = running(p, sessions);
+const launches = {
+  '/Users/me/work/sub2api': { state: 'opening', since: Date.parse('2026-10-28T09:47:59Z') },
+  '/Users/me/other': { state: 'opening', since: Date.parse('2026-10-28T09:59:30Z') },
+  '/Users/me/x': { state: 'rejected', since: 0, message: 'no' },
+};
+const settled = settleLaunches(launches, sessions);
+console.log(JSON.stringify({
+  m: ['SUB2', 'feat/tls', 'native tls', '~/work', 'nope', ''].map((q) => matches(p, q)),
+  live: live.map((s) => s.id),
+  one: runningText(live, now),
+  two: runningText([live[0], sessions[2]], now),
+  worst: [worstHealth(live), worstHealth([live[0], sessions[2]]), worstHealth([])],
+  left: Object.keys(settled.launches).sort(), started: settled.started.map((s) => s.id),
+}));
+`)
+	want := `{"m":[true,true,true,true,false,true],"live":["a"],"one":"running · official · 12m","two":"2 sessions running","worst":["warn","error","ok"],"left":["/Users/me/other","/Users/me/x"],"started":["a"]}`
+	if strings.TrimSpace(out) != want {
+		t.Fatalf("got  %s\nwant %s", strings.TrimSpace(out), want)
+	}
+}
+
 // The posture sentence bolds the upstream host and the alias count.
 func TestSessionPostureEmphasis(t *testing.T) {
 	out := runModule(t, `
@@ -250,6 +284,24 @@ import { emphasisParts } from '$JS/session/header.js';
 console.log(JSON.stringify(emphasisParts('Routing Claude Code through api.deepseek.com. CCWRAP holds your gateway credentials and applies 2 model aliases; Claude Code only sees logical names.', ['api.deepseek.com', ''])));
 `)
 	want := `[{"text":"Routing Claude Code through ","bold":false},{"text":"api.deepseek.com","bold":true},{"text":". CCWRAP holds your gateway credentials and applies ","bold":false},{"text":"2 model aliases","bold":true},{"text":"; Claude Code only sees logical names.","bold":false}]`
+	if strings.TrimSpace(out) != want {
+		t.Fatalf("got  %s\nwant %s", strings.TrimSpace(out), want)
+	}
+}
+
+// A folder's conversation is named by its title, else its last prompt; a
+// conversation without either is still one to continue.
+func TestConversationLabel(t *testing.T) {
+	out := runModule(t, `
+import { conversationLabel } from '$JS/projects.js';
+console.log(JSON.stringify([
+  conversationLabel({ last_title: 'Fix login', last_prompt: 'hi', has_conversation: true }),
+  conversationLabel({ last_prompt: 'hello there', has_conversation: true }),
+  conversationLabel({ has_conversation: true }),
+  conversationLabel({}),
+]));
+`)
+	want := `[{"text":"Fix login","none":false},{"text":"hello there","none":false},{"text":"Untitled conversation","none":true},{"text":"No conversations yet","none":true}]`
 	if strings.TrimSpace(out) != want {
 		t.Fatalf("got  %s\nwant %s", strings.TrimSpace(out), want)
 	}

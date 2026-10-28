@@ -126,8 +126,35 @@ func TestListMergesClaudeCodeHistoryAndCCWrapState(t *testing.T) {
 	if d := byName["delta"]; d.LastProfile == nil || *d.LastProfile != "" {
 		t.Fatalf("delta = %+v", d)
 	}
-	if g := byName["gamma"]; g.Path != gamma || g.Trusted {
+	if g := byName["gamma"]; g.Path != Canonical(gamma) || g.Trusted {
 		t.Fatalf("gamma = %+v", g)
+	}
+}
+
+// A folder reached through a symlink is one project: what ccwrap recorded
+// under the link (its memory, a running session) meets Claude Code's record
+// of the resolved folder.
+func TestListMergesSymlinkedFolders(t *testing.T) {
+	f := newFixture(t)
+	real := Canonical(f.project("real"))
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	f.config_(map[string]bool{real: true})
+	// Launched through the link with ark, before that in the folder itself
+	// with deepseek: the latest launch tells the profile.
+	if err := RememberLaunch(f.state, real, "deepseek", time.Now().Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := RememberLaunch(f.state, link, "ark", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	var l Lister
+	list := l.List(f.sources(map[string][]string{link: {"s1"}}))
+	if len(list) != 1 || list[0].Path != real || !list[0].Trusted || list[0].LastProfile == nil || *list[0].LastProfile != "ark" ||
+		strings.Join(list[0].RunningSessions, ",") != "s1" {
+		t.Fatalf("list = %+v", list)
 	}
 }
 

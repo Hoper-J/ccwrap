@@ -745,7 +745,7 @@ func captureCommand(paths app.Paths, args []string) error {
 	// no-op; sweepOrphanSessions + EnsureOfficialProfile + resolveLaunchProfile
 	// + composeLaunch are the same launch-composition path.
 	sweepOrphanSessions(paths)
-	cwd, _ := os.Getwd()
+	cwd := workingDir()
 	if err := profiles.EnsureOfficialProfile(paths.StateDir); err != nil {
 		fmt.Fprintf(os.Stderr, "ccwrap: ensure official profile: %v\n", err)
 	}

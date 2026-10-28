@@ -17,6 +17,7 @@ import (
 	"github.com/Hoper-J/ccwrap/internal/app"
 	"github.com/Hoper-J/ccwrap/internal/discovery"
 	"github.com/Hoper-J/ccwrap/internal/model"
+	"github.com/Hoper-J/ccwrap/internal/projects"
 	"github.com/Hoper-J/ccwrap/internal/ui"
 )
 
@@ -159,7 +160,7 @@ func deepestProjectFor(live []openCandidate, cwd string) (openCandidate, bool) {
 	if cwd == "" {
 		return openCandidate{}, false
 	}
-	here := resolvedPath(cwd)
+	here := projects.Canonical(cwd)
 	var best openCandidate
 	bestLen := -1
 	for _, c := range live {
@@ -167,7 +168,7 @@ func deepestProjectFor(live []openCandidate, cwd string) (openCandidate, bool) {
 		if dir == "" {
 			continue
 		}
-		dir = resolvedPath(dir)
+		dir = projects.Canonical(dir)
 		if here == dir || strings.HasPrefix(here, dir+string(filepath.Separator)) {
 			if len(dir) > bestLen {
 				best, bestLen = c, len(dir)
@@ -175,13 +176,6 @@ func deepestProjectFor(live []openCandidate, cwd string) (openCandidate, bool) {
 		}
 	}
 	return best, bestLen >= 0
-}
-
-func resolvedPath(p string) string {
-	if r, err := filepath.EvalSymlinks(p); err == nil {
-		return r
-	}
-	return filepath.Clean(p)
 }
 
 func listOpenCandidates(cs []openCandidate) string {

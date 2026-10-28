@@ -8,6 +8,7 @@
 package termlaunch
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 	"unicode"
@@ -29,15 +31,16 @@ type Terminal struct {
 	// Verified is false for adapters not yet tried on a real install.
 	Verified bool `json:"verified"`
 	bundle   string
+	bundleID string
 	open     func(app, script string, run runner) error
 }
 
 type runner func(name string, args ...string) error
 
 var terminals = []Terminal{
-	{ID: "terminal", Name: "Terminal", Verified: true, bundle: "Terminal.app", open: openWithApp("Terminal")},
-	{ID: "iterm", Name: "iTerm", Verified: true, bundle: "iTerm.app", open: openITerm},
-	{ID: "ghostty", Name: "Ghostty", bundle: "Ghostty.app", open: openGhostty},
+	{ID: "terminal", Name: "Terminal", Verified: true, bundle: "Terminal.app", bundleID: "com.apple.Terminal", open: openWithApp("Terminal")},
+	{ID: "iterm", Name: "iTerm", Verified: true, bundle: "iTerm.app", bundleID: "com.googlecode.iterm2", open: openITerm},
+	{ID: "ghostty", Name: "Ghostty", Verified: true, bundle: "Ghostty.app", bundleID: "com.mitchellh.ghostty", open: openGhostty},
 }
 
 // openWithApp hands the script to a terminal that runs executable files it
@@ -69,25 +72,71 @@ func openITerm(appPath, script string, run runner) error {
 }
 
 // openGhostty starts a new Ghostty instance running the script; Ghostty
-// takes its command after -e.
+// takes its command after -e and runs it with the user's shell
+// environment. Arguments reach only a new instance, hence -n.
 func openGhostty(appPath, script string, run runner) error {
 	return run("open", "-na", appPath, "--args", "-e", script)
 }
 
-// Installed lists the supported terminals found on this machine, in
-// display order, each with the app path it would be opened with.
-func Installed(appDirs []string) []Installation {
+// Installed lists the supported terminals on this machine, in display
+// order, each with the app path it would be opened with: from the usual
+// app folders, else wherever Spotlight has seen it (Homebrew can install
+// casks into any folder).
+func Installed() []Installation { return find(DefaultAppDirs(), spotlightApp) }
+
+// InstalledIn is Installed looking in appDirs only.
+func InstalledIn(appDirs []string) []Installation { return find(appDirs, nil) }
+
+func find(appDirs []string, locate func(bundleID string) string) []Installation {
 	var out []Installation
 	for _, t := range terminals {
+		p := ""
 		for _, dir := range appDirs {
-			p := filepath.Join(dir, t.bundle)
-			if info, err := os.Stat(p); err == nil && info.IsDir() {
-				out = append(out, Installation{Terminal: t, AppPath: p})
+			if isApp(filepath.Join(dir, t.bundle)) {
+				p = filepath.Join(dir, t.bundle)
 				break
 			}
 		}
+		if p == "" && locate != nil {
+			p = locate(t.bundleID)
+		}
+		if p != "" {
+			out = append(out, Installation{Terminal: t, AppPath: p})
+		}
 	}
 	return out
+}
+
+func isApp(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && info.IsDir()
+}
+
+// spotlightApp is where Spotlight has seen the app with bundleID, or ""
+// (not on macOS, Spotlight off, or not installed). Copies in the Trash or
+// inside another app are skipped.
+func spotlightApp(bundleID string) string {
+	if runtime.GOOS != "darwin" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "mdfind", "kMDItemCFBundleIdentifier == '"+bundleID+"'").Output()
+	if err != nil {
+		return ""
+	}
+	return firstApp(string(out))
+}
+
+// firstApp is the first app bundle in Spotlight's output (a path a line)
+// that is not in the Trash or inside another app.
+func firstApp(out string) string {
+	for _, p := range strings.Split(strings.TrimSpace(out), "\n") {
+		if strings.HasSuffix(p, ".app") && !strings.Contains(p, "/.Trash/") && !strings.Contains(strings.TrimSuffix(p, ".app"), ".app/") && isApp(p) {
+			return p
+		}
+	}
+	return ""
 }
 
 // Installation is a terminal found on this machine.

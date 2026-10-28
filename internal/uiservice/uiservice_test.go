@@ -24,6 +24,7 @@ import (
 	"github.com/Hoper-J/ccwrap/internal/procmeta"
 	"github.com/Hoper-J/ccwrap/internal/profiles"
 	"github.com/Hoper-J/ccwrap/internal/profiletest"
+	"github.com/Hoper-J/ccwrap/internal/projects"
 	"github.com/Hoper-J/ccwrap/internal/supervisor"
 	"github.com/Hoper-J/ccwrap/internal/termlaunch"
 	"github.com/Hoper-J/ccwrap/internal/testutil"
@@ -253,7 +254,8 @@ func TestSessionsAndEvents(t *testing.T) {
 	}
 	first := list[0].(map[string]any)
 	disp := first["display"].(map[string]any)
-	if first["project_dir"] != proj || first["health"] != "ok" || disp["title"] != filepath.Base(proj) || disp["subtitle"] != "no profile" {
+	// Listed under its resolved folder, as the Projects list has it.
+	if first["project_dir"] != projects.Canonical(proj) || first["health"] != "ok" || disp["title"] != filepath.Base(proj) || disp["subtitle"] != "no profile" {
 		t.Fatalf("summary = %v", first)
 	}
 	if status, sess := r.http(t, "GET", "/api/v1/sessions/aaaa000000000001/session", "", nil); status != 200 || sess["project_dir"] != proj {
@@ -328,7 +330,8 @@ func TestProjectsAndLaunch(t *testing.T) {
 	paths := testutil.ShortAppPaths(t, "ui.sock")
 	claudeDir := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", claudeDir)
-	proj := t.TempDir()
+	// Claude Code records folders resolved (macOS's temp dir is a symlink).
+	proj := projects.Canonical(t.TempDir())
 	cfg, _ := json.Marshal(map[string]any{"projects": map[string]any{proj: map[string]any{"hasTrustDialogAccepted": true}}, "deepLinkTerminal": "iTerm"})
 	if err := os.WriteFile(filepath.Join(claudeDir, ".claude.json"), cfg, 0o600); err != nil {
 		t.Fatal(err)
@@ -344,7 +347,7 @@ func TestProjectsAndLaunch(t *testing.T) {
 	for _, b := range []string{"Terminal.app", "iTerm.app"} {
 		_ = os.MkdirAll(filepath.Join(apps, b), 0o755)
 	}
-	appDirs = func() []string { return []string{apps} }
+	installedTerminals = func() []termlaunch.Installation { return termlaunch.InstalledIn([]string{apps}) }
 	var launched []termlaunch.Request
 	var usedTerminal string
 	launchTerminal = func(in termlaunch.Installation, req termlaunch.Request, scriptDir string) error {
@@ -352,7 +355,7 @@ func TestProjectsAndLaunch(t *testing.T) {
 		usedTerminal = in.ID
 		return nil
 	}
-	t.Cleanup(func() { appDirs, launchTerminal = termlaunch.DefaultAppDirs, termlaunch.Launch })
+	t.Cleanup(func() { installedTerminals, launchTerminal = termlaunch.Installed, termlaunch.Launch })
 
 	r := startUI(t, paths, nil, time.Hour)
 	status, out := r.http(t, "GET", "/api/v1/projects", "", nil)

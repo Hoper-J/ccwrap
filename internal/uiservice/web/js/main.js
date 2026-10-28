@@ -10,6 +10,7 @@ import { renderBanner } from './shell/banner.js';
 import { createToasts } from './shell/toast.js';
 import { renderEmpty, launchProfile } from './views/empty.js';
 import { mountSession } from './session/view.js';
+import { mountProjects, settleLaunches, LAUNCH_TIMEOUT_MS } from './projects.js';
 
 const boot = bootstrap(document.body.dataset);
 const api = createApi(boot.token);
@@ -35,7 +36,10 @@ const store = createStore({
   collapsed: localStorage.getItem(COLLAPSED_KEY) === '1',
   narrow: narrowQuery.matches,
   drawer: false,
-  opening: {},
+  projectsLoaded: false,
+  // launches: project path → {state: opening | timeout | rejected, since,
+  // mode, terminal, message}.
+  launches: {},
 });
 
 // currentSessionId is the session the session route shows: the one named,
@@ -139,8 +143,8 @@ function renderShell(st) {
 
 // ---- Views ----------------------------------------------------------------
 
-// mounted is the live view in main: a session view keeps itself current
-// from events, so it is mounted once per session, not redrawn.
+// mounted is the live view in main: the session view and the Projects page
+// keep themselves current, so they are mounted once, not redrawn.
 let mounted = null;
 // deny is the credential headers the inspector shows masked.
 const deny = new Set(boot.deny);
@@ -150,32 +154,42 @@ function unmount() {
   mounted = null;
 }
 
+function mount(kind, id, make) {
+  if (mounted && mounted.kind === kind && mounted.id === id) return mounted.handle;
+  unmount();
+  main.scrollTop = 0;
+  mounted = { kind, id, handle: make() };
+  return mounted.handle;
+}
+
 function renderMain(st) {
   const r = st.route;
   if (r.view === 'session') {
     const id = currentSessionId(st);
     if (id) {
-      if (mounted && mounted.kind === 'session' && mounted.id === id) return;
-      unmount();
-      main.scrollTop = 0;
-      mounted = {
-        kind: 'session',
-        id,
-        handle: mountSession(main, {
-          api, id, deny, toast, go,
-          summary: () => store.get().sessions.find((x) => x.id === id),
-          profiles: async () => (await api.get('/profiles')).profiles || [],
-          continueIn: (path, profile) => continueIn({ path, name: path.split('/').pop(), last_profile: profile }),
-        }),
-      };
+      mount('session', id, () => mountSession(main, {
+        api, id, deny, toast, go,
+        summary: () => store.get().sessions.find((x) => x.id === id),
+        profiles: async () => (await api.get('/profiles')).profiles || [],
+        continueIn: (path, profile) => launch({ path, name: path.split('/').pop() }, profile, 'continue'),
+      }));
       return;
     }
     unmount();
     if (!st.loaded) return show(main);
-    return renderEmpty(main, { projects: st.projects, opening: st.opening, onProjects: () => go('#/projects'), onContinue: continueIn });
+    return renderEmpty(main, {
+      projects: st.projects, opening: st.launches, onProjects: () => go('#/projects'),
+      onContinue: (p) => launch(p, launchProfile(p, st.profiles.names, st.profiles.default), 'continue'),
+    });
+  }
+  if (r.view === 'projects') {
+    mount('projects', '', () => mountProjects(main, {
+      api, toast, launch, dismiss,
+      openSession: (id) => go(sessionHash(id)),
+    })).update(st);
+    return;
   }
   unmount();
-  if (r.view === 'projects') return placeholder('Projects', 'The Projects page comes next.');
   if (r.view === 'profiles') return placeholder('Profiles', 'The Profiles page comes next.');
   return placeholder(r.isNew ? 'New profile' : r.name, 'The profile page comes next.');
 }
@@ -185,35 +199,68 @@ function placeholder(title, text) {
     h('h1', { class: 'page-title' }, title), h('p', { class: 'lede' }, text))));
 }
 
-// continueIn launches Claude Code with --continue in a project, with the
-// profile the folder last used (or the default).
-async function continueIn(p) {
-  const st = store.get();
-  const profile = launchProfile(p, st.profiles.names, st.profiles.default);
+// ---- Launches ---------------------------------------------------------------
+
+function setLaunch(path, value) {
+  const launches = { ...store.get().launches };
+  if (value) launches[path] = value;
+  else delete launches[path];
+  store.set({ launches });
+}
+
+function dismiss(path) { setLaunch(path, null); }
+
+// launch opens the user's terminal in a project and runs ccwrap there
+// (mode new or continue). The row shows opening until a session from that
+// folder appears; after LAUNCH_TIMEOUT_MS it says none did.
+async function launch(p, profile, mode) {
   const since = Date.now();
-  store.set({ opening: { ...st.opening, [p.path]: { text: 'Opening…', since } } });
+  setLaunch(p.path, { state: 'opening', since, mode, terminal: '' });
+  const onProjects = store.get().route.view === 'projects';
   try {
-    const out = await api.post('/projects/launch', { path: p.path, profile, mode: 'continue' });
-    const cur = store.get().opening[p.path];
-    if (cur) store.set({ opening: { ...store.get().opening, [p.path]: { ...cur, text: 'Opening in ' + out.terminal + '…' } } });
+    const out = await api.post('/projects/launch', { path: p.path, profile, mode });
+    const cur = store.get().launches[p.path];
+    if (cur && cur.since === since && cur.state === 'opening') setLaunch(p.path, { ...cur, terminal: out.terminal });
+    setTimeout(() => {
+      const c = store.get().launches[p.path];
+      if (c && c.since === since && c.state === 'opening') {
+        setLaunch(p.path, { ...c, state: 'timeout' });
+        if (store.get().route.view !== 'projects') toast('No session appeared after 30s — check the ' + (c.terminal || 'terminal') + ' window.', 'warning');
+      }
+    }, LAUNCH_TIMEOUT_MS);
   } catch (err) {
-    const opening = { ...store.get().opening };
-    delete opening[p.path];
-    store.set({ opening });
-    toast('Not opened: ' + err.message, 'error');
+    const message = 'Not opened: ' + err.message;
+    if (onProjects) setLaunch(p.path, { state: 'rejected', since, mode, message });
+    else { setLaunch(p.path, null); toast(message, 'error'); }
   }
+}
+
+// launchesSettled ends the launches newly listed sessions answer.
+function launchesSettled(sessions) {
+  const st = store.get();
+  const { launches, started } = settleLaunches(st.launches, sessions);
+  if (!started.length) return;
+  for (const s of started) {
+    const name = (st.projects.find((x) => x.path === s.project_dir) || {}).name || s.display.title;
+    toast('Session started in ' + name + ' · ' + (s.profile || 'no profile') + '.');
+  }
+  store.set({ launches });
 }
 
 let lastKey = '';
 store.subscribe((st) => {
   renderShell(st);
+  if (mounted && mounted.kind === 'projects' && st.route.view === 'projects') {
+    mounted.handle.update(st);
+    return;
+  }
   // The session view follows the list too: a session that ended shows so
   // even if its session.ended never arrived.
   if (mounted && mounted.kind === 'session' && st.route.view === 'session') mounted.handle.update();
   // Redraw the page only when what it shows changed, so focus and scroll
   // stay put while the list ticks.
-  const key = JSON.stringify([st.route, currentSessionId(st), st.loaded, st.projects.length, st.opening,
-    st.route.view === 'session' && !currentSessionId(st) ? st.projects : null]);
+  const key = JSON.stringify([st.route, currentSessionId(st), st.loaded,
+    st.route.view === 'session' && !currentSessionId(st) ? [st.projects, st.launches] : null]);
   if (key !== lastKey) {
     lastKey = key;
     renderMain(st);
@@ -225,7 +272,7 @@ store.subscribe((st) => {
 async function loadLists() {
   const [sessions, projects, profiles] = await Promise.allSettled([api.get('/sessions'), api.get('/projects'), api.get('/profiles')]);
   if (sessions.status === 'fulfilled') setSessions(sessions.value.sessions || []);
-  const patch = {};
+  const patch = { projectsLoaded: true };
   if (projects.status === 'fulfilled') patch.projects = projects.value.projects || [];
   if (profiles.status === 'fulfilled') {
     patch.profiles = { names: (profiles.value.profiles || []).map((p) => p.name), default: profiles.value.default || '' };
@@ -246,20 +293,7 @@ const events = connectEvents(boot.instance, {
   event(type, payload) {
     if (type === 'sessions.changed') {
       setSessions(payload.sessions || []);
-      // A session that started in a folder being opened ends its opening.
-      const st = store.get();
-      const opening = { ...st.opening };
-      let changed = false;
-      for (const s of payload.sessions || []) {
-        const p = st.projects.find((x) => x.path === s.project_dir);
-        const o = p && opening[p.path];
-        if (o && s.state !== 'ended' && Date.parse(s.started_at) >= o.since - 2000) {
-          delete opening[p.path];
-          changed = true;
-          toast('Session started in ' + p.name + (s.profile ? ' · ' + s.profile : '') + '.');
-        }
-      }
-      if (changed) store.set({ opening });
+      launchesSettled(payload.sessions || []);
       return;
     }
     if (type === 'session.updated' || type === 'session.ended') patchSession(payload.session_id, payload.data);

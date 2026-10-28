@@ -23,7 +23,7 @@ export function launchProfile(project, profileNames, defaultName) {
   return profileNames.includes(defaultName) ? defaultName : '';
 }
 
-// renderEmpty draws the empty state. m: {projects, opening: {path: {text}},
+// renderEmpty draws the empty state. m: {projects, opening: {path: launch},
 // onProjects(), onContinue(project)}.
 export function renderEmpty(main, m) {
   const recent = recentProjects(m.projects);
@@ -39,8 +39,8 @@ export function renderEmpty(main, m) {
           h('div', { class: 'recent-text' },
             h('div', { class: 'recent-name' }, p.name),
             h('div', { class: 'recent-sub' }, [p.display_path, p.last_title || p.last_prompt, ago(p.last_active_at)].filter(Boolean).join(' · '))),
-          m.opening[p.path]
-            ? h('span', { class: 'status-line', role: 'status' }, icon('loader', 'spin'), m.opening[p.path].text)
+          m.opening[p.path] && m.opening[p.path].state === 'opening'
+            ? h('span', { class: 'status-line', role: 'status' }, icon('loader', 'spin'), 'Opening' + (m.opening[p.path].terminal ? ' in ' + m.opening[p.path].terminal : '') + '…')
             : h('button', { type: 'button', class: 'btn btn-sm', onclick: () => m.onContinue(p) }, 'Continue')))),
       ] : null)));
 }

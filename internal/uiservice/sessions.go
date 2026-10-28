@@ -18,6 +18,7 @@ import (
 	"github.com/Hoper-J/ccwrap/internal/control"
 	"github.com/Hoper-J/ccwrap/internal/discovery"
 	"github.com/Hoper-J/ccwrap/internal/model"
+	"github.com/Hoper-J/ccwrap/internal/projects"
 	"github.com/Hoper-J/ccwrap/internal/ui"
 )
 
@@ -84,7 +85,7 @@ func (s *Server) summarize(ctx context.Context, ls liveSession) (SessionSummary,
 		return SessionSummary{}, summaryFailed
 	}
 	sum := SessionSummary{
-		ID: m.SessionID, ProjectDir: sess.ProjectDir, Profile: sess.ActiveProfileName,
+		ID: m.SessionID, ProjectDir: canonicalDir(sess.ProjectDir), Profile: sess.ActiveProfileName,
 		State: string(sess.State), Health: string(sess.Health), StartedAt: sess.CreatedAt,
 		EndedAt: sess.EndedAt, LastActivityAt: sess.LastActivityAt, socket: m.ControlSocket,
 	}
@@ -419,4 +420,13 @@ func writeEvent(w io.Writer, typ string, data []byte) {
 	_, _ = io.WriteString(w, "event: "+typ+"\ndata: ")
 	_, _ = w.Write(data)
 	_, _ = io.WriteString(w, "\n\n")
+}
+
+// canonicalDir is a session's project folder as the Projects list has it
+// (projects.Canonical), so pages match sessions to folders by the string.
+func canonicalDir(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	return projects.Canonical(dir)
 }

@@ -137,6 +137,7 @@ code, .mono { font-family: var(--font-mono); }
   /* --bp-table-full: 900px   activity table 5 columns; below → compact   */
   /* --bp-head-side:  760px   session header readout beside the posture   */
   /* --bp-proj-wide:  960px   project rows show the conversation column   */
+  /* --bp-proj-stack: 700px   below: profile and actions under the project */
   /* --bp-prof-wide:  900px   profile list shows all columns              */
 
   /* ---- Health (sidebar dot, header rule, state pill, tray badge) ------- */

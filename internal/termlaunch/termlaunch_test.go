@@ -67,12 +67,51 @@ func TestValidateDir(t *testing.T) {
 	}
 }
 
+// A terminal outside the usual folders (Homebrew can put casks anywhere)
+// is found where Spotlight saw it; one in the usual folders needs no lookup.
+func TestInstalledFallsBackToSpotlight(t *testing.T) {
+	apps := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(apps, "Terminal.app"), 0o755)
+	elsewhere := filepath.Join(t.TempDir(), "_", "Ghostty.app")
+	_ = os.MkdirAll(elsewhere, 0o755)
+	var asked []string
+	got := find([]string{apps}, func(id string) string {
+		asked = append(asked, id)
+		if id == "com.mitchellh.ghostty" {
+			return elsewhere
+		}
+		return ""
+	})
+	if len(got) != 2 || got[0].ID != "terminal" || got[1].ID != "ghostty" || got[1].AppPath != elsewhere {
+		t.Fatalf("installed = %+v", got)
+	}
+	if strings.Join(asked, ",") != "com.googlecode.iterm2,com.mitchellh.ghostty" {
+		t.Fatalf("asked Spotlight for %v", asked)
+	}
+}
+
+// Spotlight's answer is used only for a real app bundle that is not in the
+// Trash or nested inside another app.
+func TestFirstApp(t *testing.T) {
+	root := t.TempDir()
+	mk := func(p string) string { _ = os.MkdirAll(filepath.Join(root, p), 0o755); return filepath.Join(root, p) }
+	trashed := mk(".Trash/Ghostty.app")
+	nested := mk("Other.app/Contents/Ghostty.app")
+	real := mk("Apps/_/Ghostty.app")
+	if got := firstApp(strings.Join([]string{trashed, nested, filepath.Join(root, "Gone.app"), real}, "\n")); got != real {
+		t.Fatalf("firstApp = %q, want %q", got, real)
+	}
+	if got := firstApp(""); got != "" {
+		t.Fatalf("no answer = %q", got)
+	}
+}
+
 func TestChoose(t *testing.T) {
 	apps := t.TempDir()
 	for _, b := range []string{"Terminal.app", "iTerm.app"} {
 		_ = os.MkdirAll(filepath.Join(apps, b), 0o755)
 	}
-	installed := Installed([]string{apps})
+	installed := InstalledIn([]string{apps})
 	if len(installed) != 2 || installed[0].ID != "terminal" || installed[1].ID != "iterm" {
 		t.Fatalf("installed = %+v", installed)
 	}

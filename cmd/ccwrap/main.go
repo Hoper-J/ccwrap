@@ -306,7 +306,7 @@ func runClaude(paths app.Paths, args []string) error {
 	// including per-session bodies/, of no-longer-live sessions before
 	// launching this one. Best-effort; never blocks a fresh launch.
 	sweepOrphanSessions(paths)
-	cwd, _ := os.Getwd()
+	cwd := workingDir()
 	// Auto-restore the reserved "official" profile. Runs before the
 	// first-run migration so the file exists when migration inspects it.
 	// Idempotent; non-fatal on I/O failure (downstream consumers handle a

@@ -87,20 +87,41 @@ const (
 	headBytes = 64 << 10
 )
 
+// Canonical is dir with symlinks resolved: the form Claude Code records
+// folders in, since its working directory is the resolved one. A folder
+// reached through a symlink (macOS's /tmp is one) is then one project, not
+// two. A dir that can't be resolved is only cleaned.
+func Canonical(dir string) string {
+	if r, err := filepath.EvalSymlinks(dir); err == nil {
+		return r
+	}
+	return filepath.Clean(dir)
+}
+
 // List returns the folders Claude Code has been used in that still exist,
-// most recently active first. It only reads local files.
+// most recently active first, each under its canonical path. It only reads
+// local files.
 func (l *Lister) List(src Sources) []Project {
 	byPath := map[string]*Project{}
+	// byConvDir finds a project by its conversation folder's name, which
+	// Claude Code derives from the path it was given.
+	byConvDir := map[string]*Project{}
 	add := func(path string) *Project {
-		if p := byPath[path]; p != nil {
-			return p
-		}
-		info, err := os.Stat(path)
-		if err != nil || !info.IsDir() {
+		if path == "" {
 			return nil
 		}
-		p := &Project{Path: path, Name: filepath.Base(path), RunningSessions: []string{}}
-		byPath[path] = p
+		dir := Canonical(path)
+		p := byPath[dir]
+		if p == nil {
+			info, err := os.Stat(dir)
+			if err != nil || !info.IsDir() {
+				return nil
+			}
+			p = &Project{Path: dir, Name: filepath.Base(dir), RunningSessions: []string{}}
+			byPath[dir] = p
+			byConvDir[encodeDir(dir)] = p
+		}
+		byConvDir[encodeDir(path)] = p
 		return p
 	}
 
@@ -131,17 +152,10 @@ func (l *Lister) List(src Sources) []Project {
 		if !ok {
 			continue
 		}
-		path := ""
-		for known := range byPath {
-			if encodeDir(known) == d.Name() {
-				path = known
-				break
-			}
+		p := byConvDir[d.Name()]
+		if p == nil && s.cwd != "" && encodeDir(s.cwd) == d.Name() {
+			p = add(s.cwd)
 		}
-		if path == "" && s.cwd != "" && encodeDir(s.cwd) == d.Name() {
-			path = s.cwd
-		}
-		p := add(path)
 		if p == nil {
 			continue
 		}
@@ -151,13 +165,21 @@ func (l *Lister) List(src Sources) []Project {
 		}
 	}
 
+	// One folder can have memories under several paths (through symlinks);
+	// the latest launch tells its profile.
+	remembered := map[*Project]time.Time{}
 	for dir, m := range Memories(src.StateDir) {
-		if p := add(dir); p != nil {
+		p := add(dir)
+		if p == nil {
+			continue
+		}
+		if at, seen := remembered[p]; !seen || m.LastLaunchedAt.After(at) {
+			remembered[p] = m.LastLaunchedAt
 			profile := m.LastProfile
 			p.LastProfile = &profile
-			if m.LastLaunchedAt.After(p.LastActiveAt) {
-				p.LastActiveAt = m.LastLaunchedAt
-			}
+		}
+		if m.LastLaunchedAt.After(p.LastActiveAt) {
+			p.LastActiveAt = m.LastLaunchedAt
 		}
 	}
 	for dir, ids := range src.Running {

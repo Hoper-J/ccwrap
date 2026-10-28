@@ -107,8 +107,8 @@ func claudeDeepLinkTerminal() string {
 	return cfg.DeepLinkTerminal
 }
 
-// appDirs is where terminals are looked for; a seam for tests.
-var appDirs = termlaunch.DefaultAppDirs
+// installedTerminals finds the terminals on this machine; a seam for tests.
+var installedTerminals = termlaunch.Installed
 
 // launchTerminal opens the script; a seam for tests.
 var launchTerminal = termlaunch.Launch
@@ -159,7 +159,7 @@ func (s *Server) handleLaunch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	term, ok := termlaunch.Choose(termlaunch.Installed(appDirs()), s.opts.Paths.StateDir, claudeDeepLinkTerminal())
+	term, ok := termlaunch.Choose(installedTerminals(), s.opts.Paths.StateDir, claudeDeepLinkTerminal())
 	if !ok {
 		writeAPIError(w, http.StatusConflict, "no_terminal", "no supported terminal app found (Terminal, iTerm, Ghostty on macOS)")
 		return
@@ -188,7 +188,7 @@ func (s *Server) handleLaunch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetTerminal(w http.ResponseWriter, r *http.Request) {
-	installed := termlaunch.Installed(appDirs())
+	installed := installedTerminals()
 	claude := claudeDeepLinkTerminal()
 	current, ok := termlaunch.Choose(installed, s.opts.Paths.StateDir, claude)
 	out := map[string]any{"installed": installed, "claude_choice": termlaunch.ClaudeChoiceID(claude), "current": nil}
@@ -206,7 +206,7 @@ func (s *Server) handlePutTerminal(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "usage", "invalid request body: "+err.Error())
 		return
 	}
-	for _, in := range termlaunch.Installed(appDirs()) {
+	for _, in := range installedTerminals() {
 		if in.ID == req.Terminal {
 			if err := termlaunch.SavePreference(s.opts.Paths.StateDir, req.Terminal); err != nil {
 				writeAPIError(w, http.StatusInternalServerError, "internal", err.Error())
