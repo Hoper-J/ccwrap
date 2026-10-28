@@ -13,6 +13,9 @@ func TestMessage(t *testing.T) {
 		{"cloudflare problem json", `{"type":"https://developers.cloudflare.com/errors/502/","title":"Error 502: Bad gateway","status":502,"detail":"The origin web server returned an invalid or incomplete response to Cloudflare."}`, "", "Error 502: Bad gateway: The origin web server returned an invalid or incomplete response to Cloudflare."},
 		{"html", "<html><head><title>502 Bad Gateway</title></head><body>nginx</body></html>", "", "502 Bad Gateway"},
 		{"plain text", "404 page not found\n", "", "404 page not found"},
+		{"event", "event:error\ndata:{\"code\":\"InvalidParameter\",\"message\":\"Range of max_tokens should be [1, 32768]\",\"request_id\":\"0743\"}\n\n", "", "Range of max_tokens should be [1, 32768]"},
+		{"anthropic event", "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n", "overloaded_error", "Overloaded"},
+		{"event without data", "event: error\n\n", "", "event: error"},
 		{"empty", "  ", "", ""},
 	}
 	for _, tc := range cases {

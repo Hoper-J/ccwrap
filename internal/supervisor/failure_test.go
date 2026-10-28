@@ -25,6 +25,28 @@ import (
 	"github.com/Hoper-J/ccwrap/internal/testutil"
 )
 
+// A gateway that caps max_tokens below what Claude Code asks for says so in
+// an event's data line; the failure quotes it and names the setting to change.
+func TestUpstreamFailureMaxTokensLimit(t *testing.T) {
+	body := []byte("event:error\ndata:{\"code\":\"InvalidParameter\",\"message\":\"<400> InternalError.Algo.InvalidParameter: Range of max_tokens should be [1, 32768]\"}\n\n")
+	f := upstreamFailure(failureContext{status: 400, profile: "bailian", upstreamModel: "qwen-plus"}, body, false, false)
+	if !strings.Contains(f.Message, "Range of max_tokens should be [1, 32768]") {
+		t.Fatalf("message = %q", f.Message)
+	}
+	if !strings.Contains(f.Hint, "CLAUDE_CODE_MAX_OUTPUT_TOKENS=32768") {
+		t.Fatalf("hint = %q", f.Hint)
+	}
+	for msg, want := range map[string]int{
+		"max_tokens is too large: 128000. This model supports at most 32768 completion tokens": 32768,
+		"Invalid max_tokens value, the valid range of max_tokens is [1, 8192]":                 8192,
+		"max_tokens must be positive": 0,
+	} {
+		if got := maxTokensLimit(msg); got != want {
+			t.Errorf("maxTokensLimit(%q) = %d, want %d", msg, got, want)
+		}
+	}
+}
+
 func TestUpstreamFailureMasksEchoedKeys(t *testing.T) {
 	body := []byte(`{"error":{"type":"authentication_error","message":"invalid x-api-key: sk-ant-api03-abcdefghijklmnop"}}`)
 	f := upstreamFailure(failureContext{status: 401, profile: "gw"}, body, false, false)

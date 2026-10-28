@@ -624,3 +624,41 @@ func TestProbeModelFromAliases(t *testing.T) {
 		t.Errorf("nil map: want empty, got %q", v)
 	}
 }
+
+// Without a haiku alias the probe asks for what a haiku request would get in
+// real traffic, else a model the profile names, never a Claude ID an
+// upstream with its own model names would reject.
+func TestProbeModel(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		aliases     map[string]string
+		model, from string
+	}{
+		{"haiku alias", map[string]string{"haiku": "glm-4-flash", "*": "glm-4.6"}, "glm-4-flash", "haiku"},
+		{"default", map[string]string{"*": "qwen-plus", "claude-opus-5-5": "qwen-max"}, "qwen-plus", defaultProbeModel},
+		{"keep names", map[string]string{"*": "*", "claude-opus-5-5": "x"}, defaultProbeModel, ""},
+		{"other alias", map[string]string{"claude-sonnet-5-5": "b", "claude-opus-5-5": "a"}, "a", "claude-opus-5-5"},
+		{"none", nil, defaultProbeModel, ""},
+	} {
+		if model, from := probeModel(tc.aliases); model != tc.model || from != tc.from {
+			t.Errorf("%s: got %q from %q, want %q from %q", tc.name, model, from, tc.model, tc.from)
+		}
+	}
+}
+
+// A failed probe carries the upstream's own words, so "402" says why.
+func TestProbe_FailureQuotesUpstream(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = io.WriteString(w, `{"code":30001,"message":"Sorry, your account balance is insufficient","data":null}`)
+	}))
+	defer srv.Close()
+	p := profiles.Profile{Name: "sf", BaseURL: srv.URL, Auth: &profiles.AuthSpec{Mode: "ccwrap_bearer", Key: "k"}, ModelAliases: map[string]string{"*": "deepseek-ai/DeepSeek-V3.2"}}
+	res := Probe(p, ProbeOptions{Timeout: 3 * time.Second})
+	if res.Status != StatusHTTP4xx || res.Err != "402 Payment Required: Sorry, your account balance is insufficient" {
+		t.Fatalf("got %s %q", res.Status, res.Err)
+	}
+	if res.ModelSent != "deepseek-ai/DeepSeek-V3.2" {
+		t.Fatalf("model sent %q", res.ModelSent)
+	}
+}

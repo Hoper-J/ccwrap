@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
 
 	"github.com/Hoper-J/ccwrap/internal/model"
 	"github.com/Hoper-J/ccwrap/internal/modelalias"
@@ -116,6 +119,11 @@ func failureHint(fc failureContext, f *model.RequestFailure) string {
 		return "rate limited by the upstream — Claude Code retries on its own"
 	}
 	switch status := fc.status; {
+	case status == http.StatusBadRequest && mentionsMaxTokens(f.Message):
+		if limit := maxTokensLimit(f.Message); limit > 0 {
+			return fmt.Sprintf("the upstream allows at most %d output tokens and Claude Code asked for more — set CLAUDE_CODE_MAX_OUTPUT_TOKENS=%d (in Claude Code's settings env or your shell) and start a new session", limit, limit)
+		}
+		return "the upstream allows fewer output tokens than Claude Code asked for — set CLAUDE_CODE_MAX_OUTPUT_TOKENS to its limit (in Claude Code's settings env or your shell) and start a new session"
 	case status == http.StatusNotFound:
 		if fc.upstreamModel != "" && !fc.firstParty {
 			return "the upstream has no such model or path — check that it serves " + fc.upstreamModel + " and that the base URL is right"
@@ -127,6 +135,26 @@ func failureHint(fc failureContext, f *model.RequestFailure) string {
 		return "the upstream failed — usually temporary, and Claude Code retries on its own; if it keeps failing, the upstream cannot handle this request"
 	}
 	return ""
+}
+
+func mentionsMaxTokens(msg string) bool {
+	return strings.Contains(strings.ToLower(msg), "max_tokens")
+}
+
+var number = regexp.MustCompile(`\d+`)
+
+// maxTokensLimit reads the output-token limit from an upstream's message
+// about max_tokens: the smallest number in it that could be one ("Range of
+// max_tokens should be [1, 32768]", "max_tokens is too large: 128000. This
+// model supports at most 32768"), or 0.
+func maxTokensLimit(msg string) int {
+	limit := 0
+	for _, m := range number.FindAllString(msg, -1) {
+		if n, err := strconv.Atoi(m); err == nil && n >= 1024 && n <= 1<<20 && (limit == 0 || n < limit) {
+			limit = n
+		}
+	}
+	return limit
 }
 
 func truncateRunes(s string, n int) string {

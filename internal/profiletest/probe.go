@@ -22,7 +22,9 @@ import (
 	"time"
 
 	"github.com/Hoper-J/ccwrap/internal/egress"
+	"github.com/Hoper-J/ccwrap/internal/modelalias"
 	"github.com/Hoper-J/ccwrap/internal/profiles"
+	"github.com/Hoper-J/ccwrap/internal/upstreamerr"
 )
 
 // userinfoRE matches user[:pass]@ in URLs embedded in Go's net/url
@@ -133,6 +135,37 @@ func probeModelFromAliases(aliases map[string]string) (key, target string) {
 	return "", ""
 }
 
+// probeModel is the model the probe asks for and, when an alias picked it,
+// the Claude model or alias key it stands in for: the haiku alias, else the
+// target the profile sends other Claude models to (where a haiku request
+// goes in real traffic), else any model the profile names, so a profile
+// whose upstream serves only its own model names is not reported as
+// MODEL_404. With no aliases, or with "*=*", the Claude ID goes out as it
+// would in real traffic.
+func probeModel(aliases map[string]string) (model, from string) {
+	if k, v := probeModelFromAliases(aliases); v != "" {
+		return v, k
+	}
+	switch v := aliases[modelalias.DefaultKey]; v {
+	case modelalias.KeepName:
+		return defaultProbeModel, ""
+	case "":
+	default:
+		return v, defaultProbeModel
+	}
+	keys := make([]string, 0, len(aliases))
+	for k, v := range aliases {
+		if v != "" {
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) == 0 {
+		return defaultProbeModel, ""
+	}
+	sort.Strings(keys)
+	return aliases[keys[0]], keys[0]
+}
+
 // Probe runs a single probe against one profile. The result is
 // always non-nil and never panics. Callers may run Probe concurrently
 // for different profiles.
@@ -153,12 +186,7 @@ func Probe(profile profiles.Profile, opts ProbeOptions) ProbeResult {
 	model := opts.Model
 	rewroteFrom := ""
 	if model == "" {
-		if k, v := probeModelFromAliases(profile.ModelAliases); v != "" {
-			model = v
-			rewroteFrom = k
-		} else {
-			model = defaultProbeModel
-		}
+		model, rewroteFrom = probeModel(profile.ModelAliases)
 	}
 
 	body, err := json.Marshal(map[string]any{
@@ -208,6 +236,12 @@ func Probe(profile profiles.Profile, opts ProbeOptions) ProbeResult {
 	}
 
 	res.Status, res.Err = classifyProbeResult(resp, respBody, err)
+	if res.Status.IsFailure() && resp != nil {
+		// Say what the upstream said, unless the status line already does.
+		if _, msg := upstreamerr.Message(respBody); msg != "" && !strings.Contains(strings.ToLower(res.Err), strings.ToLower(msg)) {
+			res.Err += ": " + strings.Join(strings.Fields(upstreamerr.MaskKeys(msg)), " ")
+		}
+	}
 	res.Err = sanitizeNetErr(res.Err)
 	if res.Status == StatusOK {
 		var parsed struct {

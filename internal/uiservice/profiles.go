@@ -46,7 +46,7 @@ type profileView struct {
 type lastTest struct {
 	At time.Time `json:"at"`
 	// Status is the probe's status (OK, AUTH_FAIL, TIMEOUT, ...) and Text
-	// the line to show: "OK · 230 ms".
+	// the line to show next to it: "glm-4.6 · 230 ms".
 	Status string          `json:"status"`
 	Text   string          `json:"text"`
 	Result json.RawMessage `json:"result"`
@@ -84,15 +84,33 @@ func (r *testRecord) forget(name string) {
 	delete(r.tests, name)
 }
 
-// testText is the line a probe result shows as: its status, the HTTP status
-// when it failed with one, and the time it took.
+// testText is the line a probe result shows next to its status: the model
+// that answered, or what went wrong (and with which model, once the
+// upstream answered), and the time it took.
 func testText(res profiletest.ProbeResult) string {
-	parts := []string{res.Status.String()}
-	if res.Status.IsFailure() && res.HTTPStatus != 0 {
-		parts = append(parts, fmt.Sprint(res.HTTPStatus))
+	var parts []string
+	add := func(s string) {
+		if s != "" {
+			parts = append(parts, s)
+		}
+	}
+	switch {
+	case res.Status == profiletest.StatusSkipped:
+		add(res.SkippedReason)
+	case !res.Status.IsFailure():
+		if res.ModelEchoed != "" {
+			add(res.ModelEchoed)
+		} else {
+			add(res.ModelSent)
+		}
+	default:
+		add(res.Err)
+		if res.HTTPStatus != 0 && res.ModelSent != "" {
+			add("model " + res.ModelSent)
+		}
 	}
 	if res.Latency > 0 && res.Status != profiletest.StatusSkipped {
-		parts = append(parts, fmt.Sprintf("%d ms", res.Latency.Milliseconds()))
+		add(fmt.Sprintf("%d ms", res.Latency.Milliseconds()))
 	}
 	return strings.Join(parts, " · ")
 }

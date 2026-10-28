@@ -173,7 +173,7 @@
 .pf-title-row .page-title { margin: 0 0 4px; }
 .pf-meta { margin: 0; font-size: 12px; color: var(--text-muted); }
 .pf-test { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.pf-test-text { font-size: 12px; color: var(--text-secondary); }
+.pf-test-text { font-size: 12px; color: var(--text-secondary); max-width: 560px; overflow-wrap: anywhere; }
 .pf-card { margin: 0 0 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-xl); }
 .pf-card-label { padding: 12px 16px 0; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; color: var(--text-muted); }
 .pf-card-body { padding: 12px 16px 16px; display: flex; flex-direction: column; gap: 12px; }

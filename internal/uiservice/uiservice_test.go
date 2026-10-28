@@ -749,7 +749,8 @@ func TestProfileTests(t *testing.T) {
 	var probed profiles.Profile
 	probeProfile = func(p profiles.Profile, _ profiletest.ProbeOptions) profiletest.ProbeResult {
 		probed = p
-		return profiletest.ProbeResult{Profile: p.Name, Status: profiletest.StatusAuthFail, HTTPStatus: 401, Latency: 230 * time.Millisecond}
+		return profiletest.ProbeResult{Profile: p.Name, Status: profiletest.StatusAuthFail, HTTPStatus: 401, Latency: 230 * time.Millisecond,
+			ModelSent: "glm-4.6", Err: "401 Unauthorized: invalid api key"}
 	}
 	var egressProbed profiles.Profile
 	probeEgress = func(p profiles.Profile, _ profiletest.EgressProbeOptions) profiletest.EgressProbeResult {
@@ -763,10 +764,10 @@ func TestProfileTests(t *testing.T) {
 		t.Fatalf("add: %d", status)
 	}
 	status, out := r.write(t, "POST", "/api/v1/profiles/gw/test", "")
-	if status != 200 || out["status"] != "AUTH_FAIL" || out["text"] != "AUTH_FAIL · 401 · 230 ms" || probed.Auth == nil || probed.Auth.Key != "k" {
+	if status != 200 || out["status"] != "AUTH_FAIL" || out["text"] != "401 Unauthorized: invalid api key · model glm-4.6 · 230 ms" || probed.Auth == nil || probed.Auth.Key != "k" {
 		t.Fatalf("test: %d %v (probed %+v)", status, out, probed)
 	}
-	if _, one := r.http(t, "GET", "/api/v1/profiles/gw", "", nil); one["last_test"].(map[string]any)["text"] != "AUTH_FAIL · 401 · 230 ms" {
+	if _, one := r.http(t, "GET", "/api/v1/profiles/gw", "", nil); one["last_test"].(map[string]any)["text"] != "401 Unauthorized: invalid api key · model glm-4.6 · 230 ms" {
 		t.Fatalf("last test not kept: %v", one)
 	}
 	r.write(t, "PATCH", "/api/v1/profiles/gw", `{"auth":{"key_source":"inline","key":"k2"}}`)

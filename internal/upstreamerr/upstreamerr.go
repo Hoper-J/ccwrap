@@ -14,11 +14,23 @@ const MessageMax = 300
 
 // Message pulls the error type and message out of the shapes error bodies
 // come in: Anthropic and OpenAI style JSON, RFC 9457 problem JSON
-// (Cloudflare), an HTML page's title, or plain text.
+// (Cloudflare), either of those in a server-sent event, an HTML page's
+// title, or plain text.
 func Message(body []byte) (typ, msg string) {
 	trimmed := strings.TrimSpace(string(body))
 	if trimmed == "" {
 		return "", ""
+	}
+	if strings.HasPrefix(trimmed, "event:") || strings.HasPrefix(trimmed, "data:") {
+		// Some gateways answer a streaming request's error as an event,
+		// with the error in its data line.
+		for _, line := range strings.Split(trimmed, "\n") {
+			if data, ok := strings.CutPrefix(strings.TrimSpace(line), "data:"); ok {
+				if typ, msg := Message([]byte(data)); typ != "" || msg != "" {
+					return typ, msg
+				}
+			}
+		}
 	}
 	if strings.HasPrefix(trimmed, "{") {
 		var doc struct {
