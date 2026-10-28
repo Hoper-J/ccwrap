@@ -3,8 +3,11 @@ package uiservice
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/Hoper-J/ccwrap/internal/preflight"
 )
 
 // Activity rows read as the session page reads them: method, path without
@@ -320,7 +323,7 @@ console.log(JSON.stringify({
 		"e2":          `{"auth":null}`,
 		"e3":          `{"key":"Paste the key."}`,
 		"e4":          `{"model_aliases":{"claude-sonnet-5-5":"v4","*":"*"},"egress":{"mode":"http","url":"http://p:8080"}}`,
-		"fresh":       `{"errs":{"name":"A profile with this name exists."},"warns":{"base_url":"Claude Code adds /v1 itself, so this would send requests to /v1/v1/messages. Drop the /v1."}}`,
+		"fresh":       `{"errs":{"name":"A profile with this name exists."},"warns":{"base_url":"Claude Code adds /v1 itself, so this would send requests to /v1/v1/messages. Drop the /v1."},"fixes":{}}`,
 		"add":         `{"name":"glm2","provider":"","base_url":"https://x.example/v1","auth":{"mode":"ccwrap_bearer","key":"sk-1"},"egress":{"mode":"inherit","url":""},"model_aliases":{"claude-opus-5-5":"glm-5","*":"glm-5"},"set_default":false}`,
 		"aliasMap":    `{"a":"b","*":"m"}`,
 		"auth":        `["passthrough","bearer · env","x-api-key · inline"]`,
@@ -342,6 +345,58 @@ console.log(JSON.stringify(emphasisParts('Routing Claude Code through api.deepse
 	want := `[{"text":"Routing Claude Code through ","bold":false},{"text":"api.deepseek.com","bold":true},{"text":". CCWRAP holds your gateway credentials and applies ","bold":false},{"text":"2 model aliases","bold":true},{"text":"; Claude Code only sees logical names.","bold":false}]`
 	if strings.TrimSpace(out) != want {
 		t.Fatalf("got  %s\nwant %s", strings.TrimSpace(out), want)
+	}
+}
+
+// The profile form flags OpenAI-compatible base URLs as the server does,
+// from the table the page is served with, and offers the fix it knows.
+func TestProfileFormOpenAIBase(t *testing.T) {
+	urls := []string{
+		"https://dashscope.aliyuncs.com/compatible-mode/v1",
+		"https://dashscope.aliyuncs.com/apps/anthropic",
+		"https://ark.cn-beijing.volces.com/api/v3/",
+		"https://ark.cn-beijing.volces.com/api/coding/v3",
+		"https://API.DeepSeek.com",
+		"https://api.deepseek.com/anthropic",
+		"https://api.siliconflow.cn/v1",
+		"https://api.siliconflow.cn",
+		"https://gw.example/openai/v1/chat/completions",
+		"https://gw.example/compatible-mode/v1",
+		"https://gw.example/v1",
+	}
+	table, _ := json.Marshal(preflight.OpenAIEndpoints())
+	in, _ := json.Marshal(urls)
+	out := runModule(t, `
+import { openAIBase, problems, draftFrom } from '$JS/profiles/form.js';
+import { bootstrap } from '$JS/api.js';
+const table = bootstrap({ openai: JSON.stringify(`+string(table)+`) }).openai;
+const urls = `+string(in)+`;
+const d = { ...draftFrom(null), name: 'x', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', key: 'k' };
+const p = problems(d, null, [], table);
+console.log(JSON.stringify({ got: urls.map((u) => openAIBase(u, table)), warn: p.warns.base_url, fix: p.fixes.base_url, bad: bootstrap({ openai: '{' }).openai }));
+`)
+	var res struct {
+		Got       []*struct{ Provider, Anthropic string }
+		Warn, Fix string
+		Bad       []any
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	for i, raw := range urls {
+		u, _ := url.Parse(raw)
+		b, ok := preflight.CheckBaseURL(u)
+		want := ok && b.OpenAI
+		got := res.Got[i]
+		if (got != nil) != want || (got != nil && (got.Provider != b.Provider || got.Anthropic != b.Fixed)) {
+			t.Errorf("%s: page %+v, server %+v %v", raw, got, b, ok)
+		}
+	}
+	if res.Fix != "https://dashscope.aliyuncs.com/apps/anthropic" || !strings.Contains(res.Warn, "Alibaba Cloud Model Studio\u2019s OpenAI-compatible URL") {
+		t.Fatalf("warn %q fix %q", res.Warn, res.Fix)
+	}
+	if res.Bad == nil || len(res.Bad) != 0 {
+		t.Fatalf("a bad table must read as none: %v", res.Bad)
 	}
 }
 

@@ -86,7 +86,9 @@ const (
 const (
 	IssueUnaliasedModel      = "unaliased_model"
 	IssueCredentialsRejected = "credentials_rejected"
-	IssueBaseURLV1           = "base_url_v1"
+	// IssueBaseURL is a base URL Claude Code can't use: one ending in /v1,
+	// or a provider's OpenAI-compatible endpoint.
+	IssueBaseURL             = "base_url"
 	IssueRateLimited         = "rate_limited"
 	IssueAuthMissing         = "auth_missing"
 	IssueNativeTLSBlocked    = "native_tls_blocked"

@@ -105,12 +105,31 @@ export function aliasMap(d) {
 
 const NAME_RE = /^[A-Za-z0-9._-]+$/;
 
+// openAIBase reports a base URL that is an OpenAI-compatible endpoint, which
+// Claude Code can't use: {provider, anthropic} for a known one (the table is
+// the server's, preflight.OpenAIEndpoints), {provider: '', anthropic: ''}
+// when the path gives it away, else null. Matches like the server does.
+export function openAIBase(raw, table) {
+  let u;
+  try { u = new URL(raw); } catch { return null; }
+  const host = u.hostname.toLowerCase();
+  const path = u.pathname.replace(/\/+$/, '');
+  for (const e of table || []) {
+    if (e.host !== host) continue;
+    if ((e.paths || []).some((p) => path === p || (p !== '' && path.startsWith(p + '/')))) return { provider: e.provider, anthropic: e.anthropic };
+  }
+  if (path.endsWith('/chat/completions') || (path + '/').includes('/compatible-mode/')) return { provider: '', anthropic: '' };
+  return null;
+}
+
 // problems is what keeps the draft from saving, by field, worded for the
-// user; warnings are advisory. orig is the saved profile (null = new),
-// names the existing profile names.
-export function problems(d, orig, names) {
+// user; warnings are advisory, and fixes the value a warning offers to put
+// in. orig is the saved profile (null = new), names the existing profile
+// names, openai the known OpenAI-compatible endpoints.
+export function problems(d, orig, names, openai = []) {
   const errs = {};
   const warns = {};
+  const fixes = {};
   const isNew = !orig;
   if (isNew) {
     if (!d.name.trim()) errs.name = 'A name is required.';
@@ -120,7 +139,14 @@ export function problems(d, orig, names) {
   const base = d.base_url.trim();
   if (!base) errs.base_url = 'A base URL is required.';
   else if (!/^https?:\/\/\S+$/.test(base)) errs.base_url = 'Use an http or https URL.';
-  else if (/\/v1\/?$/.test(base)) warns.base_url = 'Claude Code adds /v1 itself, so this would send requests to /v1/v1/messages. Drop the /v1.';
+  else {
+    const oa = openAIBase(base, openai);
+    if (oa && oa.anthropic) {
+      warns.base_url = 'This is ' + oa.provider + '\u2019s OpenAI-compatible URL. Claude Code needs its Anthropic-compatible one: ' + oa.anthropic;
+      fixes.base_url = oa.anthropic;
+    } else if (oa) warns.base_url = 'This looks like an OpenAI-compatible URL. Claude Code needs the provider\u2019s Anthropic-compatible base URL; its docs give it.';
+    else if (/\/v1\/?$/.test(base)) warns.base_url = 'Claude Code adds /v1 itself, so this would send requests to /v1/v1/messages. Drop the /v1.';
+  }
   if (d.auth_mode !== 'passthrough') {
     const stored = orig && orig.auth ? (d.key_source === 'env_var' ? orig.auth.has_key_env : orig.auth.has_inline_key) : false;
     if (!d.key.trim() && !stored) errs.key = d.key_source === 'env_var' ? 'Name the environment variable that holds the key.' : 'Paste the key.';
@@ -136,7 +162,7 @@ export function problems(d, orig, names) {
     froms.add(f);
   }
   if (d.other === '__custom' && !d.otherCustom.trim()) errs.other = 'Name the model other Claude models go to.';
-  return { errs, warns };
+  return { errs, warns, fixes };
 }
 
 function sameMap(a, b) {
@@ -269,13 +295,13 @@ export function mountProfileForm(main, deps) {
     const active = document.activeElement;
     const focused = active && (root.contains(active) || foot.contains(active)) ? active.id : '';
     const caret = focused && active.selectionStart != null ? [active.selectionStart, active.selectionEnd] : null;
-    const { errs, warns } = problems(draft, orig, names);
+    const { errs, warns, fixes } = problems(draft, orig, names, deps.openai);
     const dirty = JSON.stringify(draft) !== initial;
     const blocking = Object.values(errs)[0] || '';
     const canSave = !saving && !blocking && (isNew || dirty);
     const sessions = orig ? deps.sessions().filter((s) => (orig.sessions || []).includes(s.id)) : [];
     const form = h('form', { class: 'pf-form', id: 'pf-form', novalidate: true, autocomplete: 'off' },
-      identity(errs, warns), auth(errs), aliases(errs), egress(errs), confirmDelete ? deleteCard(sessions) : null);
+      identity(errs, warns, fixes), auth(errs), aliases(errs), egress(errs), confirmDelete ? deleteCard(sessions) : null);
     // Enter saves; the page never navigates (its CSP allows no form posts).
     form.addEventListener('submit', (e) => { e.preventDefault(); if (canSave) save(); });
     show(root, header(sessions, dirty), form);
@@ -326,12 +352,15 @@ export function mountProfileForm(main, deps) {
     return h('section', { class: 'pf-card' }, h('div', { class: 'pf-card-label' }, label), h('div', { class: 'pf-card-body' }, children));
   }
 
-  function identity(errs, warns) {
+  function identity(errs, warns, fixes) {
+    const baseWarn = warns.base_url && fixes.base_url
+      ? [warns.base_url, ' ', h('button', { type: 'button', class: 'btn btn-sm pf-warn-fix', onclick: () => set({ base_url: fixes.base_url }) }, 'Use it')]
+      : warns.base_url;
     return card('Identity',
       isNew ? field('name *', input('pf-name', draft.name, (v) => set({ name: v }), { cls: errs.name ? 'invalid' : '', attrs: { placeholder: 'e.g. deepseek' } }), { id: 'pf-name', error: draft.name && errs.name }) : null,
       field('provider', input('pf-provider', draft.provider, (v) => set({ provider: v }), { attrs: { placeholder: 'optional group label' } }), { id: 'pf-provider' }),
       field('base_url *', input('pf-base', draft.base_url, (v) => set({ base_url: v }), { cls: errs.base_url && draft.base_url ? 'invalid' : warns.base_url || flagged === 'base_url' ? 'advisory' : '', attrs: { placeholder: 'https://api.example.com' } }),
-        { id: 'pf-base', error: draft.base_url && errs.base_url, warn: warns.base_url, flag: flagged === 'base_url' && !warns.base_url ? 'Requests on this route went to the wrong path; check the base URL.' : '' }));
+        { id: 'pf-base', error: draft.base_url && errs.base_url, warn: baseWarn, flag: flagged === 'base_url' && !warns.base_url ? 'Requests on this route went to the wrong path; check the base URL.' : '' }));
   }
 
   function auth(errs) {

@@ -92,7 +92,8 @@ func TestDoctorReportsKeptClaudeNames(t *testing.T) {
 	}
 }
 
-// A gateway base URL ending in /v1 is flagged at launch with the fix.
+// A gateway base URL ending in /v1, or a provider's OpenAI-compatible one,
+// is flagged at launch with the fix.
 func TestDoctorReportsDoubledV1Base(t *testing.T) {
 	paths := testutil.ShortAppPaths(t, "v.sock")
 	isolateLaunchEnv(t)
@@ -101,6 +102,12 @@ func TestDoctorReportsDoubledV1Base(t *testing.T) {
 	t.Setenv("CCWRAP_UPSTREAM", "https://gw.example/v1")
 	c := doctorChecksByName(runDoctorJSON(t, paths, []string{"--json"}))["upstream_path"]
 	if c.Status != "warn" || !strings.Contains(c.Detail, "set the base URL to https://gw.example") {
+		t.Fatalf("upstream_path = %#v", c)
+	}
+	t.Setenv("CCWRAP_UPSTREAM", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+	c = doctorChecksByName(runDoctorJSON(t, paths, []string{"--json"}))["upstream_path"]
+	if c.Status != "warn" || !strings.Contains(c.Summary, "Alibaba Cloud Model Studio's OpenAI-compatible endpoint") ||
+		!strings.Contains(c.Detail, "set the base URL to https://dashscope.aliyuncs.com/apps/anthropic") {
 		t.Fatalf("upstream_path = %#v", c)
 	}
 	t.Setenv("CCWRAP_UPSTREAM", "https://gw.example")

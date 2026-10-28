@@ -73,29 +73,45 @@ func TestUncoveredMainModel(t *testing.T) {
 	}
 }
 
-func TestDoubledV1Base(t *testing.T) {
+// A base URL that can't work is caught from the URL alone: a provider's
+// OpenAI-compatible endpoint (with its Anthropic-compatible one when ccwrap
+// knows the provider), or a base ending in /v1.
+func TestCheckBaseURL(t *testing.T) {
 	cases := []struct {
-		in, fixed string
-		ok        bool
+		in   string
+		want BaseURLProblem
+		ok   bool
 	}{
-		{"https://gw.example/v1", "https://gw.example", true},
-		{"https://gw.example/v1/", "https://gw.example", true},
-		{"https://user:pass@gw.example/api/v1", "https://gw.example/api", true},
-		{"https://gw.example", "", false},
-		{"https://api.deepseek.com/anthropic", "", false},
-		{"https://gw.example/v10", "", false},
+		{"https://gw.example/v1", BaseURLProblem{Fixed: "https://gw.example"}, true},
+		{"https://gw.example/v1/", BaseURLProblem{Fixed: "https://gw.example"}, true},
+		{"https://user:pass@gw.example/api/v1", BaseURLProblem{Fixed: "https://gw.example/api"}, true},
+		{"https://gw.example", BaseURLProblem{}, false},
+		{"https://api.deepseek.com/anthropic", BaseURLProblem{}, false},
+		{"https://gw.example/v10", BaseURLProblem{}, false},
+		{"https://dashscope.aliyuncs.com/compatible-mode/v1", BaseURLProblem{OpenAI: true, Provider: "Alibaba Cloud Model Studio", Fixed: "https://dashscope.aliyuncs.com/apps/anthropic"}, true},
+		{"https://dashscope.aliyuncs.com/apps/anthropic", BaseURLProblem{}, false},
+		{"https://ark.cn-beijing.volces.com/api/v3/", BaseURLProblem{OpenAI: true, Provider: "Volcengine Ark", Fixed: "https://ark.cn-beijing.volces.com/api/compatible"}, true},
+		{"https://ark.cn-beijing.volces.com/api/coding/v3", BaseURLProblem{OpenAI: true, Provider: "Volcengine Ark Coding Plan", Fixed: "https://ark.cn-beijing.volces.com/api/coding"}, true},
+		{"https://ark.cn-beijing.volces.com/api/compatible", BaseURLProblem{}, false},
+		{"https://open.bigmodel.cn/api/coding/paas/v4", BaseURLProblem{OpenAI: true, Provider: "Zhipu", Fixed: "https://open.bigmodel.cn/api/anthropic"}, true},
+		{"https://API.DeepSeek.com", BaseURLProblem{OpenAI: true, Provider: "DeepSeek", Fixed: "https://api.deepseek.com/anthropic"}, true},
+		{"https://api.moonshot.cn/v1", BaseURLProblem{OpenAI: true, Provider: "Moonshot", Fixed: "https://api.moonshot.cn/anthropic"}, true},
+		{"https://api.siliconflow.cn/v1", BaseURLProblem{OpenAI: true, Provider: "SiliconFlow", Fixed: "https://api.siliconflow.cn"}, true},
+		{"https://api.siliconflow.cn", BaseURLProblem{}, false},
+		{"https://gw.example/openai/v1/chat/completions", BaseURLProblem{OpenAI: true}, true},
+		{"https://gw.example/compatible-mode/v1", BaseURLProblem{OpenAI: true}, true},
 	}
 	for _, tc := range cases {
 		u, err := url.Parse(tc.in)
 		if err != nil {
 			t.Fatal(err)
 		}
-		fixed, ok := DoubledV1Base(u)
-		if fixed != tc.fixed || ok != tc.ok {
-			t.Errorf("%s: got (%q, %v), want (%q, %v)", tc.in, fixed, ok, tc.fixed, tc.ok)
+		got, ok := CheckBaseURL(u)
+		if got != tc.want || ok != tc.ok {
+			t.Errorf("%s: got (%+v, %v), want (%+v, %v)", tc.in, got, ok, tc.want, tc.ok)
 		}
 	}
-	if _, ok := DoubledV1Base(nil); ok {
+	if _, ok := CheckBaseURL(nil); ok {
 		t.Fatal("nil base")
 	}
 }

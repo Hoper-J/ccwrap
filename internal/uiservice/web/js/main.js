@@ -197,7 +197,7 @@ function renderMain(st) {
   }
   mount('profile', (r.isNew ? '+new' : r.name) + '|' + (r.field || ''), () => mountProfileForm(main, {
     api, toast, go, name: r.isNew ? '' : r.name, field: r.field || '',
-    sessions: () => store.get().sessions,
+    sessions: () => store.get().sessions, openai: boot.openai,
     onSaved: reloadProfiles,
   }));
 }

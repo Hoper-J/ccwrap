@@ -375,10 +375,11 @@ func (d *doctorChecks) launchChecks(launchOpts preflight.Options, profileErr err
 			d.add("launch_contract", "pass", "current launch satisfies CCWRAP MITM preflight checks", "")
 		}
 	}
-	// A third-party base URL ending in /v1 doubles the version segment.
+	// A third-party base URL that can't work: an OpenAI-compatible endpoint,
+	// or one ending in /v1 (the version segment doubles).
 	if launchPre != nil && launchPre.RouteClass != model.RouteClassFirstParty {
 		if lines := baseURLLines(launchPre); len(lines) > 0 {
-			d.add("upstream_path", "warn", "the base URL ends in /v1, and Claude Code adds /v1 itself: requests would go to /v1/v1/messages", strings.TrimSpace(lines[len(lines)-1]))
+			d.add("upstream_path", "warn", strings.TrimPrefix(strings.TrimSpace(lines[0]), "⚠ "), strings.TrimSpace(lines[len(lines)-1]))
 		} else {
 			d.add("upstream_path", "pass", "the base URL leaves the /v1 prefix to Claude Code", "")
 		}

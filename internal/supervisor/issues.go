@@ -53,10 +53,10 @@ type issueEntry struct {
 	at     time.Time
 	filter string
 
-	hint      string   // requests_failing: the latest failure's suggestion
-	host      string   // upstream_unreachable: the unreachable host
-	fixedBase string   // base_url_v1: the base URL without its /v1
-	models    []string // unaliased_model: the models sent unaliased
+	hint   string                   // requests_failing: the latest failure's suggestion
+	host   string                   // upstream_unreachable: the unreachable host
+	base   preflight.BaseURLProblem // base_url: what is wrong with it
+	models []string                 // unaliased_model: the models sent unaliased
 
 	// view is the session state the wording depends on: kept current while
 	// the issue is open and frozen when it resolves, so a resolved issue
@@ -147,9 +147,9 @@ func (ss *sessionState) noteRequestLocked(rec model.RequestRecord, now time.Time
 		e.seen(now, rec.Timestamp, activityFilterRequests)
 		e.evidence = statusEvidence(rec)
 		switch id {
-		case model.IssueBaseURLV1:
+		case model.IssueBaseURL:
 			if ap := ss.active.Load(); ap != nil {
-				e.fixedBase, _ = preflight.DoubledV1Base(ap.r.apiBaseURL)
+				e.base, _ = preflight.CheckBaseURL(ap.r.apiBaseURL)
 			}
 		case model.IssueRequestsFailing:
 			e.hint = f.Hint
@@ -161,7 +161,7 @@ func (ss *sessionState) noteRequestLocked(rec model.RequestRecord, now time.Time
 		}
 	case rec.ModelRequest() && rec.StatusCode < http.StatusBadRequest:
 		ss.resolveIssueLocked(model.IssueCredentialsRejected, "Requests are accepted again.")
-		ss.resolveIssueLocked(model.IssueBaseURLV1, "Requests succeed again.")
+		ss.resolveIssueLocked(model.IssueBaseURL, "Requests succeed again.")
 		ss.resolveIssueLocked(model.IssueRateLimited, "Requests go through again.")
 		ss.resolveIssueLocked(model.IssueUpstreamUnreachable, "The upstream answers again.")
 		ss.resolveIssueLocked(model.IssueRequestsFailing, "Requests succeed again.")
@@ -252,18 +252,21 @@ func (ss *sessionState) notePostureLocked(old, cur *posture) {
 	if authChanged {
 		ss.resolveIssueLocked(model.IssueCredentialsRejected, changed)
 	}
-	if e := ss.issueLocked(model.IssueBaseURLV1); e != nil && e.open {
-		fixed := ""
+	if e := ss.issueLocked(model.IssueBaseURL); e != nil && e.open {
+		var still preflight.BaseURLProblem
+		bad := false
 		if cur.r.routeClass != model.RouteClassFirstParty {
-			fixed, _ = preflight.DoubledV1Base(cur.r.apiBaseURL)
+			still, bad = preflight.CheckBaseURL(cur.r.apiBaseURL)
 		}
 		switch {
 		case switched:
-			ss.resolveIssueLocked(model.IssueBaseURLV1, changed)
-		case fixed == "":
-			ss.resolveIssueLocked(model.IssueBaseURLV1, "Fixed — the base URL no longer ends in /v1.")
+			ss.resolveIssueLocked(model.IssueBaseURL, changed)
+		case !bad && e.base.OpenAI:
+			ss.resolveIssueLocked(model.IssueBaseURL, "Fixed — the base URL is no longer an OpenAI-compatible endpoint.")
+		case !bad:
+			ss.resolveIssueLocked(model.IssueBaseURL, "Fixed — the base URL no longer ends in /v1.")
 		default:
-			e.fixedBase = fixed
+			e.base = still
 		}
 	}
 	if upstreamChanged {
@@ -438,14 +441,28 @@ func renderIssue(e *issueEntry) model.Issue {
 				note = "Check $" + env + " and relaunch."
 			}
 		}
-	case model.IssueBaseURLV1:
-		is.Title = "The base URL ends in /v1"
-		is.Detail = "Claude Code adds /v1 itself, so requests went to /v1/v1/messages."
-		if v.profile != "" {
+	case model.IssueBaseURL:
+		switch b := e.base; {
+		case b.OpenAI && b.Provider != "":
+			is.Title = "This is " + b.Provider + "'s OpenAI-compatible URL"
+			is.Detail = "Claude Code speaks the Anthropic API, so requests to this URL fail."
+		case b.OpenAI:
+			is.Title = "The base URL is an OpenAI-compatible endpoint"
+			is.Detail = "Claude Code speaks the Anthropic API, so requests to this URL fail. The provider's docs give its Anthropic-compatible base URL."
+		default:
+			is.Title = "The base URL ends in /v1"
+			is.Detail = "Claude Code adds /v1 itself, so requests went to /v1/v1/messages."
+		}
+		switch {
+		case v.profile != "":
 			fixes = editProfile("base_url")
-			note = "Change it to " + e.fixedBase + "."
-		} else {
-			note = "Set the base URL to " + e.fixedBase + " and relaunch."
+			if e.base.Fixed != "" {
+				note = "Change it to " + e.base.Fixed + "."
+			}
+		case e.base.Fixed != "":
+			note = "Set the base URL to " + e.base.Fixed + " and relaunch."
+		default:
+			note = "Set the provider's Anthropic-compatible base URL and relaunch."
 		}
 	case model.IssueRateLimited:
 		is.Title = "Rate limited by the upstream"

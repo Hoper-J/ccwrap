@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"encoding/json"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/Hoper-J/ccwrap/internal/control"
 	"github.com/Hoper-J/ccwrap/internal/model"
 	"github.com/Hoper-J/ccwrap/internal/modelalias"
+	"github.com/Hoper-J/ccwrap/internal/preflight"
 )
 
 // issueRoute is a third-party route under profile, x-api-key auth, with the
@@ -143,9 +145,9 @@ func TestIssueRateLimitedPointsAtItsRequest(t *testing.T) {
 
 func TestIssueBaseURLV1(t *testing.T) {
 	sv, sess := issueSession(t, issueRoute("https://gw.example/v1", "gw", nil))
-	sv.recordRequest(sess.public.ID, modelRequest(sess, 404, upstreamError(failureContext{status: 404, profile: "gw", fixedBase: "https://gw.example"}, "not found")))
+	sv.recordRequest(sess.public.ID, modelRequest(sess, 404, upstreamError(failureContext{status: 404, profile: "gw", base: &preflight.BaseURLProblem{Fixed: "https://gw.example"}}, "not found")))
 	is := onlyIssue(t, sess)
-	if is.ID != model.IssueBaseURLV1 || is.Title != "The base URL ends in /v1" || is.Note != "Change it to https://gw.example." ||
+	if is.ID != model.IssueBaseURL || is.Title != "The base URL ends in /v1" || is.Note != "Change it to https://gw.example." ||
 		len(is.Fixes) != 1 || is.Fixes[0].Field != "base_url" || is.Fixes[0].Value != "gw" {
 		t.Fatalf("issue = %+v", is)
 	}
@@ -156,6 +158,25 @@ func TestIssueBaseURLV1(t *testing.T) {
 	}
 	setIssueRoute(t, sv, sess, issueRoute("https://gw.example/", "gw", nil))
 	if is := onlyIssue(t, sess); is.State != model.IssueResolved || is.Resolution != "Fixed — the base URL no longer ends in /v1." {
+		t.Fatalf("fixed: %+v", is)
+	}
+}
+
+// A provider's OpenAI-compatible URL is named as such, with the provider's
+// Anthropic-compatible URL to change it to.
+func TestIssueBaseURLOpenAICompatible(t *testing.T) {
+	base := "https://dashscope.aliyuncs.com/compatible-mode/v1"
+	sv, sess := issueSession(t, issueRoute(base, "bailian", nil))
+	u, _ := url.Parse(base)
+	b, _ := preflight.CheckBaseURL(u)
+	sv.recordRequest(sess.public.ID, modelRequest(sess, 404, upstreamError(failureContext{status: 404, profile: "bailian", base: &b}, "")))
+	is := onlyIssue(t, sess)
+	if is.ID != model.IssueBaseURL || is.Title != "This is Alibaba Cloud Model Studio's OpenAI-compatible URL" ||
+		is.Note != "Change it to https://dashscope.aliyuncs.com/apps/anthropic." || len(is.Fixes) != 1 || is.Fixes[0].Field != "base_url" {
+		t.Fatalf("issue = %+v", is)
+	}
+	setIssueRoute(t, sv, sess, issueRoute("https://dashscope.aliyuncs.com/apps/anthropic", "bailian", nil))
+	if is := onlyIssue(t, sess); is.State != model.IssueResolved || is.Resolution != "Fixed — the base URL is no longer an OpenAI-compatible endpoint." {
 		t.Fatalf("fixed: %+v", is)
 	}
 }

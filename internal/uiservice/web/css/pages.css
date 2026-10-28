@@ -195,6 +195,7 @@
 .pf-hint { font-size: 12px; color: var(--text-muted); }
 .pf-error { font-size: 12px; color: var(--danger); }
 .pf-warn { font-size: 12px; color: var(--warn); }
+.pf-warn-fix { margin-left: 4px; vertical-align: baseline; }
 .pf-joined { display: flex; align-items: center; gap: 0; min-width: 0; }
 .pf-joined > .pf-input, .pf-joined > .pf-select { border-radius: 0; }
 .pf-joined > :first-child { border-radius: 6px 0 0 6px; }

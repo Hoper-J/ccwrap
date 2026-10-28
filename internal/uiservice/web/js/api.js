@@ -2,14 +2,18 @@
 // the merged event stream.
 
 // bootstrap is what the page was served with: the write token, the service
-// instance, its version and address, and the credential header names.
+// instance, its version and address, the credential header names, and the
+// known OpenAI-compatible endpoints.
 export function bootstrap(dataset) {
+  let openai = [];
+  try { openai = JSON.parse(dataset.openai || '[]'); } catch { /* keep none */ }
   return {
     token: dataset.token || '',
     instance: dataset.instance || '',
     version: dataset.version || '',
     address: dataset.address || '',
     deny: String(dataset.deny || '').split(',').filter(Boolean),
+    openai: Array.isArray(openai) ? openai : [],
   };
 }
 

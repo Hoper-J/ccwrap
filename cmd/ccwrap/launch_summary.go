@@ -231,23 +231,36 @@ func aliasFixLines(alias modelalias.Config, profile string) []string {
 }
 
 // launchWarningLines are the banner's config warnings, each with its fix: a
-// base URL ending in /v1, then Claude models the route has no alias for.
+// base URL that can't work, then Claude models the route has no alias for.
 func launchWarningLines(pre *preflight.Result, stateDir string) []string {
 	return append(baseURLLines(pre), modelCoverageLines(pre, seenUnaliasedModels(pre, stateDir))...)
 }
 
-// baseURLLines warns about a third-party base URL ending in /v1.
+// baseURLLines warns about a third-party base URL that can't work: a
+// provider's OpenAI-compatible endpoint, or one ending in /v1.
 func baseURLLines(pre *preflight.Result) []string {
 	if pre.RouteClass == model.RouteClassFirstParty {
 		return nil
 	}
-	fixed, ok := preflight.DoubledV1Base(pre.APIBaseURL)
+	b, ok := preflight.CheckBaseURL(pre.APIBaseURL)
 	if !ok {
 		return nil
 	}
-	fix := "set the base URL to " + fixed
+	fix := "set the base URL to " + b.Fixed
 	if pre.ActiveProfileName != "" {
-		fix = "ccwrap profile edit " + pre.ActiveProfileName + " --base-url " + fixed
+		fix = "ccwrap profile edit " + pre.ActiveProfileName + " --base-url " + b.Fixed
+	}
+	switch {
+	case b.OpenAI && b.Fixed != "":
+		return []string{
+			"  ⚠ The base URL is " + b.Provider + "'s OpenAI-compatible endpoint; Claude Code needs its Anthropic-compatible one.",
+			"    Switch to it: " + fix,
+		}
+	case b.OpenAI:
+		return []string{
+			"  ⚠ The base URL looks like an OpenAI-compatible endpoint; Claude Code needs the provider's Anthropic-compatible one.",
+			"    Set the base URL the provider's docs give for Claude Code or the Anthropic API.",
+		}
 	}
 	return []string{
 		"  ⚠ The base URL ends in /v1, and Claude Code adds /v1 itself: requests would go to /v1/v1/messages.",

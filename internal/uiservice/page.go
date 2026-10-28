@@ -2,11 +2,13 @@ package uiservice
 
 import (
 	"embed"
+	"encoding/json"
 	"html/template"
 	"io/fs"
 	"net/http"
 	"strings"
 
+	"github.com/Hoper-J/ccwrap/internal/preflight"
 	"github.com/Hoper-J/ccwrap/internal/ui"
 )
 
@@ -48,9 +50,17 @@ type pageData struct {
 	Token, InstanceID, Version, Address string
 	// Deny is the credential header names the inspector masks, comma
 	// separated.
-	Deny   string
+	Deny string
+	// OpenAI is the known OpenAI-compatible endpoints as JSON, for the
+	// profile form's base URL warning.
+	OpenAI string
 	Sprite template.HTML
 }
+
+var openAIEndpointsJSON = func() string {
+	b, _ := json.Marshal(preflight.OpenAIEndpoints())
+	return string(b)
+}()
 
 func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 	pageHeaders(w.Header())
@@ -58,7 +68,7 @@ func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	_ = pageTemplate.Execute(w, pageData{
 		Token: s.token, InstanceID: s.info.InstanceID, Version: s.info.Version, Address: s.info.HTTPAddr,
-		Deny: strings.Join(ui.CredentialDenyList(), ","), Sprite: iconSprite,
+		Deny: strings.Join(ui.CredentialDenyList(), ","), OpenAI: openAIEndpointsJSON, Sprite: iconSprite,
 	})
 }
 

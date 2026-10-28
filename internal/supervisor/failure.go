@@ -31,9 +31,9 @@ type failureContext struct {
 	upstreamModel string
 	profile       string
 	aliasTarget   string // a target the route already uses, for the hint
-	// fixedBase is the route's base URL minus a trailing /v1, set when the
-	// base ends in /v1 (requests then go to /v1/v1/...).
-	fixedBase string
+	// base is what is wrong with the route's base URL, when ccwrap can
+	// tell from the URL (preflight.CheckBaseURL).
+	base *preflight.BaseURLProblem
 }
 
 // upstreamFailure builds the Failure for an upstream error response from
@@ -75,8 +75,8 @@ func maskFailureBody(body []byte, unmask bool) string {
 // Its order decides what failureHint explains when several apply.
 func failureIssue(fc failureContext) string {
 	switch status := fc.status; {
-	case fc.fixedBase != "" && status == http.StatusNotFound:
-		return model.IssueBaseURLV1
+	case fc.base != nil && (status == http.StatusNotFound || (fc.base.OpenAI && status == http.StatusMethodNotAllowed)):
+		return model.IssueBaseURL
 	case fc.unmapped && (status == http.StatusBadRequest || status == http.StatusNotFound || status == http.StatusUnprocessableEntity):
 		return model.IssueUnaliasedModel
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
@@ -98,10 +98,17 @@ func failureHint(fc failureContext, f *model.RequestFailure) string {
 		editCmd = "ccwrap profile edit " + fc.profile + " --model-alias"
 	}
 	switch failureIssue(fc) {
-	case model.IssueBaseURLV1:
-		fix := "set the base URL to " + fc.fixedBase
+	case model.IssueBaseURL:
+		b := fc.base
+		fix := "set the base URL to " + b.Fixed
 		if fc.profile != "" {
-			fix = "ccwrap profile edit " + fc.profile + " --base-url " + fc.fixedBase
+			fix = "ccwrap profile edit " + fc.profile + " --base-url " + b.Fixed
+		}
+		switch {
+		case b.OpenAI && b.Fixed != "":
+			return "This is " + b.Provider + "'s OpenAI-compatible endpoint, and Claude Code needs its Anthropic-compatible one: " + fix
+		case b.OpenAI:
+			return "The base URL looks like an OpenAI-compatible endpoint, and Claude Code needs the provider's Anthropic-compatible base URL (see the provider's docs)"
 		}
 		return "The base URL ends in /v1 and Claude Code adds /v1 itself, so this went to /v1/v1/messages. Drop the /v1: " + fix
 	case model.IssueUnaliasedModel:
@@ -205,7 +212,9 @@ func newFailureTap(ap *posture, aliasCtx *modelalias.Context, unmask bool) *fail
 	t.fc.profile = ap.r.profileName
 	t.fc.aliasTarget = aliasHintTarget(ap.r.modelAlias)
 	if !t.fc.firstParty {
-		t.fc.fixedBase, _ = preflight.DoubledV1Base(ap.r.apiBaseURL)
+		if b, ok := preflight.CheckBaseURL(ap.r.apiBaseURL); ok {
+			t.fc.base = &b
+		}
 	}
 	if aliasCtx != nil {
 		t.fc.model, t.fc.upstreamModel = aliasCtx.LogicalModel, aliasCtx.UpstreamModel

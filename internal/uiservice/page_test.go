@@ -50,6 +50,7 @@ func TestPageShell(t *testing.T) {
 	for _, want := range []string{
 		`data-token="` + r.srv.token + `"`, `data-instance="` + r.info.InstanceID + `"`, `data-address="` + r.info.HTTPAddr + `"`,
 		`<script type="module" src="/assets/js/main.js"></script>`, `<symbol id="i-panel-left"`,
+		`data-openai="[{&#34;host&#34;:&#34;dashscope.aliyuncs.com&#34;`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("page lacks %q", want)

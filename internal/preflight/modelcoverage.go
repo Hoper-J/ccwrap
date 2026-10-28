@@ -1,7 +1,6 @@
 package preflight
 
 import (
-	"net/url"
 	"strings"
 
 	"github.com/Hoper-J/ccwrap/internal/model"
@@ -57,23 +56,4 @@ func uncoveredMainModel(routeClass model.RouteClass, alias modelalias.Config, ch
 		return nil
 	}
 	return &UncoveredModel{Model: value, Source: source}
-}
-
-// DoubledV1Base reports a third-party base URL ending in /v1. Claude Code
-// appends /v1/messages to its base URL, so such a base sends requests to
-// /v1/v1/messages (gateway docs often quote the OpenAI-style /v1 form).
-// fixed is the base without the /v1 and without userinfo.
-func DoubledV1Base(base *url.URL) (fixed string, ok bool) {
-	if base == nil {
-		return "", false
-	}
-	p := strings.TrimRight(base.Path, "/")
-	if !strings.HasSuffix(p, "/v1") {
-		return "", false
-	}
-	u := *base
-	u.User = nil
-	u.Path = strings.TrimSuffix(p, "/v1")
-	u.RawPath = ""
-	return u.String(), true
 }
