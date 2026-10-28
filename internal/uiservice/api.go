@@ -12,6 +12,7 @@ import (
 	"github.com/Hoper-J/ccwrap/internal/projects"
 	"github.com/Hoper-J/ccwrap/internal/settings"
 	"github.com/Hoper-J/ccwrap/internal/termlaunch"
+	"github.com/Hoper-J/ccwrap/internal/ui"
 )
 
 func (s *Server) apiMux() http.Handler {
@@ -79,8 +80,19 @@ func (s *Server) projectSources() projects.Sources {
 	}
 }
 
+// projectView is a project with its path as the page shows it (~ for home).
+type projectView struct {
+	projects.Project
+	DisplayPath string `json:"display_path"`
+}
+
 func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]any{"projects": s.lister.List(s.projectSources())})
+	list := s.lister.List(s.projectSources())
+	out := make([]projectView, len(list))
+	for i, p := range list {
+		out[i] = projectView{Project: p, DisplayPath: ui.DisplayDir(p.Path)}
+	}
+	writeJSON(w, map[string]any{"projects": out})
 }
 
 // claudeDeepLinkTerminal is the terminal Claude Code opens for its own deep

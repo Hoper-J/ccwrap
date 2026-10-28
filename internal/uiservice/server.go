@@ -282,16 +282,12 @@ func (s *Server) guard(h http.Handler) http.Handler {
 	})
 }
 
-// pageMux serves the page and the API on the HTTP port. The page is a
-// placeholder until the app's front end lands.
+// pageMux serves the page, its assets and the API on the HTTP port.
 func (s *Server) pageMux(api http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/api/", api)
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		fmt.Fprintln(w, "ccwrap ui is running. Its interface is not built yet; run `ccwrap open` to open a session's dashboard.")
-	})
+	mux.HandleFunc("GET /{$}", s.handlePage)
+	mux.Handle("GET /assets/", assets())
 	return mux
 }
 

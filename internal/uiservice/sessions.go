@@ -33,7 +33,9 @@ type SessionSummary struct {
 	EndedAt        *time.Time `json:"ended_at,omitempty"`
 	LastActivityAt *time.Time `json:"last_activity_at,omitempty"`
 	Display        struct {
-		Title    string `json:"title"`
+		Title string `json:"title"`
+		// Path is the project folder as shown (~ for home).
+		Path     string `json:"path,omitempty"`
 		Subtitle string `json:"subtitle"`
 		Badge    string `json:"badge,omitempty"`
 	} `json:"display"`
@@ -97,6 +99,7 @@ func (s *Server) summarize(ctx context.Context, ls liveSession) (SessionSummary,
 	default:
 		sum.Display.Title = ui.ShortID(m.SessionID)
 	}
+	sum.Display.Path = ui.DisplayDir(sum.ProjectDir)
 	sum.Display.Subtitle = sum.Profile
 	if sum.Display.Subtitle == "" {
 		sum.Display.Subtitle = "no profile"
