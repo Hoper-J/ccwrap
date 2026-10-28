@@ -22,6 +22,8 @@ import (
 	"github.com/Hoper-J/ccwrap/internal/manifest"
 	"github.com/Hoper-J/ccwrap/internal/model"
 	"github.com/Hoper-J/ccwrap/internal/procmeta"
+	"github.com/Hoper-J/ccwrap/internal/profiles"
+	"github.com/Hoper-J/ccwrap/internal/profiletest"
 	"github.com/Hoper-J/ccwrap/internal/supervisor"
 	"github.com/Hoper-J/ccwrap/internal/termlaunch"
 	"github.com/Hoper-J/ccwrap/internal/testutil"
@@ -634,5 +636,154 @@ func TestSessionSummaryShowsIssues(t *testing.T) {
 	sum := r.listed(t, "the session", func(m map[string]map[string]any) bool { return len(m) == 1 })["aaaa000000000001"]
 	if sum["health"] != "warn" || sum["profile"] != "gw" || sum["display"].(map[string]any)["badge"] != "1 issue" || sum["display"].(map[string]any)["subtitle"] != "gw" {
 		t.Fatalf("summary = %v", sum)
+	}
+}
+
+// The Profiles page's API: add, read, edit, set default, remove — writes
+// need the token, nothing returns a key, and validation errors name the
+// fields at fault.
+func TestProfilesAPI(t *testing.T) {
+	paths := testutil.ShortAppPaths(t, "ui.sock")
+	r := startUI(t, paths, nil, time.Hour)
+	add := `{"name":"gw","provider":"Gateway","base_url":"https://gw.example","auth":{"mode":"ccwrap_bearer","key":"sk-very-secret"}}`
+	if status, out := r.http(t, "POST", "/api/v1/profiles", add, nil); status != 403 || code(out) != "token" {
+		t.Fatalf("add without token: %d %v", status, out)
+	}
+	status, out := r.write(t, "POST", "/api/v1/profiles", add)
+	if status != http.StatusCreated || out["default"] != "official" || strings.Contains(mustJSON(out), "sk-very-secret") {
+		t.Fatalf("add: %d %v", status, out)
+	}
+	if prof := out["profile"].(map[string]any); prof["name"] != "gw" || prof["is_default"] != false || len(prof["sessions"].([]any)) != 0 {
+		t.Fatalf("added profile: %v", prof)
+	}
+	if status, out := r.write(t, "POST", "/api/v1/profiles", add); status != http.StatusConflict || code(out) != "conflict" {
+		t.Fatalf("duplicate: %d %v", status, out)
+	}
+
+	status, list := r.http(t, "GET", "/api/v1/profiles", "", nil)
+	items, _ := list["profiles"].([]any)
+	if status != 200 || len(items) != 2 || list["path"] != filepath.Join(paths.StateDir, "profiles.json") || strings.Contains(mustJSON(list), "sk-very-secret") {
+		t.Fatalf("list: %d %v", status, list)
+	}
+	if status, one := r.http(t, "GET", "/api/v1/profiles/gw", "", nil); status != 200 || one["base_url"] != "https://gw.example" || one["auth"].(map[string]any)["has_inline_key"] != true {
+		t.Fatalf("get: %d %v", status, one)
+	}
+	if status, out := r.http(t, "GET", "/api/v1/profiles/nope", "", nil); status != 404 || code(out) != "not_found" {
+		t.Fatalf("get unknown: %d %v", status, out)
+	}
+
+	status, out = r.write(t, "PATCH", "/api/v1/profiles/gw", `{"base_url":"https://gw.example/anthropic"}`)
+	if status != 200 || out["profile"].(map[string]any)["base_url"] != "https://gw.example/anthropic" || len(out["applied"].([]any)) != 0 {
+		t.Fatalf("edit: %d %v", status, out)
+	}
+	if status, out := r.write(t, "PATCH", "/api/v1/profiles/gw", `{"name":"other"}`); status != 400 || code(out) != "usage" {
+		t.Fatalf("rename: %d %v", status, out)
+	}
+	status, out = r.write(t, "PATCH", "/api/v1/profiles/gw", `{"base_url":"ftp://nope"}`)
+	if e, _ := out["error"].(map[string]any); status != 422 || code(out) != "validation_error" || e["paths"] == nil {
+		t.Fatalf("invalid edit: %d %v", status, out)
+	}
+
+	if status, out := r.write(t, "POST", "/api/v1/profiles/gw/default", ""); status != 200 || out["default"] != "gw" {
+		t.Fatalf("set default: %d %v", status, out)
+	}
+	if status, out := r.write(t, "DELETE", "/api/v1/profiles/gw", `{"confirm_name":"gx"}`); status != 400 || code(out) != "usage" {
+		t.Fatalf("remove unconfirmed: %d %v", status, out)
+	}
+	status, out = r.write(t, "DELETE", "/api/v1/profiles/gw", `{"confirm_name":"gw"}`)
+	if status != 200 || out["removed"] != "gw" || out["default"] != "official" {
+		t.Fatalf("remove: %d %v", status, out)
+	}
+	req, _ := http.NewRequest("PUT", r.info.URL()+"api/v1/profiles/official", nil)
+	req.Header.Set("X-CCWRAP-Token", r.srv.token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed || resp.Header.Get("Allow") != "GET, PATCH, DELETE" {
+		t.Fatalf("wrong method: %d allow=%q", resp.StatusCode, resp.Header.Get("Allow"))
+	}
+}
+
+// Editing a profile a session runs on applies it to that session; the list
+// shows which sessions use each profile.
+func TestProfileEditReachesItsSessions(t *testing.T) {
+	paths := testutil.ShortAppPaths(t, "ui.sock")
+	if err := os.MkdirAll(paths.StateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(paths.StateDir, "profiles.json"), []byte(`{"default":"gw","profiles":{"gw":{"provider":"Gateway","base_url":"https://gw.example","auth":{"mode":"ccwrap_bearer","key":"k"}}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	startSession(t, paths, "aaaa000000000001", t.TempDir())
+	if err := control.NewClient(paths.SessionPaths("aaaa000000000001").SocketPath).SetRoute(context.Background(), "aaaa000000000001", model.SessionRouteRequest{
+		APIBaseURL: "https://gw.example/", RouteClass: model.RouteClassThirdPartyHidden, ActiveProfileName: "gw", FailPolicy: model.FailClosed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	r := startUI(t, paths, nil, time.Hour)
+	r.listed(t, "the session", func(m map[string]map[string]any) bool { return m["aaaa000000000001"]["profile"] == "gw" })
+	_, list := r.http(t, "GET", "/api/v1/profiles", "", nil)
+	if gw := list["profiles"].([]any)[0].(map[string]any); gw["name"] != "gw" || mustJSON(gw["sessions"]) != `["aaaa000000000001"]` {
+		t.Fatalf("list: %v", list)
+	}
+	status, out := r.write(t, "PATCH", "/api/v1/profiles/gw", `{"provider":"Gateway 2"}`)
+	applied, _ := out["applied"].([]any)
+	if status != 200 || len(applied) != 1 {
+		t.Fatalf("edit: %d %v", status, out)
+	}
+	// The test session has no launch context, so it answers with its
+	// refusal — which shows the switch reached it.
+	if a := applied[0].(map[string]any); a["session_id"] != "aaaa000000000001" || a["result"] != "rejected_invalid" {
+		t.Fatalf("applied: %v", a)
+	}
+}
+
+// A connection test is kept as the profile's last test until the profile
+// changes; tests of unknown profiles say so.
+func TestProfileTests(t *testing.T) {
+	var probed profiles.Profile
+	probeProfile = func(p profiles.Profile, _ profiletest.ProbeOptions) profiletest.ProbeResult {
+		probed = p
+		return profiletest.ProbeResult{Profile: p.Name, Status: profiletest.StatusAuthFail, HTTPStatus: 401, Latency: 230 * time.Millisecond}
+	}
+	var egressProbed profiles.Profile
+	probeEgress = func(p profiles.Profile, _ profiletest.EgressProbeOptions) profiletest.EgressProbeResult {
+		egressProbed = p
+		return profiletest.EgressProbeResult{}
+	}
+	t.Cleanup(func() { probeProfile, probeEgress = profiletest.Probe, profiletest.ProbeEgress })
+	paths := testutil.ShortAppPaths(t, "ui.sock")
+	r := startUI(t, paths, nil, time.Hour)
+	if status, _ := r.write(t, "POST", "/api/v1/profiles", `{"name":"gw","base_url":"https://gw.example","auth":{"mode":"ccwrap_bearer","key":"k"}}`); status != http.StatusCreated {
+		t.Fatalf("add: %d", status)
+	}
+	status, out := r.write(t, "POST", "/api/v1/profiles/gw/test", "")
+	if status != 200 || out["status"] != "AUTH_FAIL" || out["text"] != "AUTH_FAIL · 401 · 230 ms" || probed.Auth == nil || probed.Auth.Key != "k" {
+		t.Fatalf("test: %d %v (probed %+v)", status, out, probed)
+	}
+	if _, one := r.http(t, "GET", "/api/v1/profiles/gw", "", nil); one["last_test"].(map[string]any)["text"] != "AUTH_FAIL · 401 · 230 ms" {
+		t.Fatalf("last test not kept: %v", one)
+	}
+	r.write(t, "PATCH", "/api/v1/profiles/gw", `{"auth":{"key_source":"inline","key":"k2"}}`)
+	if _, one := r.http(t, "GET", "/api/v1/profiles/gw", "", nil); one["last_test"] != nil {
+		t.Fatalf("an edit keeps the old test: %v", one)
+	}
+	if status, out := r.write(t, "POST", "/api/v1/profiles/nope/test", ""); status != 404 || code(out) != "not_found" {
+		t.Fatalf("unknown: %d %v", status, out)
+	}
+	if status, out := r.write(t, "POST", "/api/v1/profiles/inherit-env/test", ""); status != 404 || !strings.Contains(mustJSON(out), "inherit-env credentials missing") {
+		t.Fatalf("inherit-env without env: %d %v", status, out)
+	}
+
+	if status, out := r.write(t, "POST", "/api/v1/profiles/gw/test-egress", `{"egress":{"mode":"direct","url":"http://p:1"}}`); status != 422 || code(out) != "validation_error" {
+		t.Fatalf("bad egress: %d %v", status, out)
+	}
+	if status, _ := r.write(t, "POST", "/api/v1/profiles/gw/test-egress", `{"egress":{"mode":"http","url":"http://proxy.example:8080"}}`); status != 200 || egressProbed.Egress.URL != "http://proxy.example:8080" {
+		t.Fatalf("draft egress: %d %+v", status, egressProbed)
+	}
+	if status, _ := r.write(t, "POST", "/api/v1/profiles/gw/test-egress", ""); status != 200 || egressProbed.Egress.Mode != "" {
+		t.Fatalf("saved egress: %d %+v", status, egressProbed)
 	}
 }

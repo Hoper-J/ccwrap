@@ -2,12 +2,13 @@ package supervisor
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"strings"
 
 	"github.com/Hoper-J/ccwrap/internal/control"
+	"github.com/Hoper-J/ccwrap/internal/profileapi"
 	"github.com/Hoper-J/ccwrap/internal/profiles"
 )
 
@@ -51,38 +52,39 @@ func writeMutationSuccess(w http.ResponseWriter, item *control.SafeCatalogItem, 
 	})
 }
 
-// writeMutationValidationError formats a *ParseErrors into the wire
-// envelope without leaking the on-disk path through err.Error().
-// Matches the sanitizeProfileCatalogError pattern in server.go: iterate
-// items, format each, write to b.WriteString.
-//
-// CALLER CONTRACT: perr.Source MUST be an operation label like
-// "profile add foo" — produced by Validate(f, opLabel) or
-// OverwriteFile(path, f, opLabel). NEVER forward a *ParseErrors
-// returned by profiles.Load(path) directly — its Source IS the
-// on-disk path, which would leak via the wire envelope's Message field.
-// As defense-in-depth, this function clamps Source to its base name
-// (filepath.Base) if it contains a path separator.
-func writeMutationValidationError(w http.ResponseWriter, perr *profiles.ParseErrors) {
-	var b strings.Builder
-	src := perr.Source
-	if strings.ContainsAny(src, "/\\") {
-		src = filepath.Base(src)
-	}
-	fmt.Fprintf(&b, "%s invalid: %d errors", src, len(perr.Items))
-	paths := make([]string, 0, len(perr.Items))
-	for _, it := range perr.Items {
-		fmt.Fprintf(&b, "\n  - %s", it.Error())
-		paths = append(paths, it.Path)
-	}
+// writeStoreError writes a refused profile edit in the mutation envelope.
+func writeStoreError(w http.ResponseWriter, e *profileapi.Error) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusUnprocessableEntity)
-	_ = json.NewEncoder(w).Encode(mutationResponse{
-		OK:         false,
-		Kind:       "validation_error",
-		Message:    b.String(),
-		ErrorPaths: paths,
-	})
+	w.WriteHeader(e.Status)
+	_ = json.NewEncoder(w).Encode(mutationResponse{OK: false, Kind: e.Kind, Message: e.Message, ErrorPaths: e.Paths})
+}
+
+// decodeProfileMutation runs the checks every profile mutation endpoint
+// shares and decodes the body into v: POST only (405, checked first so a
+// wrong method never reads as a CSRF failure), the profile token (403), at
+// most maxProfileMutationBytes (413), valid JSON (400).
+func (sp *sessionProxy) decodeProfileMutation(w http.ResponseWriter, r *http.Request, v any) bool {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return false
+	}
+	if !sp.session.matchProfileToken(r.Header.Get("X-CCWRAP-Profile-Token")) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return false
+	}
+	body := http.MaxBytesReader(w, r.Body, maxProfileMutationBytes)
+	defer body.Close()
+	if err := json.NewDecoder(body).Decode(v); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeMutationError(w, http.StatusRequestEntityTooLarge, "usage",
+				fmt.Sprintf("request body exceeds %d bytes", maxProfileMutationBytes))
+			return false
+		}
+		writeMutationError(w, http.StatusBadRequest, "usage", err.Error())
+		return false
+	}
+	return true
 }
 
 // toControlSafeCatalogItem converts a profiles.SafeCatalogItem into the

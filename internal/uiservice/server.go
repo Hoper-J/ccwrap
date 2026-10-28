@@ -20,6 +20,7 @@ import (
 
 	"github.com/Hoper-J/ccwrap/internal/app"
 	"github.com/Hoper-J/ccwrap/internal/localpeer"
+	"github.com/Hoper-J/ccwrap/internal/profileapi"
 	"github.com/Hoper-J/ccwrap/internal/projects"
 	"github.com/Hoper-J/ccwrap/internal/statefile"
 	"github.com/Hoper-J/ccwrap/internal/webguard"
@@ -57,6 +58,8 @@ type Server struct {
 	allowed    map[string]struct{}
 	lister     projects.Lister
 	hub        *hub
+	profiles   *profileapi.Store
+	tests      testRecord
 	launchMu   sync.Mutex
 	lastLaunch time.Time
 
@@ -83,7 +86,7 @@ func New(opts Options) *Server {
 	if opts.EndedRetention == 0 {
 		opts.EndedRetention = 60 * time.Second
 	}
-	s := &Server{opts: opts, dir: Dir(opts.Paths), allowed: webguard.AllowedHostsFromEnv(), stop: make(chan struct{})}
+	s := &Server{opts: opts, dir: Dir(opts.Paths), allowed: webguard.AllowedHostsFromEnv(), profiles: profileapi.NewStore(opts.Paths.StateDir), stop: make(chan struct{})}
 	s.hub = newHub(s)
 	return s
 }

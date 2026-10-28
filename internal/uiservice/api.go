@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
+	"strings"
 	"time"
 
 	"github.com/Hoper-J/ccwrap/internal/profiles"
@@ -25,14 +25,25 @@ func (s *Server) apiMux() http.Handler {
 	mux.HandleFunc("GET /api/v1/settings/terminal", s.handleGetTerminal)
 	mux.HandleFunc("PUT /api/v1/settings/terminal", s.handlePutTerminal)
 	mux.HandleFunc("GET /api/v1/profiles", s.handleProfiles)
+	mux.HandleFunc("POST /api/v1/profiles", s.handleAddProfile)
+	mux.HandleFunc("GET /api/v1/profiles/{name}", s.handleGetProfile)
+	mux.HandleFunc("PATCH /api/v1/profiles/{name}", s.handleEditProfile)
+	mux.HandleFunc("DELETE /api/v1/profiles/{name}", s.handleRemoveProfile)
+	mux.HandleFunc("POST /api/v1/profiles/{name}/default", s.handleSetDefaultProfile)
+	mux.HandleFunc("POST /api/v1/profiles/{name}/test", s.handleTestProfile)
+	mux.HandleFunc("POST /api/v1/profiles/{name}/test-egress", s.handleTestEgress)
 	// The catch-all also wins over a method mismatch, so it tells the two
 	// apart itself.
 	known := map[string]string{
 		"/api/v1/meta": "GET", "/api/v1/sessions": "GET", "/api/v1/events": "GET", "/api/v1/projects": "GET",
-		"/api/v1/projects/launch": "POST", "/api/v1/settings/terminal": "GET, PUT", "/api/v1/profiles": "GET",
+		"/api/v1/projects/launch": "POST", "/api/v1/settings/terminal": "GET, PUT", "/api/v1/profiles": "GET, POST",
 	}
 	mux.HandleFunc("/api/v1/", func(w http.ResponseWriter, r *http.Request) {
-		if allow, ok := known[r.URL.Path]; ok {
+		allow, ok := known[r.URL.Path]
+		if !ok {
+			allow, ok = profileRouteMethods(r.URL.Path)
+		}
+		if ok {
 			w.Header().Set("Allow", allow)
 			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", r.URL.Path+" takes "+allow)
 			return
@@ -47,7 +58,7 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 		"api":          "v1",
 		"version":      s.info.Version,
 		"instance_id":  s.info.InstanceID,
-		"capabilities": []string{"sessions", "events", "projects", "launch", "terminal-settings", "profiles-read"},
+		"capabilities": []string{"sessions", "events", "projects", "launch", "terminal-settings", "profiles", "profile-tests"},
 	})
 }
 
@@ -196,27 +207,20 @@ func (s *Server) handlePutTerminal(w http.ResponseWriter, r *http.Request) {
 	writeAPIError(w, http.StatusUnprocessableEntity, "unknown_terminal", "not an installed terminal: "+req.Terminal)
 }
 
-// handleProfiles lists profiles in their safe view (no secrets), for the
-// Projects page's profile picker.
-func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
-	f, err := profiles.Load(profiles.DefaultPath(s.opts.Paths.StateDir))
-	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, "internal", err.Error())
-		return
+// profileRouteMethods is the methods a /api/v1/profiles/... path takes.
+func profileRouteMethods(path string) (string, bool) {
+	rest, ok := strings.CutPrefix(path, "/api/v1/profiles/")
+	if !ok || rest == "" {
+		return "", false
 	}
-	out := map[string]any{"default": "", "profiles": []profiles.SafeCatalogItem{}}
-	if f != nil {
-		items := make([]profiles.SafeCatalogItem, 0, len(f.Profiles))
-		for name, p := range f.Profiles {
-			p.Name = name
-			items = append(items, p.SafeView())
-		}
-		sortSafeItems(items)
-		out["default"], out["profiles"] = f.Default, items
+	name, action, _ := strings.Cut(rest, "/")
+	switch {
+	case name == "":
+		return "", false
+	case action == "":
+		return "GET, PATCH, DELETE", true
+	case action == "default" || action == "test" || action == "test-egress":
+		return "POST", true
 	}
-	writeJSON(w, out)
-}
-
-func sortSafeItems(items []profiles.SafeCatalogItem) {
-	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
+	return "", false
 }

@@ -31,6 +31,7 @@ import (
 	"github.com/Hoper-J/ccwrap/internal/modelalias"
 	"github.com/Hoper-J/ccwrap/internal/preflight"
 	"github.com/Hoper-J/ccwrap/internal/procmeta"
+	"github.com/Hoper-J/ccwrap/internal/profileapi"
 	"github.com/Hoper-J/ccwrap/internal/profiles"
 	"github.com/Hoper-J/ccwrap/internal/settings"
 	"github.com/Hoper-J/ccwrap/internal/ui"
@@ -183,22 +184,10 @@ type Supervisor struct {
 	nextEventSeq uint64
 	lastActive   time.Time
 
-	// profileFileMu serializes load+mutate+OverwriteFile sequences across
-	// the profile-CRUD handlers (add / edit / rm / set-default) WITHIN this
-	// supervisor process. Without it, two concurrent in-process requests on
-	// the same profiles.json (e.g. a browser retry, or two browser tabs hitting
-	// this supervisor's control surface) interleave their load-check-write and
-	// the second write silently clobbers the first. The mutex is on the
-	// Supervisor (not on a session) because profiles.json is shared across all
-	// sessions that share the StateDir.
-	//
-	// Scope: intra-process only. A separate `ccwrap profile ...` CLI invocation
-	// runs in its own OS process and does NOT acquire this mutex, so a
-	// CLI-vs-supervisor concurrent edit of the same profiles.json is NOT
-	// serialized here. Closing that cross-process window would require a file
-	// lock (flock) acquired by both the supervisor handlers and the CLI; not
-	// done today.
-	profileFileMu sync.Mutex
+	// profileStore edits profiles.json for the profile endpoints, under its
+	// own in-process mutex and the cross-process profiles lock. profiles.json
+	// is shared by every session using the StateDir.
+	profileStore *profileapi.Store
 
 	httpServer *http.Server
 	listener   net.Listener
@@ -252,6 +241,7 @@ func New(paths app.Paths, idleTimeout time.Duration, launchCtx *LaunchContext) (
 		unmaskCredentials: unmask,
 		transport:         transport,
 		logger:            logger,
+		profileStore:      profileapi.NewStore(paths.StateDir),
 		subscribers:       map[int]chan model.Event{},
 		lastActive:        time.Now(),
 		closed:            make(chan struct{}),

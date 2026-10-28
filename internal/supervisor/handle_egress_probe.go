@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -216,20 +217,7 @@ func (sp *sessionProxy) resolveProfileForEgressProbe(name string) (profiles.Prof
 		// at runtime. With no proxy env set, this is direct.
 		return profiles.Profile{Name: "inherit-env"}, nil
 	}
-	stateDir := sp.supervisor.paths.StateDir
-	file, err := profiles.Load(profiles.DefaultPath(stateDir))
-	if err != nil {
-		return profiles.Profile{}, errProfileConfig
-	}
-	if file == nil || len(file.Profiles) == 0 {
-		return profiles.Profile{}, errProfileNotFound
-	}
-	p, ok := file.Profiles[name]
-	if !ok {
-		return profiles.Profile{}, errProfileNotFound
-	}
-	p.Name = name
-	return p, nil
+	return sp.supervisor.profileStore.ProfileForTest(name, os.Getenv)
 }
 
 // synthesizeActiveSessionProfile returns a profile whose Egress reflects

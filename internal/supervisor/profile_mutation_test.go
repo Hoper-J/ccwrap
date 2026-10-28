@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Hoper-J/ccwrap/internal/profiles"
+	"github.com/Hoper-J/ccwrap/internal/profileapi"
 )
 
 func TestWriteMutationError_SetsStatusAndBody(t *testing.T) {
@@ -50,78 +50,14 @@ func TestWriteMutationResponse_HasProfilesFile_FalseIsEmitted(t *testing.T) {
 	}
 }
 
-func TestWriteMutationValidationError_FormatsMultiLine(t *testing.T) {
-	perr := &profiles.ParseErrors{
-		Source: "profile edit glm",
-		Items: []profiles.ValidationError{
-			{Path: "profiles.glm.base_url", Want: "URL with http or https", Got: "ftp://x"},
-			{Path: "profiles.glm.auth.mode", Want: "ccwrap_bearer | ccwrap_x_api_key"},
-		},
-	}
+// A refused store edit keeps the mutation envelope, paths included.
+func TestWriteStoreError_KeepsTheEnvelope(t *testing.T) {
 	w := httptest.NewRecorder()
-	writeMutationValidationError(w, perr)
-	if w.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("status: got %d, want 422", w.Code)
-	}
+	writeStoreError(w, &profileapi.Error{Status: http.StatusUnprocessableEntity, Kind: "validation_error", Message: "profile edit glm invalid: 1 errors", Paths: []string{"profiles.glm.base_url"}})
 	var resp mutationResponse
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp.Kind != "validation_error" {
-		t.Fatalf("kind: got %q", resp.Kind)
-	}
-	if !strings.Contains(resp.Message, "profile edit glm invalid: 2 errors") {
-		t.Fatalf("message header missing: %q", resp.Message)
-	}
-	if !strings.Contains(resp.Message, "profiles.glm.base_url") {
-		t.Fatalf("first item missing: %q", resp.Message)
-	}
-	if len(resp.ErrorPaths) != 2 ||
-		resp.ErrorPaths[0] != "profiles.glm.base_url" ||
-		resp.ErrorPaths[1] != "profiles.glm.auth.mode" {
-		t.Fatalf("error_paths: got %v", resp.ErrorPaths)
-	}
-}
-
-func TestWriteMutationValidationError_NoDiskPathLeak(t *testing.T) {
-	perr := &profiles.ParseErrors{
-		Source: "profile add foo",
-		Items: []profiles.ValidationError{
-			{Path: "profiles.foo.base_url", Want: "URL"},
-		},
-	}
-	w := httptest.NewRecorder()
-	writeMutationValidationError(w, perr)
-	var resp mutationResponse
-	_ = json.Unmarshal(w.Body.Bytes(), &resp)
-	for _, banned := range []string{"/Users/", "profiles.json", "/state/", "StateDir"} {
-		if strings.Contains(resp.Message, banned) {
-			t.Fatalf("disk path leaked: %q in %q", banned, resp.Message)
-		}
-	}
-}
-
-func TestWriteMutationValidationError_DiskPathSource_Sanitized(t *testing.T) {
-	// Caller-contract violation: Source contains a disk path (would happen
-	// if a future handler forwarded a Load-produced *ParseErrors directly).
-	// The runtime guard must clamp Source to its base name to prevent leak.
-	perr := &profiles.ParseErrors{
-		Source: "/Users/home/.local/state/ccwrap/profiles.json",
-		Items: []profiles.ValidationError{
-			{Path: "profiles.foo.base_url", Want: "URL"},
-		},
-	}
-	w := httptest.NewRecorder()
-	writeMutationValidationError(w, perr)
-	var resp mutationResponse
-	_ = json.Unmarshal(w.Body.Bytes(), &resp)
-	// The disk path components must NOT appear in the wire message.
-	for _, banned := range []string{"/Users/", "/home/", "/state/", "/.local/", "/ccwrap/"} {
-		if strings.Contains(resp.Message, banned) {
-			t.Fatalf("disk path leaked through Source: %q in message %q", banned, resp.Message)
-		}
-	}
-	// The base name "profiles.json" SHOULD appear (filepath.Base output).
-	if !strings.Contains(resp.Message, "profiles.json invalid:") {
-		t.Fatalf("expected basename header; got %q", resp.Message)
+	if w.Code != http.StatusUnprocessableEntity || resp.OK || resp.Kind != "validation_error" || len(resp.ErrorPaths) != 1 || resp.ErrorPaths[0] != "profiles.glm.base_url" {
+		t.Fatalf("%d %+v", w.Code, resp)
 	}
 }
 

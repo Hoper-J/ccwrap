@@ -2,7 +2,6 @@ package supervisor
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -223,62 +222,6 @@ func TestHandleProfileTest_InheritEnvMissing(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404 (no env creds)", resp.StatusCode)
-	}
-}
-
-func TestResolveInheritEnv_APIKey(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "sk-fake")
-	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
-	t.Setenv("ANTHROPIC_BASE_URL", "")
-	p, err := resolveInheritEnv()
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if p.Name != "inherit-env" {
-		t.Errorf("name: %q", p.Name)
-	}
-	if p.Auth.Mode != "ccwrap_x_api_key" || p.Auth.Key != "sk-fake" {
-		t.Errorf("auth: %+v", p.Auth)
-	}
-	if p.BaseURL != "https://api.anthropic.com" {
-		t.Errorf("base_url default: %q", p.BaseURL)
-	}
-}
-
-func TestResolveInheritEnv_Bearer(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "")
-	t.Setenv("ANTHROPIC_AUTH_TOKEN", "tok-fake")
-	t.Setenv("ANTHROPIC_BASE_URL", "https://custom.example")
-	p, err := resolveInheritEnv()
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if p.Auth.Mode != "ccwrap_bearer" || p.Auth.Key != "tok-fake" {
-		t.Errorf("auth: %+v", p.Auth)
-	}
-	if p.BaseURL != "https://custom.example" {
-		t.Errorf("base_url: %q", p.BaseURL)
-	}
-}
-
-func TestResolveInheritEnv_APIKeyBeatsAuthToken(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "sk-wins")
-	t.Setenv("ANTHROPIC_AUTH_TOKEN", "tok-loses")
-	p, err := resolveInheritEnv()
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if p.Auth.Mode != "ccwrap_x_api_key" {
-		t.Errorf("API_KEY must beat AUTH_TOKEN; got %s", p.Auth.Mode)
-	}
-}
-
-func TestResolveInheritEnv_NoEnv(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "")
-	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
-	_, err := resolveInheritEnv()
-	if !errors.Is(err, errInheritEnvMissing) {
-		t.Errorf("err: %v (want errInheritEnvMissing)", err)
 	}
 }
 

@@ -2,13 +2,11 @@ package supervisor
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/Hoper-J/ccwrap/internal/modelalias"
-	"github.com/Hoper-J/ccwrap/internal/profiles"
 )
 
 // handleProfileModelDefault is the dashboard's one-click fix for Claude
@@ -66,52 +64,10 @@ func (sp *sessionProxy) applyModelDefault(target string) (SwitchOutcome, *apiErr
 			fmt.Sprintf("this session runs without a profile; relaunch with --model-alias '%s=%s'", modelalias.DefaultKey, target)}
 	}
 	name := ap.r.profileName
-	if status, kind, err := sp.setProfileDefaultAlias(name, target); err != nil {
-		return SwitchOutcome{}, &apiError{status, kind, err.Error()}
+	if e := sp.supervisor.profileStore.SetModelDefault(name, target); e != nil {
+		return SwitchOutcome{}, &apiError{e.Status, e.Kind, e.Message}
 	}
 	// The write is done and its locks released; re-apply the profile so
 	// the session uses it now (SwitchProfile takes its own locks).
 	return sp.supervisor.SwitchProfile(sp.session.public.ID, name), nil
-}
-
-// setProfileDefaultAlias writes name's "*" alias under the same locks as the
-// other profile mutations.
-func (sp *sessionProxy) setProfileDefaultAlias(name, target string) (status int, kind string, err error) {
-	sp.supervisor.profileFileMu.Lock()
-	defer sp.supervisor.profileFileMu.Unlock()
-	unlock, err := profiles.Lock(sp.supervisor.paths.StateDir)
-	if err != nil {
-		return http.StatusInternalServerError, "internal", err
-	}
-	defer unlock()
-	path := profiles.DefaultPath(sp.supervisor.paths.StateDir)
-	f, err := profiles.Load(path)
-	if err != nil {
-		return http.StatusInternalServerError, "internal", err
-	}
-	if f == nil {
-		return http.StatusNotFound, "not_found", errors.New("no profiles.json present")
-	}
-	p, ok := f.Profiles[name]
-	if !ok {
-		return http.StatusNotFound, "not_found", fmt.Errorf("profile %q no longer exists", name)
-	}
-	aliases := make(map[string]string, len(p.ModelAliases)+1)
-	for k, v := range p.ModelAliases {
-		aliases[k] = v
-	}
-	aliases[modelalias.DefaultKey] = target
-	if _, err := modelalias.New(aliases, "profile "+name, true); err != nil {
-		return http.StatusUnprocessableEntity, "validation_error", err
-	}
-	p.ModelAliases = aliases
-	f.Profiles[name] = p
-	if err := profiles.OverwriteFile(path, f, "profile model default "+name); err != nil {
-		var perr *profiles.ParseErrors
-		if errors.As(err, &perr) {
-			return http.StatusUnprocessableEntity, "validation_error", err
-		}
-		return http.StatusInternalServerError, "internal", err
-	}
-	return http.StatusOK, "", nil
 }
