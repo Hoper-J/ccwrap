@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Hoper-J/ccwrap/internal/model"
+	"github.com/Hoper-J/ccwrap/internal/testutil"
 	"github.com/Hoper-J/ccwrap/internal/tlsfp"
 )
 
@@ -461,5 +463,27 @@ func TestStrictMatcherFor_MemoizesBodyVerdicts(t *testing.T) {
 	}
 	if got := bodyFetches.Load(); got != 1 {
 		t.Fatalf("body fetched %d times across 5 polls; memo must hold it to 1", got)
+	}
+}
+
+// --help explains capture and launches nothing, wherever it sits among the
+// flags; after "--" it is Claude Code's.
+func TestCaptureHelpLaunchesNothing(t *testing.T) {
+	paths := testutil.ShortAppPaths(t, "h.sock")
+	for _, args := range [][]string{{"--help"}, {"--with-tls", "-h"}} {
+		out := captureStdout(t, func() {
+			if err := captureCommand(paths, args); err != nil {
+				t.Fatal(err)
+			}
+		})
+		if !strings.Contains(out, "Usage: ccwrap capture [flags] [-- CLAUDE_ARGS]") {
+			t.Fatalf("%v: %q", args, out)
+		}
+	}
+	if _, err := os.Stat(paths.SessionsDir()); !os.IsNotExist(err) {
+		t.Fatal("help started a session")
+	}
+	if o, err := parseCaptureArgs([]string{"--", "--help"}); err != nil || strings.Join(o.ClaudeArgs, " ") != "--help" {
+		t.Fatalf("after --: %+v %v", o, err)
 	}
 }

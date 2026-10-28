@@ -688,13 +688,44 @@ func noMatchError(opts captureOpts) error {
 // the assembled capture object as JSON. The exit code is decoupled from
 // Claude's: success when a request was captured (even a 4xx upstream), non-zero
 // only for no-match/timeout/launch-failure or a synthetic auth-missing record.
+// captureHelp is `ccwrap capture --help`.
+const captureHelp = `ccwrap capture runs Claude Code once through ccwrap and prints its first
+model request, and the response, as JSON: for comparing Claude Code
+versions. Credentials are masked unless --unmask.
+
+Usage: ccwrap capture [flags] [-- CLAUDE_ARGS]   (no CLAUDE_ARGS: -p hello)
+
+  --with-tls           add the TLS fingerprint of the request's connection
+  --clienthello        add the raw ClientHello too (implies --with-tls)
+  --tls-only           print only the TLS fingerprint
+  --headers            add the request headers
+  --full               --with-tls, --clienthello and --headers
+  --no-response        leave out the response
+  --main-inference     skip quota, title and warm-up calls; take the first
+                       request that carries tools
+  --unmask             keep credentials in the output
+  --host H, --path P   the request to take (default api.anthropic.com,
+                       /v1/messages)
+  --timeout DUR        how long to wait for it (default 30s)
+  --claude-bin PATH    the Claude Code to run (default $CLAUDE_BIN or claude)
+  --timezone IANA      the time zone Claude Code runs in
+  --print-diff-filter  print the jq filter for diffing two captures, and exit
+`
+
 func captureCommand(paths app.Paths, args []string) error {
-	// --print-diff-filter is a pure local query: emit the canonical jq filter
-	// and exit before any parsing or launch. Detected on the raw args (it is
-	// not a parsed capture flag).
+	// --print-diff-filter and --help are pure local queries: answer and exit
+	// before any parsing or launch. Claude Code's own flags after "--" are
+	// left alone.
 	for _, a := range args {
-		if a == "--print-diff-filter" {
+		if a == "--" {
+			break
+		}
+		switch a {
+		case "--print-diff-filter":
 			fmt.Println(captureDiffFilter)
+			return nil
+		case "-h", "--help":
+			fmt.Print(captureHelp)
 			return nil
 		}
 	}
