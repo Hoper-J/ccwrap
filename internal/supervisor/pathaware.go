@@ -35,8 +35,8 @@ var anthropicOAuthHosts = map[string]bool{
 // CA. True for: (a) any *.anthropic.com subdomain (suffix match — the
 // historical scope: api, api-staging, mcp-proxy, telemetry, etc.) and
 // (b) the exact-host OAuth domain set in anthropicOAuthHosts. The OAuth
-// hosts are added so refresh-token POSTs are observable in inspect-web
-// instead of falling through to handleBlindTunnel.
+// hosts are added so refresh-token POSTs are observable in the session's
+// activity instead of falling through to handleBlindTunnel.
 func isAnthropicHost(h string) bool {
 	h = normalizeProxyHost(h)
 	if strings.HasSuffix(h, ".anthropic.com") {

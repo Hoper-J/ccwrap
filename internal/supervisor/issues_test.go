@@ -583,3 +583,27 @@ func TestLastActivityAt(t *testing.T) {
 		t.Fatalf("LastActivityAt moved back to %v", got)
 	}
 }
+
+// An error changes the session's issue count and health, so it is followed
+// by a session update carrying them.
+func TestRecordErrorBroadcastsSessionUpdate(t *testing.T) {
+	sv, sess := newTestSessionForCreate(t)
+	ch, unsubscribe := sv.subscribe()
+	defer unsubscribe()
+	sv.recordError(sess.public.ID, model.ErrorRecord{ErrorClass: "upstream_unreachable", Summary: "boom"})
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case ev := <-ch:
+			if ev.Type != "session_updated" {
+				continue
+			}
+			if s, ok := ev.Data.(model.Session); !ok || s.RecentErrorCount != 1 {
+				t.Fatalf("session_updated data = %+v", ev.Data)
+			}
+			return
+		case <-deadline:
+			t.Fatal("no session_updated after recordError")
+		}
+	}
+}

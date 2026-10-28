@@ -555,7 +555,6 @@ func writeManifest(sessionDir, controlSocket string, sess *model.Session, eg mod
 		ProjectDir:                         sess.ProjectDir,
 		ControlSocket:                      controlSocket,
 		ProxyListenAddr:                    sess.ProxyListenAddr,
-		ProxyInfoURL:                       proxyInfoURL(sess.ProxyListenAddr),
 		RouteClass:                         sess.RouteClass,
 		RouteSource:                        sess.RouteSource,
 		RouteConfigSource:                  sess.RouteConfigSource,

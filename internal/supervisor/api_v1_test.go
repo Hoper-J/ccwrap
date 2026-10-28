@@ -17,6 +17,68 @@ import (
 	"github.com/Hoper-J/ccwrap/internal/testutil"
 )
 
+// egress-test probes the egress the session's posture resolved to — not the
+// launcher flag or the environment — and honors the posture's NO_PROXY.
+func TestAPIv1EgressTestFollowsThePosture(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"ip":"42.42.42.42"}`)
+	}))
+	defer target.Close()
+	t.Setenv("CCWRAP_EGRESS_TEST_URL", target.URL)
+	srv, _, sess, _, upstream := headerInspectorSessionWithSupervisor(t, "v1-egress.sock")
+	defer upstream.Close()
+	state := srv.getSession(sess.ID)
+
+	// A SOCKS5h exit that only the posture can name.
+	state.active.Store(&posture{r: resolved{egress: model.EgressConfig{
+		Mode: "explicit", HTTPSProxy: "socks5h://posture-proxy.test:1080", HTTPProxy: "socks5h://posture-proxy.test:1080",
+		Source: "test_posture", Summary: "socks5h://posture-proxy.test:1080",
+	}}})
+	_, got := apiCall(t, srv.paths.SocketPath, "POST", "/api/v1/egress-test", "")
+	if via, _ := got["egress_via"].(string); got["profile"] != "<active-session>" || !strings.Contains(via, "posture-proxy.test:1080") {
+		t.Fatalf("the probe did not follow the posture: %v", got)
+	}
+
+	// The target's host is in the posture's NO_PROXY, so the probe goes
+	// direct instead of through a proxy that refuses every connection.
+	host, _, _ := strings.Cut(strings.TrimPrefix(target.URL, "http://"), ":")
+	state.active.Store(&posture{r: resolved{egress: model.EgressConfig{
+		Mode: "explicit", HTTPSProxy: "http://127.0.0.1:1", HTTPProxy: "http://127.0.0.1:1", NoProxy: host,
+		Source: "test_posture", Summary: "http://127.0.0.1:1",
+	}}})
+	if _, got := apiCall(t, srv.paths.SocketPath, "POST", "/api/v1/egress-test", ""); got["status"] != "OK" {
+		t.Fatalf("NO_PROXY not honored: %v", got)
+	}
+}
+
+// capture flips the live posture's body and telemetry capture, each on its
+// own, both ways.
+func TestAPIv1CaptureTogglesTheLivePosture(t *testing.T) {
+	srv, _, sess, _, upstream := headerInspectorSessionWithSupervisor(t, "v1-capture.sock")
+	defer upstream.Close()
+	state := srv.getSession(sess.ID)
+	live := func() (bodies, telemetry bool) {
+		l := state.active.Load().l
+		return l.captureBodies, l.captureTelemetry
+	}
+	for _, step := range []struct {
+		body              string
+		bodies, telemetry bool
+	}{
+		{`{"bodies":true}`, true, false},
+		{`{"telemetry":true}`, true, true},
+		{`{"bodies":false}`, false, true},
+		{`{"telemetry":false}`, false, false},
+	} {
+		if status, out := apiCall(t, srv.paths.SocketPath, "POST", "/api/v1/capture", step.body); status != 200 {
+			t.Fatalf("%s: %d %v", step.body, status, out)
+		}
+		if b, tel := live(); b != step.bodies || tel != step.telemetry {
+			t.Fatalf("after %s: bodies=%v telemetry=%v, want %v %v", step.body, b, tel, step.bodies, step.telemetry)
+		}
+	}
+}
+
 // apiCall sends one request to the session's v1 API over its control socket.
 func apiCall(t *testing.T, socket, method, path, body string) (int, map[string]any) {
 	t.Helper()
@@ -54,7 +116,8 @@ func TestAPIv1ReadsSession(t *testing.T) {
 	}
 	status, got := apiCall(t, paths.SocketPath, "GET", "/api/v1/session", "")
 	disp, _ := got["display"].(map[string]any)
-	if status != 200 || got["id"] != sess.ID || disp == nil || disp["route_value"] == "" || disp["models_value"] != "1 alias" {
+	cells, _ := disp["cells"].([]any)
+	if status != 200 || got["id"] != sess.ID || len(cells) < 3 || cells[0].(map[string]any)["value"] == "" || cells[2].(map[string]any)["value"] != "1 alias" {
 		t.Fatalf("session: %d %v", status, got)
 	}
 	status, act := apiCall(t, paths.SocketPath, "GET", "/api/v1/activity", "")

@@ -1,21 +1,49 @@
 package supervisor
 
 import (
-	"encoding/json"
-	"net/http"
+	"context"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/Hoper-J/ccwrap/internal/control"
 	"github.com/Hoper-J/ccwrap/internal/model"
 	"github.com/Hoper-J/ccwrap/internal/profiles"
+	"github.com/Hoper-J/ccwrap/internal/testutil"
 )
+
+// newSupervisedSession runs a supervisor with one session and returns the
+// session, its state and the supervisor's StateDir (where profiles.json
+// lives).
+func newSupervisedSession(t *testing.T) (*model.Session, *sessionState, string) {
+	t.Helper()
+	paths := testutil.ShortAppPaths(t, "pmut.sock")
+	srv, err := New(paths, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() { _ = srv.Run(ctx) }()
+	client := control.NewClient(paths.SocketPath)
+	waitForSupervisor(t, client)
+	sess, err := client.CreateSession(context.Background(), model.SessionCreateRequest{LauncherPID: os.Getpid(), Name: "pmut"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := srv.getSession(sess.ID)
+	if state == nil {
+		t.Fatal("getSession returned nil after CreateSession")
+	}
+	return sess, state, paths.StateDir
+}
 
 // sessionOnGatewayProfile is a live session switched onto profile "gw",
 // whose only alias is claude-opus-4-8 → gpt-6.
 func sessionOnGatewayProfile(t *testing.T) (*model.Session, *sessionState, string) {
 	t.Helper()
-	sess, state, dir := newSessionForProfileMutation(t)
+	sess, state, dir := newSupervisedSession(t)
 	sv := state.proxy.supervisor
 	installLaunchCtxForSwitch(t, sv)
 	if err := sv.setRoute(sess.ID, model.SessionRouteRequest{
@@ -34,34 +62,19 @@ func sessionOnGatewayProfile(t *testing.T) (*model.Session, *sessionState, strin
 	return sess, state, dir
 }
 
-func postModelDefault(t *testing.T, sess *model.Session, token, body string) (int, map[string]any) {
-	t.Helper()
-	req, _ := http.NewRequest(http.MethodPost, "http://"+sess.ProxyListenAddr+"/profile/model-default", strings.NewReader(body))
-	if token != "" {
-		req.Header.Set("X-CCWRAP-Profile-Token", token)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	var out map[string]any
-	_ = json.NewDecoder(resp.Body).Decode(&out)
-	return resp.StatusCode, out
-}
-
 // The one-click fix adds only "*" to the active profile, keeps its other
 // aliases, and applies it to the live session, which clears the warning.
-func TestProfileModelDefaultSavesAndApplies(t *testing.T) {
+func TestModelDefaultSavesAndApplies(t *testing.T) {
 	sess, state, dir := sessionOnGatewayProfile(t)
+	socket := state.proxy.supervisor.paths.SocketPath
 	state.proxy.supervisor.recordRequest(sess.ID, model.RequestRecord{Method: "POST", Path: "/v1/messages", StatusCode: 200, Model: "claude-opus-5-5", ModelUnmapped: true, ActiveProfileName: "gw"})
 	if len(state.snapshot().UnmappedModels) != 1 {
 		t.Fatal("setup: no unmapped model")
 	}
 
 	for _, target := range []string{"gpt-6", "*"} {
-		status, out := postModelDefault(t, sess, state.profileToken, `{"target":"`+target+`"}`)
-		if status != http.StatusOK || out["result"] != string(SwitchResultSwitched) {
+		status, out := apiCall(t, socket, "POST", "/api/v1/model-default", `{"target":"`+target+`"}`)
+		if status != 200 || out["result"] != string(SwitchResultSwitched) {
 			t.Fatalf("target %s: %d %v", target, status, out)
 		}
 		f, err := profiles.Load(profiles.DefaultPath(dir))
@@ -78,18 +91,16 @@ func TestProfileModelDefaultSavesAndApplies(t *testing.T) {
 	}
 }
 
-func TestProfileModelDefaultRefusals(t *testing.T) {
-	sess, state, _ := sessionOnGatewayProfile(t)
-	if status, _ := postModelDefault(t, sess, "", `{"target":"gpt-6"}`); status != http.StatusForbidden {
-		t.Fatalf("no token: %d", status)
-	}
-	if status, _ := postModelDefault(t, sess, state.profileToken, `{"target":"  "}`); status != http.StatusBadRequest {
-		t.Fatalf("empty target: %d", status)
+func TestModelDefaultRefusals(t *testing.T) {
+	_, state, _ := sessionOnGatewayProfile(t)
+	if status, out := apiCall(t, state.proxy.supervisor.paths.SocketPath, "POST", "/api/v1/model-default", `{"target":"  "}`); status != 400 || errCode(out) != "usage" {
+		t.Fatalf("empty target: %d %v", status, out)
 	}
 	// A session without a profile has nowhere to save the choice.
-	bare, bareState, _ := newSessionForProfileMutation(t)
-	status, out := postModelDefault(t, bare, bareState.profileToken, `{"target":"gpt-6"}`)
-	if status != http.StatusConflict || !strings.Contains(out["message"].(string), "--model-alias '*=gpt-6'") {
+	_, bare, _ := newSupervisedSession(t)
+	status, out := apiCall(t, bare.proxy.supervisor.paths.SocketPath, "POST", "/api/v1/model-default", `{"target":"gpt-6"}`)
+	msg, _ := out["error"].(map[string]any)["message"].(string)
+	if status != 409 || errCode(out) != "no_profile" || !strings.Contains(msg, "--model-alias '*=gpt-6'") {
 		t.Fatalf("no profile: %d %v", status, out)
 	}
 }

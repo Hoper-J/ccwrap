@@ -30,10 +30,10 @@ const (
 //
 // MUST stay aligned with the upstream-strip list in
 // routeresolve.go::applyAuthOverride: every credential header
-// ccwrap strips from the upstream wire must also be redacted
-// in the inspect drawer. Otherwise the same credential gets
-// removed from the upstream forward but rendered in plaintext
-// via /recent — a one-sided defense-in-depth gap.
+// ccwrap strips from the upstream wire must also be masked
+// in recorded requests. Otherwise the same credential gets
+// removed from the upstream forward but shown in plaintext
+// in the session's activity — a one-sided defense-in-depth gap.
 var credentialDenyList = map[string]struct{}{
 	"authorization":       {},
 	"proxy-authorization": {},
@@ -47,9 +47,9 @@ var credentialDenyList = map[string]struct{}{
 	"cookie":              {},
 }
 
-// CredentialDenyList returns the deny-list header names, sorted. It is
-// the single source of truth shared with the JS live-patch via the
-// page bootstrap so Go and JS cannot drift.
+// CredentialDenyList returns the deny-list header names, sorted. ccwrap
+// ui's page gets it in its data-deny attribute, so Go and JS cannot
+// drift.
 func CredentialDenyList() []string {
 	out := make([]string, 0, len(credentialDenyList))
 	for k := range credentialDenyList {
@@ -122,44 +122,14 @@ var headerGroupOrder = []struct {
 // is still shown. Multi-value headers join with ", ". Wire order is
 // not preserved (http.Header is a map; accepted limitation, not to be
 // "fixed").
-//
-// This is the always-redact entry — used by CLI surfaces (ccwrap doctor,
-// status banners, etc.) that have no per-session context and must stay
-// conservative. The inspect web path uses
-// RenderHeaderGroupsWithRedaction so the per-session unmask flag can
-// route to the raw branch.
 func RenderHeaderGroups(h http.Header) []HeaderGroup {
-	return RenderHeaderGroupsWithRedaction(h, true)
-}
-
-// RenderHeaderGroupsWithRedaction is the variant the inspect-web path
-// uses to honor CCWRAP_UNMASK_CREDENTIALS=1. When redact is true the output
-// is byte-identical to RenderHeaderGroups (credential values become the
-// sentinel); when redact is false credential values are rendered raw —
-// the user explicitly opted into seeing them via the env flag, and the
-// ribbon Auth/Bodies cell already shows a persistent "⚠ UNMASKED"
-// state to keep the choice visible (see web.go bodiesCellPresentation).
-//
-// Crucially this stays a render-time policy: the underlying RequestRecord
-// always carries the raw value. ccwrap's /recent + SSE wire is therefore
-// stable across mask/unmask modes, and curl /recent remains a useful
-// self-debug surface regardless of unmask state. The mask decision lives
-// at exactly two render points (this function for first paint + the
-// inline-JS classifyHdr branch in web.go for SSE-driven re-render) and
-// both consult the same `redact` boolean (web.go: from
-// sess.CaptureBodiesUnmasked).
-func RenderHeaderGroupsWithRedaction(h http.Header, redact bool) []HeaderGroup {
 	buckets := make(map[string][]HeaderRow)
 	for name, vals := range h {
 		lower := strings.ToLower(name)
 		display := strings.Join(vals, ", ")
 		group := "Other"
 		if ClassifyHeader(name) == HeaderCredential {
-			if redact {
-				display = redactedSentinel
-			}
-			// !redact: keep `display` as the joined raw value. The ribbon
-			// UNMASKED marker is the user's persistent "you opted in" signal.
+			display = redactedSentinel
 			group = "Credentials"
 		} else {
 			for _, g := range headerGroupOrder {

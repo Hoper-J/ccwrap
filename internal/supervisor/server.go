@@ -3,7 +3,6 @@ package supervisor
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -17,7 +16,6 @@ import (
 	"runtime"
 	"runtime/debug"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,13 +24,11 @@ import (
 
 	"github.com/Hoper-J/ccwrap/internal/app"
 	"github.com/Hoper-J/ccwrap/internal/certs"
-	"github.com/Hoper-J/ccwrap/internal/control"
 	"github.com/Hoper-J/ccwrap/internal/model"
 	"github.com/Hoper-J/ccwrap/internal/modelalias"
 	"github.com/Hoper-J/ccwrap/internal/preflight"
 	"github.com/Hoper-J/ccwrap/internal/procmeta"
 	"github.com/Hoper-J/ccwrap/internal/profileapi"
-	"github.com/Hoper-J/ccwrap/internal/profiles"
 	"github.com/Hoper-J/ccwrap/internal/settings"
 	"github.com/Hoper-J/ccwrap/internal/ui"
 	"github.com/Hoper-J/ccwrap/internal/unmapped"
@@ -128,11 +124,6 @@ type sessionState struct {
 	// cannot race past each other into publishPosture. Independent of
 	// sess.mu (which gates the single-critical-section publish itself).
 	switchMu sync.Mutex
-	// profileToken is the per-session CSRF nonce that the browser must echo
-	// as X-CCWRAP-Profile-Token on POST /profile/switch. Generated
-	// once at createSession from 16 cryptographically-random bytes; never
-	// rotated; never logged. Lowercase hex.
-	profileToken string
 	// mirroredHelloRaw is the session-default ClientHello: the first one CC
 	// sent on a MITM'd Anthropic CONNECT, or the hello pinned by
 	// CCWRAP_NATIVE_TLS_HELLO. The native-TLS dialer replays it (re-parsed per
@@ -190,8 +181,8 @@ type Supervisor struct {
 	// spill files. Read once at New() from the process env (only "1" or
 	// case-insensitive "true" enables); never togglable mid-session — the
 	// user must restart with the env unset to mask again. Mirrored to
-	// model.Session.CaptureBodiesUnmasked so the inspect-web ribbon shows
-	// a persistent danger-color marker.
+	// model.Session.CaptureBodiesUnmasked so the Bodies cell shows a
+	// persistent danger-color marker.
 	unmaskCredentials bool
 
 	transport *http.Transport
@@ -655,13 +646,6 @@ func (s *Supervisor) createSession(req model.SessionCreateRequest) (model.Sessio
 	// and the first publish observes a zero-valued (non-nil) snapshot —
 	// reproducing the pre-publish zero-routing behavior.
 	sess.active.Store(&posture{})
-	// CSRF nonce: 16 cryptographically-random bytes (128 bits
-	// of entropy), hex-encoded. Set once, never rotated.
-	var tok [16]byte
-	if _, err := rand.Read(tok[:]); err != nil {
-		return model.Session{}, fmt.Errorf("ccwrap: failed to seed profile token: %w", err)
-	}
-	sess.profileToken = hex.EncodeToString(tok[:])
 	// Per-session body spill store (256 MB budget). The
 	// supervisor is single-session, so s.paths.RuntimeDir IS the
 	// per-session runtime dir; bodyStore writes to <RuntimeDir>/bodies.
@@ -960,8 +944,7 @@ func stripUserinfoString(s string) string {
 //
 // Idempotent on no-op (same value): no Store, no public mutation, no event;
 // returns the unchanged snapshot. Otherwise emits session_updated so the
-// inspect ribbon's Bodies cell flips without a page reload. Reused by the
-// browser POST /capture/bodies endpoint (CSRF-guarded by the profile token).
+// Bodies cell flips live. Used by the API's POST /api/v1/capture.
 func (s *Supervisor) SetCaptureBodies(id string, enable bool) (model.Session, error) {
 	sess := s.getSession(id)
 	if sess == nil {
@@ -1097,11 +1080,11 @@ func (s *Supervisor) recordRequest(id string, record model.RequestRecord) {
 	}
 	// Mask credential request headers BEFORE the record enters the ring — the
 	// single store-side convergence point for all eight construction sites. The
-	// raw value therefore never reaches /recent, the page bootstrap, the SSE
-	// stream, a HAR export, or any future emit site: masking is
+	// raw value therefore never reaches the activity API, the event stream,
+	// ccwrap capture, or any future emit site: masking is
 	// correct-by-construction here, not a property each consumer must remember.
-	// Render-time redaction (ui.RenderHeaderGroupsWithRedaction + its web.js
-	// twin) is now defense in depth on top of this. Bypassed only under the
+	// ccwrap ui masks credential headers again when it shows them, as defense
+	// in depth on top of this. Bypassed only under the
 	// explicit CCWRAP_UNMASK_CREDENTIALS=1 launch opt-in — the same flag that
 	// already gates body redaction — so the wire stays consistent across header
 	// and body, and the ribbon's persistent UNMASKED marker covers both.
@@ -1247,133 +1230,6 @@ func (s *Supervisor) recordTrace(id string, record model.TraceRecord) {
 	sess.mu.Unlock()
 	s.touch()
 	s.broadcast("trace", id, record)
-}
-
-// sanitizeProfileCatalogError reduces a profiles.Load error to a fixed,
-// non-leaking message (mirrors sanitizeSwitchError's principle: no path,
-// no parse-state details, no environment crumbs). The catalog endpoint
-// returns the result as ProfileCatalogResponse.LoadError; the UI renders
-// it in a danger block.
-func sanitizeProfileCatalogError(err error) string {
-	if err == nil {
-		return ""
-	}
-	// Multi-error validation report — manually build multi-line
-	// output from items so the source path (which may be a full
-	// filesystem path) never reaches the wire.
-	var perr *profiles.ParseErrors
-	if errors.As(err, &perr) && len(perr.Items) > 0 {
-		var b strings.Builder
-		fmt.Fprintf(&b, "profiles.json invalid: %d errors", len(perr.Items))
-		for _, it := range perr.Items {
-			fmt.Fprintf(&b, "\n  - %s", it.Error())
-		}
-		return b.String()
-	}
-	msg := err.Error()
-	switch {
-	case strings.HasPrefix(msg, "parse profiles "):
-		return "profiles.json malformed"
-	case strings.HasPrefix(msg, "read profiles file "):
-		return "profiles.json unreadable"
-	default:
-		return "profiles.json error"
-	}
-}
-
-// envBaseURLHostFor returns the host[:port] of ANTHROPIC_BASE_URL from
-// the supervisor's snapshotted parent env (LaunchContext.Options.ParentEnv).
-// Empty when launchCtx is nil, the env var is unset, the value does not
-// parse as a URL, or the parsed URL has no Host. Surfaced via /profile/catalog
-// so the popover's inherit-env row can show what env-live mode would route
-// to and the user can detect drift between the active profile's frozen
-// BaseURL and the live env. Never includes credentials (ANTHROPIC_BASE_URL
-// is a URL, not a secret); empty-on-malformed is defensive — the env value
-// is user-provided and may be any string.
-func envBaseURLHostFor(lc *LaunchContext) string {
-	if lc == nil {
-		return ""
-	}
-	raw := strings.TrimSpace(lookupEnv(lc.Options.ParentEnv, "ANTHROPIC_BASE_URL"))
-	if raw == "" {
-		return ""
-	}
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" {
-		return ""
-	}
-	return u.Host
-}
-
-// envHasCredentialsFor reports whether the launch-time parent env
-// has either ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN set (non-empty
-// after trim). Used to gate the popover's inherit-env [test] button:
-// in OAuth-mode sessions both vars are empty (OAuth tokens live in
-// the keychain), so a probe would always fail with "credentials
-// missing".
-func envHasCredentialsFor(lc *LaunchContext) bool {
-	if lc == nil {
-		return false
-	}
-	if strings.TrimSpace(lookupEnv(lc.Options.ParentEnv, "ANTHROPIC_API_KEY")) != "" {
-		return true
-	}
-	if strings.TrimSpace(lookupEnv(lc.Options.ParentEnv, "ANTHROPIC_AUTH_TOKEN")) != "" {
-		return true
-	}
-	return false
-}
-
-// profileCatalogFor assembles the browser-facing catalog response for one
-// session. Disk-read on every call (mirrors `ccwrap profile ls` semantics —
-// fresh fetch). Items[] sorted by (Provider, Name) for
-// stable UI grouping. Items is empty slice (not nil) when no profiles or
-// no file — preserves "Array.isArray length" semantics in browser JS.
-func (s *Supervisor) profileCatalogFor(sess *sessionState) *control.ProfileCatalogResponse {
-	path := profiles.DefaultPath(s.paths.StateDir)
-	resp := &control.ProfileCatalogResponse{
-		Source:            path,
-		Items:             []control.SafeCatalogItem{},
-		EnvBaseURLHost:    envBaseURLHostFor(s.launchCtx),
-		EnvHasCredentials: envHasCredentialsFor(s.launchCtx),
-	}
-	if sess == nil {
-		return resp
-	}
-	file, err := profiles.Load(path)
-	if err != nil {
-		resp.LoadError = sanitizeProfileCatalogError(err)
-		// Active profile still surfaces so the UI can render the chip even
-		// when catalog load failed.
-		sess.mu.RLock()
-		resp.ActiveProfile = sess.public.ActiveProfileName
-		sess.mu.RUnlock()
-		return resp
-	}
-	if file == nil {
-		sess.mu.RLock()
-		resp.ActiveProfile = sess.public.ActiveProfileName
-		sess.mu.RUnlock()
-		return resp
-	}
-	resp.HasProfilesFile = true
-	resp.Default = file.Default
-	items := make([]control.SafeCatalogItem, 0, len(file.Profiles))
-	for name, p := range file.Profiles {
-		p.Name = name
-		items = append(items, toControlSafeCatalogItem(p.SafeView()))
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].Provider != items[j].Provider {
-			return items[i].Provider < items[j].Provider
-		}
-		return items[i].Name < items[j].Name
-	})
-	resp.Items = items
-	sess.mu.RLock()
-	resp.ActiveProfile = sess.public.ActiveProfileName
-	sess.mu.RUnlock()
-	return resp
 }
 
 func (s *Supervisor) statusSnapshot() model.StatusResponse {
@@ -1654,18 +1510,6 @@ func (ss *sessionState) noteActivityLocked(at time.Time) {
 	if cur := ss.public.LastActivityAt; cur == nil || at.After(*cur) {
 		ss.public.LastActivityAt = &at
 	}
-}
-
-// matchProfileToken returns true iff candidate equals ss.profileToken under
-// constant-time compare (defense against timing-based token
-// disclosure). Empty candidate is rejected (subtle.ConstantTimeCompare
-// returns 0 for length mismatch, but the explicit guard makes intent
-// obvious and survives a future refactor).
-func (ss *sessionState) matchProfileToken(candidate string) bool {
-	if candidate == "" || ss.profileToken == "" {
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(candidate), []byte(ss.profileToken)) == 1
 }
 
 func appendCapped[T any](in []T, item T, limit int) []T {

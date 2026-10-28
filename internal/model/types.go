@@ -290,8 +290,8 @@ type Session struct {
 	// place: the supervisor replaces the slice.
 	Issues []Issue `json:"issues,omitempty"`
 	// CaptureBodies mirrors the per-session captureBodies routing flag so the
-	// inspect-web ribbon can render a "Bodies: on/off" cell and the runtime
-	// /capture/bodies toggle has a state to report. Launch-time initial value
+	// Bodies cell can show on/off and the runtime capture toggle
+	// (POST /api/v1/capture) has a state to report. Launch-time initial value
 	// comes from SessionRouteRequest.CaptureRequestBodies (set by the CCWRAP
 	// launcher from --capture-request-bodies / CCWRAP_CAPTURE_BODIES); runtime
 	// changes via Supervisor.SetCaptureBodies emit session_updated events
@@ -628,7 +628,6 @@ type SessionManifest struct {
 	ProjectDir                         string            `json:"project_dir,omitempty"`
 	ControlSocket                      string            `json:"control_socket"`
 	ProxyListenAddr                    string            `json:"proxy_listen_addr,omitempty"`
-	ProxyInfoURL                       string            `json:"proxy_info_url,omitempty"`
 	RouteClass                         RouteClass        `json:"route_class,omitempty"`
 	RouteSource                        RouteSource       `json:"route_source,omitempty"`
 	RouteConfigSource                  string            `json:"route_config_source,omitempty"`

@@ -3,8 +3,8 @@ package profiletest
 import "encoding/json"
 
 // MarshalResult formats a ProbeResult as the wire JSON used by both
-// the CLI (`ccwrap profile test --format json`) and the inspect-web
-// `/profile/test` endpoint. *T pointer fields encode as `null` when
+// the CLI (`ccwrap profile test --format json`) and ccwrap ui's profile
+// tests. *T pointer fields encode as `null` when
 // the underlying value is the zero-value.
 //
 // Schema:

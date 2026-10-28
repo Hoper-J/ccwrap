@@ -162,12 +162,11 @@ func safeUTLSDial(rawConn net.Conn, host string, roots *x509.CertPool, rawHello 
 }
 
 // initialNativeTLSPosture seeds a session's NativeTLS posture at construction so
-// the dashboard NATIVE TLS cell is present from first paint — BEFORE any upstream
+// the NATIVE TLS cell is present from the start — BEFORE any upstream
 // dial. "active" means the session is armed to mirror; the first dial confirms it
 // or flips it to "blocked". Empty when the feature is off (no cell). Without this
-// seed, public.NativeTLS stays "" until the first dial, so a dashboard opened
-// earlier would never show the cell (the JS live-updater only patches an existing
-// cell, it does not create one).
+// seed, public.NativeTLS stays "" until the first dial, so a session looked at
+// before then would show no NATIVE TLS cell at all.
 func initialNativeTLSPosture(on bool) string {
 	if on {
 		return "active"

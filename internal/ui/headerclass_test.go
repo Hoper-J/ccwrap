@@ -91,16 +91,15 @@ func TestRenderHeaderGroups(t *testing.T) {
 	}
 }
 
-// TestRenderHeaderGroupsWithRedaction_Mask is byte-identical to
-// RenderHeaderGroups (the always-redact CLI entry); locks the contract
-// that the new API's redact=true mode is the historical behavior.
-func TestRenderHeaderGroupsWithRedaction_Mask(t *testing.T) {
+// RenderHeaderGroups never shows a credential value: the sentinel stands
+// in for it.
+func TestRenderHeaderGroupsMasksCredentials(t *testing.T) {
 	h := http.Header{
 		"Authorization":     {"Bearer sk-REALSECRET"},
 		"X-Api-Key":         {"sk-ALSOSECRET"},
 		"Anthropic-Version": {"2023-06-01"},
 	}
-	masked := RenderHeaderGroupsWithRedaction(h, true)
+	masked := RenderHeaderGroups(h)
 	flat := ""
 	for _, g := range masked {
 		for _, r := range g.Rows {
@@ -112,42 +111,6 @@ func TestRenderHeaderGroupsWithRedaction_Mask(t *testing.T) {
 	}
 	if !strings.Contains(flat, "‹redacted by ccwrap›") {
 		t.Fatalf("masked must use sentinel:\n%s", flat)
-	}
-}
-
-// TestRenderHeaderGroupsWithRedaction_Unmask locks the contract:
-// when redact=false (CCWRAP_UNMASK_CREDENTIALS=1 path), credential header
-// VALUES render raw. The classification (which group, name preserved)
-// is unchanged — only the sentinel substitution is skipped. The user
-// is presumed to have opted in; the ribbon UNMASKED state is the
-// persistent visual signal.
-func TestRenderHeaderGroupsWithRedaction_Unmask(t *testing.T) {
-	h := http.Header{
-		"Authorization":     {"Bearer sk-REALSECRET"},
-		"X-Api-Key":         {"sk-ALSOSECRET"},
-		"Anthropic-Version": {"2023-06-01"},
-	}
-	raw := RenderHeaderGroupsWithRedaction(h, false)
-	flat := ""
-	credGroupCount := 0
-	for _, g := range raw {
-		if g.Name == "Credentials" {
-			credGroupCount++
-		}
-		for _, r := range g.Rows {
-			flat += g.Name + "|" + r.Name + "|" + r.Value + "|"
-		}
-	}
-	if strings.Contains(flat, "‹redacted by ccwrap›") {
-		t.Fatalf("unmask must NOT emit the sentinel:\n%s", flat)
-	}
-	if !strings.Contains(flat, "sk-REALSECRET") || !strings.Contains(flat, "sk-ALSOSECRET") {
-		t.Fatalf("unmask must render credential values raw:\n%s", flat)
-	}
-	// Credential-class headers still group under "Credentials" — the
-	// classification is unchanged; only the value substitution is skipped.
-	if credGroupCount != 1 {
-		t.Fatalf("expected 1 Credentials group regardless of redact mode; got %d", credGroupCount)
 	}
 }
 

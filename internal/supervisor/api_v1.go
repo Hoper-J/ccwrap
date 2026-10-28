@@ -136,7 +136,7 @@ func (s *Supervisor) apiActivity(w http.ResponseWriter, r *http.Request, sess *s
 	id := sess.snapshot().ID
 	out := map[string]any{}
 	if kind == "" || kind == "requests" {
-		recs := tailRequestsForWeb(s.listRequests(id), capped(maxSessionRequests))
+		recs := tailRequests(s.listRequests(id), capped(maxSessionRequests))
 		classified := make([]classifiedRecord, len(recs))
 		for i, rec := range recs {
 			classified[i] = classifiedRecord{Class: recordClass(rec), RequestRecord: rec}
@@ -144,10 +144,10 @@ func (s *Supervisor) apiActivity(w http.ResponseWriter, r *http.Request, sess *s
 		out["requests"] = classified
 	}
 	if kind == "" || kind == "errors" {
-		out["errors"] = tailErrorsForWeb(s.listErrors(id), capped(maxSessionErrors))
+		out["errors"] = tailErrors(s.listErrors(id), capped(maxSessionErrors))
 	}
 	if kind == "" || kind == "trace" {
-		out["trace"] = tailTraceForWeb(s.listTrace(id), capped(maxSessionTrace))
+		out["trace"] = tailTrace(s.listTrace(id), capped(maxSessionTrace))
 	}
 	writeJSON(w, out)
 }
@@ -249,8 +249,11 @@ func writeSSE(w io.Writer, typ string, ev model.Event) {
 	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", typ, data)
 }
 
+// maxAPIBodyBytes caps a v1 request body.
+const maxAPIBodyBytes = 5 * 1024 * 1024
+
 func decodeAPIBody(w http.ResponseWriter, r *http.Request, v any) bool {
-	body := http.MaxBytesReader(w, r.Body, maxProfileMutationBytes)
+	body := http.MaxBytesReader(w, r.Body, maxAPIBodyBytes)
 	defer body.Close()
 	if err := json.NewDecoder(body).Decode(v); err != nil {
 		writeAPIError(w, &apiError{http.StatusBadRequest, "usage", "invalid request body: " + err.Error()})

@@ -302,7 +302,7 @@ The probe target sees the IP your egress is exiting from. By default
 ccwrap uses ipinfo.io's free /json endpoint; set CCWRAP_EGRESS_TEST_URL
 to a self-hosted endpoint to avoid third-party visibility.
 
-Probe traffic does NOT appear in ccwrap inspect web /recent.
+Probe traffic does not appear in any session's activity.
 
 Flags:
   --timeout <dur>    Per-profile timeout (default 5s)

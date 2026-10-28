@@ -60,7 +60,7 @@ func (s *bodyStore) put(id string, payload []byte) *model.RequestBodyRef {
 			return // write-failed: ref stays, endpoint will 404
 		}
 		// Atomic publish: write to a sibling .tmp then rename into place. A
-		// concurrent reader (load → /recent/body) then sees either no file or
+		// concurrent reader (load → GET /api/v1/bodies/{id}) then sees either no file or
 		// the COMPLETE file — never the empty/partial window os.WriteFile would
 		// expose between create-truncate and write. The .tmp suffix is ignored
 		// by enforceBudgetLocked (.json-only) and wiped by removeAll's RemoveAll.

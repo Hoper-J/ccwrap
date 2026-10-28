@@ -20,9 +20,9 @@ import (
 	"github.com/Hoper-J/ccwrap/internal/testutil"
 )
 
-// recentServer is a stand-in for the per-session supervisor's HTTP surface
-// that capture polls: /recent (the request ring), /recent/body?id= (spilled
-// bodies), and /native-tls/clienthello.bin (the captured ClientHello).
+// recentServer is a stand-in for the session supervisor's /api/v1 that
+// capture polls: activity (the request ring), bodies/<id> (spilled bodies),
+// and native-tls/clienthello.bin (the captured ClientHello).
 type recentServer struct {
 	mu sync.Mutex
 
@@ -35,14 +35,14 @@ type recentServer struct {
 
 func (s *recentServer) handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/recent", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v1/activity", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		recs := s.records
 		s.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(map[string]any{"requests": recs})
 	})
-	mux.HandleFunc("/recent/body", func(w http.ResponseWriter, r *http.Request) {
-		id := r.URL.Query().Get("id")
+	mux.HandleFunc("/api/v1/bodies/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
 		s.mu.Lock()
 		if s.bodyMiss[id] > 0 {
 			s.bodyMiss[id]--
@@ -58,7 +58,7 @@ func (s *recentServer) handler() http.Handler {
 		}
 		_, _ = w.Write(b)
 	})
-	mux.HandleFunc("/native-tls/clienthello.bin", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v1/native-tls/clienthello.bin", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		hello := s.hello
 		if key := r.URL.Query().Get("key"); key != "" {
@@ -106,7 +106,7 @@ func TestRunCaptureLoop_HappyPath(t *testing.T) {
 	defer ts.Close()
 
 	opts := captureOpts{Response: true, TLS: true, Host: "api.anthropic.com", Path: "/v1/messages"}
-	res, synthetic, err := runCaptureLoop(ts.URL, opts, time.Now().Add(2*time.Second), nil)
+	res, synthetic, err := runCaptureLoop(urlSource(ts.URL), opts, time.Now().Add(2*time.Second), nil)
 	if err != nil {
 		t.Fatalf("runCaptureLoop: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestRunCaptureLoop_ExactPathBeatsCountTokens(t *testing.T) {
 	defer ts.Close()
 
 	opts := captureOpts{Response: true, Host: "api.anthropic.com", Path: "/v1/messages"}
-	res, _, err := runCaptureLoop(ts.URL, opts, time.Now().Add(2*time.Second), nil)
+	res, _, err := runCaptureLoop(urlSource(ts.URL), opts, time.Now().Add(2*time.Second), nil)
 	if err != nil {
 		t.Fatalf("runCaptureLoop: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestRunCaptureLoop_SyntheticReturnsPromptlyWithFlag(t *testing.T) {
 	// it out. The 4s promptness bound stays well under the 10s deadline (the
 	// discriminator: a broken strict matcher only returns via giveUp AT the
 	// deadline) while giving a starved CI runner scheduling slack.
-	res, synthetic, err := runCaptureLoop(ts.URL, opts, time.Now().Add(10*time.Second), nil)
+	res, synthetic, err := runCaptureLoop(urlSource(ts.URL), opts, time.Now().Add(10*time.Second), nil)
 	if err != nil {
 		t.Fatalf("runCaptureLoop: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestRunCaptureLoop_SpillRetry(t *testing.T) {
 	defer ts.Close()
 
 	opts := captureOpts{Response: false, Host: "api.anthropic.com", Path: "/v1/messages"}
-	res, _, err := runCaptureLoop(ts.URL, opts, time.Now().Add(2*time.Second), nil)
+	res, _, err := runCaptureLoop(urlSource(ts.URL), opts, time.Now().Add(2*time.Second), nil)
 	if err != nil {
 		t.Fatalf("runCaptureLoop: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestRunCaptureLoop_BodyLessResponseDoesNotHang(t *testing.T) {
 	opts := captureOpts{Response: true, Host: "api.anthropic.com", Path: "/v1/messages"}
 	start := time.Now()
 	// Short deadline: with the bug this would spin to the deadline then error.
-	res, synthetic, err := runCaptureLoop(ts.URL, opts, time.Now().Add(400*time.Millisecond), nil)
+	res, synthetic, err := runCaptureLoop(urlSource(ts.URL), opts, time.Now().Add(400*time.Millisecond), nil)
 	if err != nil {
 		t.Fatalf("body-less response must not error: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestRunCaptureLoop_TimeoutMentionsPath(t *testing.T) {
 
 	opts := captureOpts{Response: true, Host: "api.anthropic.com", Path: "/v1/messages"}
 	start := time.Now()
-	_, _, err := runCaptureLoop(ts.URL, opts, time.Now().Add(300*time.Millisecond), nil)
+	_, _, err := runCaptureLoop(urlSource(ts.URL), opts, time.Now().Add(300*time.Millisecond), nil)
 	if err == nil {
 		t.Fatalf("expected a timeout error")
 	}
@@ -315,7 +315,7 @@ func TestRunCaptureLoop_TLSOnly(t *testing.T) {
 	defer ts.Close()
 
 	opts := captureOpts{TLSOnly: true, Host: "api.anthropic.com", Path: "/v1/messages"}
-	res, synthetic, err := runCaptureLoop(ts.URL, opts, time.Now().Add(2*time.Second), nil)
+	res, synthetic, err := runCaptureLoop(urlSource(ts.URL), opts, time.Now().Add(2*time.Second), nil)
 	if err != nil {
 		t.Fatalf("runCaptureLoop --tls-only: %v", err)
 	}
@@ -343,7 +343,7 @@ func TestRunCaptureLoop_ChildExitAborts(t *testing.T) {
 
 	opts := captureOpts{Response: true, Host: "api.anthropic.com", Path: "/v1/messages"}
 	start := time.Now()
-	_, _, err := runCaptureLoop(ts.URL, opts, time.Now().Add(10*time.Second), exited)
+	_, _, err := runCaptureLoop(urlSource(ts.URL), opts, time.Now().Add(10*time.Second), exited)
 	if err == nil {
 		t.Fatalf("expected an error after child exit with no match")
 	}
@@ -360,14 +360,14 @@ func TestRunCaptureLoop_ChildExitAborts(t *testing.T) {
 // capture poller and the real per-session supervisor surface. The
 // TestRunCaptureLoop_* gates above pin the poller against an httptest
 // stand-in, which shares wire TYPES with the supervisor (internal/model) but
-// not SEMANTICS — if the recording behavior behind /recent drifts (when
+// not SEMANTICS — if the recording behavior behind /api/v1 drifts (when
 // BodyRef is set, how spilled bodies are served, what logical host/path a
 // record carries), the stand-in keeps passing while real `ccwrap capture`
 // breaks. This test closes that gap without the launcher scaffolding the
 // full E2E below needs: it boots a real supervisor in-process, drives a real
 // MITM round-trip through the session proxy (the same fixture
 // internal/supervisor's proxy_test locks), then points runCaptureLoop at the
-// session's REAL listener — the exact base URL captureCommand derives.
+// session's REAL control socket — the exact source captureCommand uses.
 func TestRunCaptureLoop_MatesWithRealSupervisor(t *testing.T) {
 	paths := testutil.ShortAppPaths(t, "m.sock")
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -458,9 +458,8 @@ func TestRunCaptureLoop_MatesWithRealSupervisor(t *testing.T) {
 		t.Fatalf("unexpected proxy round-trip status: %d", resp.StatusCode)
 	}
 
-	base := "http://" + sess.ProxyListenAddr
 	opts := captureOpts{Response: true, Host: "api.anthropic.com", Path: "/v1/messages"}
-	res, synthetic, err := runCaptureLoop(base, opts, time.Now().Add(10*time.Second), nil)
+	res, synthetic, err := runCaptureLoop(socketSource(paths.SocketPath), opts, time.Now().Add(10*time.Second), nil)
 	if err != nil {
 		t.Fatalf("runCaptureLoop against the real supervisor: %v", err)
 	}
@@ -511,7 +510,7 @@ func TestRunCaptureLoop_MatesWithRealSupervisor(t *testing.T) {
 // The deterministic acceptance gates for the orchestration are
 // TestRunCaptureLoop_* above (polling/assembly against an httptest stand-in)
 // plus TestRunCaptureLoop_MatesWithRealSupervisor (the same poller against a
-// REAL in-process supervisor and a real MITM round-trip, so /recent recording
+// REAL in-process supervisor and a real MITM round-trip, so the recording
 // semantics cannot drift past the stand-in unnoticed). The only ground left
 // to this E2E is the launcher handoff itself — fake-claude spawn plus the
 // HTTPS_PROXY / NODE_EXTRA_CA_CERTS env injection. Landing it would require
@@ -543,7 +542,7 @@ func TestRunCaptureLoop_TLSFollowsTheCapturedRequest(t *testing.T) {
 	defer ts.Close()
 
 	start := time.Now()
-	res, _, err := runCaptureLoop(ts.URL, captureOpts{TLSOnly: true, Host: "api.anthropic.com", Path: "/v1/messages"}, time.Now().Add(5*time.Second), nil)
+	res, _, err := runCaptureLoop(urlSource(ts.URL), captureOpts{TLSOnly: true, Host: "api.anthropic.com", Path: "/v1/messages"}, time.Now().Add(5*time.Second), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -553,7 +552,7 @@ func TestRunCaptureLoop_TLSFollowsTheCapturedRequest(t *testing.T) {
 	if time.Since(start) > 2*time.Second {
 		t.Fatalf("--tls-only should return as soon as the request lands, took %v", time.Since(start))
 	}
-	res, _, err = runCaptureLoop(ts.URL, captureOpts{TLS: true, Response: false, Host: "api.anthropic.com", Path: "/v1/messages"}, time.Now().Add(5*time.Second), nil)
+	res, _, err = runCaptureLoop(urlSource(ts.URL), captureOpts{TLS: true, Response: false, Host: "api.anthropic.com", Path: "/v1/messages"}, time.Now().Add(5*time.Second), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,7 +8,7 @@
 // user restriction: every profile activation still passes the preflight
 // hidden-auth / fail-closed validation, an invalid/unresolvable profile
 // refuses to launch, and credential VALUES never leave the proxy
-// boundary (never to HTML/JS, /recent, or any control response).
+// boundary (never to a page, the activity API, or any control response).
 //
 // Absent file => behavior is exactly today's (inherit-env); the
 // zero-touch first launch is unchanged.

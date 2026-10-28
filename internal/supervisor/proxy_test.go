@@ -132,145 +132,7 @@ func mustParse(t *testing.T, raw string) *url.URL {
 	return u
 }
 
-func TestSessionProxyInfoEndpoints(t *testing.T) {
-	paths := testutil.ShortAppPaths(t, "s.sock")
-	srv, err := New(paths, 0, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() { _ = srv.Run(ctx) }()
-	client := control.NewClient(paths.SocketPath)
-	waitForSupervisor(t, client)
-
-	sess, err := client.CreateSession(context.Background(), model.SessionCreateRequest{LauncherPID: os.Getpid(), Name: "info"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := client.SetRoute(context.Background(), sess.ID, model.SessionRouteRequest{
-		APIBaseURL:        "https://api.example.test",
-		RouteSource:       model.RouteSourceExplicit,
-		AuthMode:          model.AuthModePassthrough,
-		AuthSource:        model.AuthSourceNone,
-		ExactUpstreamHost: "api.example.test",
-		ExactUpstreamBase: "https://api.example.test",
-		FailPolicy:        model.FailClosed,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	base := "http://" + sess.ProxyListenAddr
-	resp, err := http.Get(base + "/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("unexpected status: %d", resp.StatusCode)
-	}
-	if !strings.Contains(string(body), "Pause stream") {
-		t.Fatalf("expected live mode control; got: %s", string(body))
-	}
-	if !strings.Contains(string(body), "connecting") {
-		t.Fatalf("expected live mode status UI; got: %s", string(body))
-	}
-	if !strings.Contains(string(body), "Activity") {
-		t.Fatalf("expected activity panel; got: %s", string(body))
-	}
-	// The "Last activity" cell label lives in the hero sub-line as inline
-	// lowercase text ("last activity"). The Time column in the activity
-	// table remains unchanged.
-	if !strings.Contains(string(body), "last activity") || !strings.Contains(string(body), ">Time<") {
-		t.Fatalf("expected hero last-activity sub-line and time column; got: %s", string(body))
-	}
-	if strings.Contains(string(body), ">Scope<") {
-		t.Fatalf("unexpected scope cell on single-session page; got: %s", string(body))
-	}
-	if strings.Contains(string(body), "session-table") || strings.Contains(string(body), ">Current route<") {
-		t.Fatalf("unexpected legacy route table on session page; got: %s", string(body))
-	}
-	if strings.Contains(string(body), ">Proxy<") || strings.Contains(string(body), ">Fail<") {
-		t.Fatalf("unexpected low-value summary item on session page; got: %s", string(body))
-	}
-	if strings.Contains(string(body), "Known limitations") || strings.Contains(string(body), "Child process attribution is best-effort") {
-		t.Fatalf("unexpected static limitations copy on proxy page; got: %s", string(body))
-	}
-	if strings.Contains(string(body), "<h2>Session</h2>") {
-		t.Fatalf("unexpected duplicate session section heading on proxy page; got: %s", string(body))
-	}
-	if strings.Contains(string(body), "Incremental refresh keeps recent history visible.") {
-		t.Fatalf("unexpected explanatory refresh text; got: %s", string(body))
-	}
-	if strings.Contains(strings.ToLower(resp.Header.Get("Refresh")), "1") {
-		t.Fatalf("unexpected refresh header: %q", resp.Header.Get("Refresh"))
-	}
-	if strings.Contains(string(body), "/sessions/") {
-		t.Fatalf("unexpected legacy /sessions/ link on session page; got: %s", string(body))
-	}
-	if strings.Contains(string(body), "<th>Actions</th>") {
-		t.Fatalf("unexpected Actions column on session page; got: %s", string(body))
-	}
-	if strings.Contains(string(body), "href=\"/session\"") {
-		t.Fatalf("unexpected separate session link on single-page session UI; got: %s", string(body))
-	}
-	if !strings.Contains(string(body), "Configuration details") {
-		t.Fatalf("expected configuration details affordance on canonical session page; got: %s", string(body))
-	}
-
-	sessionResp, err := http.Get(base + "/session")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer sessionResp.Body.Close()
-	if sessionResp.StatusCode != http.StatusNotFound {
-		t.Fatalf("unexpected /session status: %d", sessionResp.StatusCode)
-	}
-
-	healthResp, err := http.Get(base + "/healthz")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer healthResp.Body.Close()
-	var payload map[string]any
-	if err := json.NewDecoder(healthResp.Body).Decode(&payload); err != nil {
-		t.Fatal(err)
-	}
-	if payload["session"] == nil {
-		t.Fatalf("expected session payload; got %#v", payload)
-	}
-
-	recentResp, err := http.Get(base + "/recent")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer recentResp.Body.Close()
-	var recent map[string]any
-	if err := json.NewDecoder(recentResp.Body).Decode(&recent); err != nil {
-		t.Fatal(err)
-	}
-	sessPayload, ok := recent["session"].(map[string]any)
-	if !ok || sessPayload["session_url"] != "/" {
-		t.Fatalf("expected recent payload session_url=/; got %#v", recent["session"])
-	}
-	requests, ok := recent["requests"].([]any)
-	if !ok {
-		t.Fatalf("expected recent requests to be an empty array, got %#v", recent["requests"])
-	}
-	if len(requests) != 0 {
-		t.Fatalf("expected no recent requests, got %#v", requests)
-	}
-	errorsPayload, ok := recent["errors"].([]any)
-	if !ok {
-		t.Fatalf("expected recent errors to be an empty array, got %#v", recent["errors"])
-	}
-	if len(errorsPayload) != 0 {
-		t.Fatalf("expected no recent errors, got %#v", errorsPayload)
-	}
-}
-
-func TestSessionProxyEventsStream(t *testing.T) {
+func TestAPIv1EventsCarryTrace(t *testing.T) {
 	paths := testutil.ShortAppPaths(t, "s.sock")
 	srv, err := New(paths, 0, nil)
 	if err != nil {
@@ -298,10 +160,7 @@ func TestSessionProxyEventsStream(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resp, err := http.Get("http://" + sess.ProxyListenAddr + "/events")
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp := openV1Events(t, paths.SocketPath)
 	defer resp.Body.Close()
 
 	gotCh := make(chan string, 1)
@@ -313,7 +172,7 @@ func TestSessionProxyEventsStream(t *testing.T) {
 			line := scanner.Text()
 			body.WriteString(line)
 			body.WriteByte('\n')
-			if strings.Contains(body.String(), "event: trace") && strings.Contains(body.String(), "forwarded request observed") {
+			if strings.Contains(body.String(), "event: trace.added") && strings.Contains(body.String(), "forwarded request observed") {
 				gotCh <- body.String()
 				return
 			}
@@ -336,7 +195,7 @@ func TestSessionProxyEventsStream(t *testing.T) {
 
 	select {
 	case got := <-gotCh:
-		if !strings.Contains(got, "event: trace") || !strings.Contains(got, "forwarded request observed") {
+		if !strings.Contains(got, "event: trace.added") || !strings.Contains(got, "forwarded request observed") {
 			t.Fatalf("unexpected event stream body: %s", got)
 		}
 	case <-time.After(2 * time.Second):
@@ -344,7 +203,7 @@ func TestSessionProxyEventsStream(t *testing.T) {
 	}
 }
 
-func TestSessionProxyEventsStreamUsesProxyErrorEvent(t *testing.T) {
+func TestAPIv1EventsNameProxyErrorsErrorAdded(t *testing.T) {
 	paths := testutil.ShortAppPaths(t, "s.sock")
 	srv, err := New(paths, 0, nil)
 	if err != nil {
@@ -372,10 +231,7 @@ func TestSessionProxyEventsStreamUsesProxyErrorEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resp, err := http.Get("http://" + sess.ProxyListenAddr + "/events")
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp := openV1Events(t, paths.SocketPath)
 	defer resp.Body.Close()
 
 	gotCh := make(chan string, 1)
@@ -406,18 +262,18 @@ func TestSessionProxyEventsStreamUsesProxyErrorEvent(t *testing.T) {
 
 	select {
 	case got := <-gotCh:
-		if !strings.Contains(got, "event: proxy_error") {
-			t.Fatalf("expected proxy_error event, got: %s", got)
+		if !strings.Contains(got, "event: error.added") {
+			t.Fatalf("expected error.added event, got: %s", got)
 		}
-		if strings.Contains(got, "event: error") {
+		if strings.Contains(got, "event: error\n") {
 			t.Fatalf("business proxy errors should not use EventSource error event: %s", got)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for proxy_error event")
+		t.Fatal("timed out waiting for error.added event")
 	}
 }
 
-func TestSessionProxyEventsStreamForwardProxyE2E(t *testing.T) {
+func TestAPIv1EventsForwardProxyE2E(t *testing.T) {
 	paths := testutil.ShortAppPaths(t, "s.sock")
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "ok")
@@ -450,10 +306,7 @@ func TestSessionProxyEventsStreamForwardProxyE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resp, err := http.Get("http://" + sess.ProxyListenAddr + "/events")
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp := openV1Events(t, paths.SocketPath)
 	defer resp.Body.Close()
 
 	gotCh := make(chan string, 1)
@@ -464,7 +317,7 @@ func TestSessionProxyEventsStreamForwardProxyE2E(t *testing.T) {
 		for scanner.Scan() {
 			body.WriteString(scanner.Text())
 			body.WriteByte('\n')
-			if strings.Contains(body.String(), "event: trace") && strings.Contains(body.String(), "forward_proxy") {
+			if strings.Contains(body.String(), "event: trace.added") && strings.Contains(body.String(), "forward_proxy") {
 				gotCh <- body.String()
 				return
 			}
@@ -482,7 +335,7 @@ func TestSessionProxyEventsStreamForwardProxyE2E(t *testing.T) {
 
 	select {
 	case got := <-gotCh:
-		if !strings.Contains(got, "event: trace") || !strings.Contains(got, "forward_proxy") {
+		if !strings.Contains(got, "event: trace.added") || !strings.Contains(got, "forward_proxy") {
 			t.Fatalf("unexpected event stream body: %s", got)
 		}
 	case <-time.After(3 * time.Second):
@@ -2071,13 +1924,12 @@ func TestRequestBodyNoUpstreamRefWhenAliasMisses(t *testing.T) {
 	}
 }
 
-// TestRecentBodyEndpointStreamsAndMisses is the delivery contract:
-// the session-proxy info endpoint GET /recent/body streams a
-// spilled body file as application/json when present, and 404s with a
-// JSON reason on a miss. Reuses headerInspectorSession + the capture-ON
+// TestAPIv1BodiesStreamsAndMisses is the delivery contract:
+// GET /api/v1/bodies/{id} streams a spilled body file as
+// application/json when present, and 404s with a JSON reason on a miss. Reuses headerInspectorSession + the capture-ON
 // SetRoute / POST-through-MITM / async-poll plumbing exactly as
 // TestRequestBodyCapturedToFileWhenEnabled does.
-func TestRecentBodyEndpointStreamsAndMisses(t *testing.T) {
+func TestAPIv1BodiesStreamsAndMisses(t *testing.T) {
 	client, sess, hc, upstream := headerInspectorSession(t, "s.sock")
 	defer upstream.Close()
 
@@ -2124,16 +1976,14 @@ func TestRecentBodyEndpointStreamsAndMisses(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	// Info endpoints are reached via a plain GET to the proxy address
-	// (not a forward-proxy/CONNECT request); use a direct client.
-	base := "http://" + sess.ProxyListenAddr + "/recent/body"
+	// Bodies are read over the session's control socket.
+	body := func(id string) *http.Response {
+		return apiGetRaw(t, client.SocketPath(), "/api/v1/bodies/"+url.PathEscape(id))
+	}
 
 	// Present ⇒ stream the spilled file as application/json (+nosniff),
 	// bytes == sent body, sha == BodyRef.SHA256.
-	hit, err := http.Get(base + "?session=" + sess.ID + "&id=" + rec.BodyRef.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	hit := body(rec.BodyRef.ID)
 	defer hit.Body.Close()
 	if hit.StatusCode != http.StatusOK {
 		t.Fatalf("present body GET status = %d, want 200", hit.StatusCode)
@@ -2157,10 +2007,7 @@ func TestRecentBodyEndpointStreamsAndMisses(t *testing.T) {
 	}
 
 	// Missing id ⇒ 404 with a JSON reason (not text/plain).
-	miss, err := http.Get(base + "?session=" + sess.ID + "&id=does-not-exist")
-	if err != nil {
-		t.Fatal(err)
-	}
+	miss := body("does-not-exist")
 	defer miss.Body.Close()
 	if miss.StatusCode != http.StatusNotFound {
 		t.Fatalf("missing body GET status = %d, want 404", miss.StatusCode)
@@ -2181,7 +2028,7 @@ func TestRecentBodyEndpointStreamsAndMisses(t *testing.T) {
 	// bodiesDir() == filepath.Join(status.RuntimeDir, "bodies"), and
 	// load() does os.ReadFile(filepath.Join(bodiesDir(), id+".json")).
 	// filepath.Join lexically cleans ".." WITHOUT containment, so a
-	// crafted ?id= can escape the bodies/ dir and read any *.json on
+	// crafted id can escape the bodies/ dir and read any *.json on
 	// disk (including other sessions' cleartext bodies).
 	//
 	// Deterministic proof: drop a sentinel ONE level above bodies/ at
@@ -2201,18 +2048,12 @@ func TestRecentBodyEndpointStreamsAndMisses(t *testing.T) {
 		"../sentinel",                       // deterministic: pre-fix reads the sentinel marker
 		"../../../../../../../../etc/hosts", // classic deep escape
 		"../" + rec.BodyRef.ID,              // sibling-escape form
-		"%2e%2e%2f%2e%2e%2fetc%2fhosts",     // percent-encoded ../../ (decoded by r.URL.Query().Get)
+		"%2e%2e%2f%2e%2e%2fetc%2fhosts",     // percent-encoded ../../ (sent escaped once more; the mux unescapes it once)
 		"foo/../../bar",                     // mid-path escape
 		"/etc/hosts",                        // absolute path
 	}
 	for _, payload := range traversalPayloads {
-		q := url.Values{}
-		q.Set("session", sess.ID)
-		q.Set("id", payload)
-		tr, err := http.Get(base + "?" + q.Encode())
-		if err != nil {
-			t.Fatalf("traversal GET %q: %v", payload, err)
-		}
+		tr := body(payload)
 		trBytes, _ := io.ReadAll(tr.Body)
 		tr.Body.Close()
 
@@ -2242,10 +2083,7 @@ func TestRecentBodyEndpointStreamsAndMisses(t *testing.T) {
 
 	// Happy path must still work after the guards: the legit hex id
 	// streams 200 + exact bytes.
-	again, err := http.Get(base + "?session=" + sess.ID + "&id=" + rec.BodyRef.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	again := body(rec.BodyRef.ID)
 	defer again.Body.Close()
 	if again.StatusCode != http.StatusOK {
 		t.Fatalf("post-guard legit body GET status = %d, want 200", again.StatusCode)
@@ -2511,14 +2349,14 @@ func assertNoSpilledBodies(t *testing.T, runtimeDir string) {
 	}
 }
 
-func TestRecentJSONMasksCredentialsByDefault(t *testing.T) {
-	// CONTRACT PROTECTION: /recent (like the page bootstrap and the SSE stream)
-	// carries credential header values MASKED. The raw secret is removed
-	// store-side in recordRequest before any record reaches the wire, so
-	// curl /recent, a browser extension reading the bootstrap, or a shared HAR
-	// can never lift a live bearer. Only the CCWRAP_UNMASK_CREDENTIALS=1 launch
-	// opt-in serves raw. If this test fails because the raw secret reappeared
-	// on /recent, that REOPENS the credential-on-the-wire hole — understand the
+func TestActivityMasksCredentialsByDefault(t *testing.T) {
+	// CONTRACT PROTECTION: the activity API (like the event stream) carries
+	// credential header values MASKED. The raw secret is removed store-side
+	// in recordRequest before any record reaches the wire, so no client of
+	// the session's API — ccwrap ui, ccwrap capture, a script — can lift a
+	// live bearer. Only the CCWRAP_UNMASK_CREDENTIALS=1 launch opt-in serves
+	// raw. If this test fails because the raw secret reappeared in the
+	// activity, that REOPENS the credential-on-the-wire hole — understand the
 	// store-side masking (recordRequest + ui.MaskCredentialHeaders) before
 	// "fixing" the test.
 	client, sess, hc, upstream := headerInspectorSession(t, "r.sock")
@@ -2533,48 +2371,46 @@ func TestRecentJSONMasksCredentialsByDefault(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	// The record lands only after the proxy handler returns, so /recent
+	// The record lands only after the proxy handler returns, so the activity
 	// polled immediately can win the race and show an empty ring. Wait via
 	// the control surface first — same ring, same lock, so control-visible
-	// implies /recent-visible.
+	// implies activity-visible.
 	waitForRequestRecord(t, client, sess.ID, "forwarded /v1/messages request",
 		func(rec model.RequestRecord) bool {
 			return rec.Method == http.MethodPost && strings.Contains(rec.Path, "/v1/messages")
 		})
 
-	rresp, err := http.Get("http://" + sess.ProxyListenAddr + "/recent")
-	if err != nil {
-		t.Fatal(err)
-	}
+	rresp := apiGetRaw(t, client.SocketPath(), "/api/v1/activity")
 	defer rresp.Body.Close()
 	body, _ := io.ReadAll(rresp.Body)
 	if strings.Contains(string(body), "sk-RECENTSECRET") {
-		t.Fatalf("/recent leaked the raw credential (store-side masking regressed):\n%s", body)
+		t.Fatalf("the activity leaked the raw credential (store-side masking regressed):\n%s", body)
 	}
 	// Masked, not dropped: the scheme + redaction marker survive.
 	if !strings.Contains(string(body), "redacted") {
-		t.Fatalf("/recent should carry the masked Authorization marker; got:\n%s", body)
+		t.Fatalf("the activity should carry the masked Authorization marker; got:\n%s", body)
 	}
 }
 
-// TestRecentJSONCarriesBodyRefNeverInlineBody is a CONTRACT PROTECTION
-// guard: the bounded /recent JSON carries body_ref METADATA
-// (id/sha256/size) so a client can fetch the body out-of-band
-// via /recent/body, but it must NEVER inline the captured body bytes
-// into /recent itself. This passes today because model.RequestRecord
-// holds only a *RequestBodyRef (reference: id/size/sha256/captured_at/
-// truncated), no body-bytes field — /recent serializes records, so the
-// sent body cannot appear. It is a regression guard (a sibling to
-// TestRecentJSONMasksCredentialsByDefault): if it ever fails because
-// the body got inlined into /recent, that BREAKS the bounded-/recent
-// contract — understand the body_ref design before "fixing" the test.
+// TestActivityCarriesBodyRefNeverInlineBody is a CONTRACT PROTECTION
+// guard: the bounded activity JSON (GET /api/v1/activity) carries
+// body_ref METADATA (id/sha256/size) so a client can fetch the body
+// out-of-band via GET /api/v1/bodies/{id}, but it must NEVER inline the
+// captured body bytes into the activity itself. This passes today because
+// model.RequestRecord holds only a *RequestBodyRef (reference: id/size/
+// sha256/captured_at/truncated), no body-bytes field — the activity
+// serializes records, so the sent body cannot appear. It is a regression
+// guard (a sibling to TestActivityMasksCredentialsByDefault): if it ever
+// fails because the body got inlined into the activity, that BREAKS the
+// bounded-activity contract — understand the body_ref design before
+// "fixing" the test.
 //
-// Harness mirrors TestRecentJSONMasksCredentialsByDefault exactly
-// (headerInspectorSession + GET http://<ProxyAddr>/recent), only
+// Harness mirrors TestActivityMasksCredentialsByDefault exactly
+// (headerInspectorSession + GET /api/v1/activity), only
 // flipping the route's CaptureRequestBodies on via the same control
 // SetRoute path TestRequestBodyCapturedToFileWhenEnabled uses, and
 // reusing its client.Requests poll-for-BodyRef idiom. No new helpers.
-func TestRecentJSONCarriesBodyRefNeverInlineBody(t *testing.T) {
+func TestActivityCarriesBodyRefNeverInlineBody(t *testing.T) {
 	client, sess, hc, upstream := headerInspectorSession(t, "r.sock")
 	defer upstream.Close()
 
@@ -2597,7 +2433,7 @@ func TestRecentJSONCarriesBodyRefNeverInlineBody(t *testing.T) {
 
 	// A unique, improbable marker embedded as a string value inside a
 	// valid /v1/messages-ish JSON body. The distinctive prefix makes an
-	// accidental substring match in /recent implausible.
+	// accidental substring match in the activity implausible.
 	marker := fmt.Sprintf("CCWRAPBODYMARKER_neverinline_%d", time.Now().UnixNano())
 	sentBody := fmt.Sprintf(`{"model":"claude-sonnet-4-6","system":[{"type":"text","text":%q}],"messages":[{"role":"user","content":%q}]}`, marker, marker)
 	req, _ := http.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", strings.NewReader(sentBody))
@@ -2633,35 +2469,32 @@ func TestRecentJSONCarriesBodyRefNeverInlineBody(t *testing.T) {
 		t.Fatalf("capture ON: forwarded /v1/messages request must record a BodyRef within deadline, got nil")
 	}
 
-	rresp, err := http.Get("http://" + sess.ProxyListenAddr + "/recent")
-	if err != nil {
-		t.Fatal(err)
-	}
+	rresp := apiGetRaw(t, client.SocketPath(), "/api/v1/activity")
 	defer rresp.Body.Close()
 	body, _ := io.ReadAll(rresp.Body)
 	recentStr := string(body)
 
-	// (a) /recent MUST carry the body_ref metadata: the field name plus
+	// (a) the activity MUST carry the body_ref metadata: the field name plus
 	// the recorded ref's sha256 and size (as it appears in JSON).
 	if !strings.Contains(recentStr, `"body_ref"`) {
-		t.Fatalf("/recent must carry body_ref metadata, field absent.\n%s", recentStr)
+		t.Fatalf("the activity must carry body_ref metadata, field absent.\n%s", recentStr)
 	}
 	if !strings.Contains(recentStr, rec.BodyRef.SHA256) {
-		t.Fatalf("/recent must carry BodyRef.SHA256 %q.\n%s", rec.BodyRef.SHA256, recentStr)
+		t.Fatalf("the activity must carry BodyRef.SHA256 %q.\n%s", rec.BodyRef.SHA256, recentStr)
 	}
 	if !strings.Contains(recentStr, fmt.Sprint(rec.BodyRef.Size)) {
-		t.Fatalf("/recent must carry BodyRef.Size %d.\n%s", rec.BodyRef.Size, recentStr)
+		t.Fatalf("the activity must carry BodyRef.Size %d.\n%s", rec.BodyRef.Size, recentStr)
 	}
 
-	// (b) /recent MUST NOT inline the captured body bytes: the unique
+	// (b) the activity MUST NOT inline the captured body bytes: the unique
 	// marker (and a long substring of the sent body) must be absent.
 	// Bodies are referenced via BodyRef and fetched out-of-band through
-	// /recent/body — never inlined into the bounded /recent.
+	// GET /api/v1/bodies/{id} — never inlined into the bounded activity.
 	if strings.Contains(recentStr, marker) {
-		t.Fatalf("REGRESSION: /recent inlined the captured body — unique marker %q present. /recent must reference bodies via body_ref, never inline bytes. Do not weaken this guard.\n%s", marker, recentStr)
+		t.Fatalf("REGRESSION: the activity inlined the captured body — unique marker %q present. It must reference bodies via body_ref, never inline bytes. Do not weaken this guard.\n%s", marker, recentStr)
 	}
 	if strings.Contains(recentStr, `{"type":"text","text":"CCWRAPBODYMARKER_neverinline_`) {
-		t.Fatalf("REGRESSION: /recent inlined a substring of the captured body. /recent must reference bodies via body_ref, never inline bytes.\n%s", recentStr)
+		t.Fatalf("REGRESSION: the activity inlined a substring of the captured body. It must reference bodies via body_ref, never inline bytes.\n%s", recentStr)
 	}
 }
 
@@ -2942,23 +2775,19 @@ func TestRingEvictionDeletesBodyFileAndCloseRemovesDir(t *testing.T) {
 	}
 }
 
-// TestRequestSSEEventCarriesClass is the contract: the request SSE
-// payload must carry the Go-derived class top-level so the live JS
-// never re-derives it (no Go↔JS drift with first paint). Reuses
+// TestRequestSSEEventCarriesClass is the contract: the request event's
+// payload carries the Go-derived class top-level so clients never
+// re-derive it. Reuses
 // headerInspectorSession exactly as TestRequestHeadersCapturedWithCredentialsMasked
 // does (third-party-hidden route to the httptest upstream): a POST to
 // /v1/messages is forwarded (class "forwarded-api"); a POST to
 // /api/event_logging/v2/batch is answered synthetically (class
-// "synthetic"). The /events read loop mirrors TestSessionProxyEventsStream.
+// "synthetic"). Read over /api/v1/events, as ccwrap ui reads it.
 func TestRequestSSEEventCarriesClass(t *testing.T) {
-	client, sess, hc, upstream := headerInspectorSession(t, "s.sock")
+	client, _, hc, upstream := headerInspectorSession(t, "s.sock")
 	defer upstream.Close()
-	_ = client
 
-	resp, err := http.Get("http://" + sess.ProxyListenAddr + "/events")
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp := openV1Events(t, client.SocketPath())
 	defer resp.Body.Close()
 
 	// classByPath collects, per request event, the top-level "class" plus
@@ -2984,7 +2813,7 @@ func TestRequestSSEEventCarriesClass(t *testing.T) {
 			switch {
 			case strings.HasPrefix(line, "event: "):
 				curType = strings.TrimPrefix(line, "event: ")
-			case strings.HasPrefix(line, "data: ") && curType == "request":
+			case strings.HasPrefix(line, "data: ") && curType == "request.added":
 				// The SSE data: line is a model.Event envelope
 				// ({id,type,time,session_id,data}); the request
 				// payload (classifiedRecord) is ev.Data. The payload
@@ -3025,7 +2854,7 @@ func TestRequestSSEEventCarriesClass(t *testing.T) {
 	}()
 
 	// Give the SSE subscription time to attach before producing traffic
-	// (same 50ms idiom as TestSessionProxyEventsStream).
+	// (same 50ms idiom as TestAPIv1EventsCarryTrace).
 	time.Sleep(50 * time.Millisecond)
 
 	fwdReq, _ := http.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-6","messages":[]}`))
@@ -3465,95 +3294,6 @@ func TestMITMForwardingTraceStripsURLUserinfo(t *testing.T) {
 	}
 }
 
-func TestHandleInfoRecent_IncludesActiveProfileFields(t *testing.T) {
-	client, sess, hc, upstream := headerInspectorSession(t, "recap.sock")
-	defer upstream.Close()
-	_ = client
-	url := "http://" + sess.ProxyListenAddr + "/recent"
-	req, _ := http.NewRequest(http.MethodGet, url, nil)
-	resp, err := hc.Transport.RoundTrip(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, body)
-	}
-	var payload struct {
-		Session map[string]json.RawMessage `json:"session"`
-	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		t.Fatalf("decode /recent: %v\n  body: %s", err, body)
-	}
-	if _, ok := payload.Session["active_profile_name"]; !ok {
-		t.Fatalf("/recent.session missing active_profile_name key (body: %s)", body)
-	}
-	if _, ok := payload.Session["active_profile_provider"]; !ok {
-		t.Fatalf("/recent.session missing active_profile_provider key (body: %s)", body)
-	}
-	// capture_bodies key MUST be present on /recent (not just bootstrap/SSE)
-	// — JS re-bootstrap on SSE-disconnect-reconnect calls /recent and reads
-	// session.capture_bodies to re-render the Bodies cell. The field-by-field
-	// map in handleInfoRecent doesn't auto-serialize new model.Session fields,
-	// so this guards against a future field-on-model-but-missing-on-/recent drift.
-	if _, ok := payload.Session["capture_bodies"]; !ok {
-		t.Fatalf("/recent.session missing capture_bodies key (body: %s)", body)
-	}
-	if _, ok := payload.Session["capture_telemetry"]; !ok {
-		t.Fatalf("/recent.session missing capture_telemetry key (body: %s)", body)
-	}
-	if _, ok := payload.Session["native_tls"]; !ok {
-		t.Fatalf("/recent.session missing native_tls key (body: %s)", body)
-	}
-	// Same guard for the CCWRAP_UNMASK_CREDENTIALS marker — without this field
-	// the inspect ribbon would re-render to bodies-on after a reconnect,
-	// hiding the danger-color UNMASKED state even though the supervisor is
-	// still unmask-on. The reconnect path MUST surface the launch-fixed flag.
-	if _, ok := payload.Session["capture_bodies_unmasked"]; !ok {
-		t.Fatalf("/recent.session missing capture_bodies_unmasked key (body: %s)", body)
-	}
-}
-
-func TestHandleProfileCatalog_NoFile(t *testing.T) {
-	client, sess, hc, upstream := headerInspectorSession(t, "pcat-nofile-h.sock")
-	defer upstream.Close()
-	_ = client
-	url := "http://" + sess.ProxyListenAddr + "/profile/catalog"
-	req, _ := http.NewRequest(http.MethodGet, url, nil)
-	resp, err := hc.Transport.RoundTrip(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		t.Fatalf("status = %d, body=%s", resp.StatusCode, body)
-	}
-	if !strings.Contains(string(body), `"has_profiles_file":false`) {
-		t.Fatalf("no-file response shape: %s", body)
-	}
-	if !strings.Contains(string(body), `"items":[]`) {
-		t.Fatalf("items must be empty array not null: %s", body)
-	}
-}
-
-func TestHandleProfileCatalog_RejectsWrongMethod(t *testing.T) {
-	client, sess, hc, upstream := headerInspectorSession(t, "pcat-method.sock")
-	defer upstream.Close()
-	_ = client
-	url := "http://" + sess.ProxyListenAddr + "/profile/catalog"
-	req, _ := http.NewRequest(http.MethodPost, url, nil)
-	resp, err := hc.Transport.RoundTrip(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusMethodNotAllowed {
-		t.Fatalf("status = %d, want 405", resp.StatusCode)
-	}
-}
-
 // headerInspectorSessionWithSupervisor mirrors headerInspectorSession but
 // returns the *Supervisor instance too, so tests can reach into private
 // state (sessionState.profileToken). Test-only.
@@ -3602,326 +3342,6 @@ func headerInspectorSessionWithSupervisor(t *testing.T, sockName string) (*Super
 		TLSClientConfig: &tls.Config{RootCAs: pool},
 	}}
 	return srv, client, sess, hc, upstream
-}
-
-func TestHandleProfileSwitch_RejectsMissingToken(t *testing.T) {
-	srv, _, sess, hc, upstream := headerInspectorSessionWithSupervisor(t, "psw-notok.sock")
-	defer upstream.Close()
-	_ = srv
-	url := "http://" + sess.ProxyListenAddr + "/profile/switch"
-	body := strings.NewReader(`{"name":"any"}`)
-	req, _ := http.NewRequest(http.MethodPost, url, body)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := hc.Transport.RoundTrip(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", resp.StatusCode)
-	}
-}
-
-func TestHandleProfileSwitch_RejectsWrongToken(t *testing.T) {
-	srv, _, sess, hc, upstream := headerInspectorSessionWithSupervisor(t, "psw-wrongtok.sock")
-	defer upstream.Close()
-	_ = srv
-	url := "http://" + sess.ProxyListenAddr + "/profile/switch"
-	body := strings.NewReader(`{"name":"any"}`)
-	req, _ := http.NewRequest(http.MethodPost, url, body)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-CCWRAP-Profile-Token", strings.Repeat("0", 32))
-	resp, err := hc.Transport.RoundTrip(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403 for wrong token", resp.StatusCode)
-	}
-}
-
-func TestHandleProfileSwitch_AcceptsRightToken_ReturnsSwitchOutcome(t *testing.T) {
-	srv, _, sess, hc, upstream := headerInspectorSessionWithSupervisor(t, "psw-rt.sock")
-	defer upstream.Close()
-	state := srv.getSession(sess.ID)
-	if state == nil {
-		t.Fatalf("session not found")
-	}
-	url := "http://" + sess.ProxyListenAddr + "/profile/switch"
-	body := strings.NewReader(`{"name":""}`)
-	req, _ := http.NewRequest(http.MethodPost, url, body)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-CCWRAP-Profile-Token", state.profileToken)
-	resp, err := hc.Transport.RoundTrip(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, respBody)
-	}
-	var out struct {
-		Result string `json:"result"`
-	}
-	if err := json.Unmarshal(respBody, &out); err != nil {
-		t.Fatalf("decode outcome: %v body=%s", err, respBody)
-	}
-	if out.Result == "" {
-		t.Fatalf("outcome.result empty: %s", respBody)
-	}
-}
-
-// TestHandleProfileSwitch_BodyNeverDecodedOnCSRFMiss asserts the
-// defense-in-depth contract: on missing/wrong CSRF token, the handler
-// returns 403 BEFORE consuming or parsing the body. We assert this by
-// sending a malformed JSON body alongside a missing token — if the
-// handler decoded first, we'd see 400 "invalid request body"; if it
-// checks CSRF first, we see 403 regardless of body shape.
-func TestHandleProfileSwitch_BodyNeverDecodedOnCSRFMiss(t *testing.T) {
-	srv, _, sess, hc, upstream := headerInspectorSessionWithSupervisor(t, "psw-csrf-body.sock")
-	defer upstream.Close()
-	_ = srv
-	url := "http://" + sess.ProxyListenAddr + "/profile/switch"
-	body := strings.NewReader(`{"name": NOT VALID JSON`)
-	req, _ := http.NewRequest(http.MethodPost, url, body)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := hc.Transport.RoundTrip(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403 (CSRF must check before body decode)", resp.StatusCode)
-	}
-}
-
-// TestHandleCaptureBodies_RejectsWrongMethod confirms GET/HEAD/PUT/PATCH/DELETE
-// to /capture/bodies return 405 (the method-aware dispatch matches the
-// path before /404 fall-through, mirroring /profile/switch's contract).
-func TestHandleCaptureBodies_RejectsWrongMethod(t *testing.T) {
-	srv, _, sess, hc, upstream := headerInspectorSessionWithSupervisor(t, "cb-405.sock")
-	defer upstream.Close()
-	_ = srv
-	for _, m := range []string{http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodDelete} {
-		req, _ := http.NewRequest(m, "http://"+sess.ProxyListenAddr+"/capture/bodies", nil)
-		resp, err := hc.Transport.RoundTrip(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusMethodNotAllowed {
-			t.Errorf("%s /capture/bodies status = %d, want 405", m, resp.StatusCode)
-		}
-	}
-}
-
-// TestHandleCaptureBodies_RejectsMissingToken locks the CSRF guard: a POST
-// without X-CCWRAP-Profile-Token must be refused with 403 before body decode.
-func TestHandleCaptureBodies_RejectsMissingToken(t *testing.T) {
-	srv, _, sess, hc, upstream := headerInspectorSessionWithSupervisor(t, "cb-notok.sock")
-	defer upstream.Close()
-	_ = srv
-	body := strings.NewReader(`{"enable":true}`)
-	req, _ := http.NewRequest(http.MethodPost, "http://"+sess.ProxyListenAddr+"/capture/bodies", body)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := hc.Transport.RoundTrip(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", resp.StatusCode)
-	}
-}
-
-// TestHandleCaptureBodies_RejectsWrongToken — defense-in-depth for the
-// constant-time compare path: any non-matching token must 403.
-func TestHandleCaptureBodies_RejectsWrongToken(t *testing.T) {
-	srv, _, sess, hc, upstream := headerInspectorSessionWithSupervisor(t, "cb-wrongtok.sock")
-	defer upstream.Close()
-	_ = srv
-	body := strings.NewReader(`{"enable":true}`)
-	req, _ := http.NewRequest(http.MethodPost, "http://"+sess.ProxyListenAddr+"/capture/bodies", body)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-CCWRAP-Profile-Token", strings.Repeat("0", 32))
-	resp, err := hc.Transport.RoundTrip(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", resp.StatusCode)
-	}
-}
-
-// TestHandleCaptureBodies_MissingEnable returns 400 when the required field
-// is absent. This guards against an accidental empty body silently disabling
-// capture (the *bool sentinel encodes "absent" vs "explicit false").
-func TestHandleCaptureBodies_MissingEnable(t *testing.T) {
-	srv, _, sess, hc, upstream := headerInspectorSessionWithSupervisor(t, "cb-noenable.sock")
-	defer upstream.Close()
-	state := srv.getSession(sess.ID)
-	if state == nil {
-		t.Fatalf("session not found")
-	}
-	// Empty JSON object — valid JSON, but no `enable` field.
-	body := strings.NewReader(`{}`)
-	req, _ := http.NewRequest(http.MethodPost, "http://"+sess.ProxyListenAddr+"/capture/bodies", body)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-CCWRAP-Profile-Token", state.profileToken)
-	resp, err := hc.Transport.RoundTrip(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 for missing enable", resp.StatusCode)
-	}
-}
-
-// TestHandleCaptureBodies_BodyNeverDecodedOnCSRFMiss — defense-in-depth: when
-// CSRF fails, the handler must not parse the JSON body (mirrors the
-// /profile/switch contract). We send malformed JSON without a token — if the
-// handler decoded first, we'd see 400; if CSRF runs first, we see 403.
-func TestHandleCaptureBodies_BodyNeverDecodedOnCSRFMiss(t *testing.T) {
-	srv, _, sess, hc, upstream := headerInspectorSessionWithSupervisor(t, "cb-csrf-body.sock")
-	defer upstream.Close()
-	_ = srv
-	body := strings.NewReader(`{"enable":  NOT JSON`)
-	req, _ := http.NewRequest(http.MethodPost, "http://"+sess.ProxyListenAddr+"/capture/bodies", body)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := hc.Transport.RoundTrip(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403 (CSRF must check before body decode)", resp.StatusCode)
-	}
-}
-
-// TestHandleCaptureBodies_RoundTrip — happy path: POST {enable:true} returns
-// 200 {enabled:true}, AND the session state actually flipped (sess.public
-// .CaptureBodies and ap.l.captureBodies both updated). Then POST
-// {enable:false} flips back.
-func TestHandleCaptureBodies_RoundTrip(t *testing.T) {
-	srv, _, sess, hc, upstream := headerInspectorSessionWithSupervisor(t, "cb-rt.sock")
-	defer upstream.Close()
-	state := srv.getSession(sess.ID)
-	if state == nil {
-		t.Fatalf("session not found")
-	}
-	post := func(enable bool) (int, bool) {
-		body := strings.NewReader(fmt.Sprintf(`{"enable":%t}`, enable))
-		req, _ := http.NewRequest(http.MethodPost, "http://"+sess.ProxyListenAddr+"/capture/bodies", body)
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-CCWRAP-Profile-Token", state.profileToken)
-		resp, err := hc.Transport.RoundTrip(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer resp.Body.Close()
-		buf, _ := io.ReadAll(resp.Body)
-		var out struct {
-			Enabled bool `json:"enabled"`
-		}
-		if jerr := json.Unmarshal(buf, &out); jerr != nil {
-			t.Fatalf("decode capture response: %v; body=%s", jerr, buf)
-		}
-		return resp.StatusCode, out.Enabled
-	}
-	// 1. Enable
-	if status, enabled := post(true); status != 200 || !enabled {
-		t.Fatalf("POST enable=true: status=%d enabled=%v", status, enabled)
-	}
-	if !state.active.Load().l.captureBodies {
-		t.Errorf("after enable: ap.l.captureBodies = false, want true")
-	}
-	// 2. Disable
-	if status, enabled := post(false); status != 200 || enabled {
-		t.Fatalf("POST enable=false: status=%d enabled=%v", status, enabled)
-	}
-	if state.active.Load().l.captureBodies {
-		t.Errorf("after disable: ap.l.captureBodies = true, want false")
-	}
-}
-
-// TestHandleCaptureTelemetryEndpoint mirrors the /capture/bodies endpoint
-// contract for the telemetry toggle: (1) a valid POST {enable:true} with the
-// correct CSRF token returns 200 {enabled:true} and actually flips the live
-// session state; (2) a missing/invalid token returns 403; (3) a non-POST
-// method returns 405; (4) a POST with no enable field returns 400.
-func TestHandleCaptureTelemetryEndpoint(t *testing.T) {
-	srv, _, sess, hc, upstream := headerInspectorSessionWithSupervisor(t, "ct-ep.sock")
-	defer upstream.Close()
-	state := srv.getSession(sess.ID)
-	if state == nil {
-		t.Fatalf("session not found")
-	}
-
-	// (1) Valid POST {enable:true} with the correct token -> 200 {enabled:true}.
-	body := strings.NewReader(`{"enable":true}`)
-	req, _ := http.NewRequest(http.MethodPost, "http://"+sess.ProxyListenAddr+"/capture/telemetry", body)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-CCWRAP-Profile-Token", state.profileToken)
-	resp, err := hc.Transport.RoundTrip(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	buf, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-	var out struct {
-		Enabled bool `json:"enabled"`
-	}
-	if jerr := json.Unmarshal(buf, &out); jerr != nil {
-		t.Fatalf("decode capture response: %v; body=%s", jerr, buf)
-	}
-	if resp.StatusCode != http.StatusOK || !out.Enabled {
-		t.Fatalf("POST enable=true: status=%d enabled=%v", resp.StatusCode, out.Enabled)
-	}
-	if !state.active.Load().l.captureTelemetry {
-		t.Errorf("after enable: ap.l.captureTelemetry = false, want true")
-	}
-
-	// (2) Missing token -> 403.
-	body = strings.NewReader(`{"enable":true}`)
-	req, _ = http.NewRequest(http.MethodPost, "http://"+sess.ProxyListenAddr+"/capture/telemetry", body)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err = hc.Transport.RoundTrip(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("missing token: status = %d, want 403", resp.StatusCode)
-	}
-
-	// (3) Non-POST (GET) -> 405.
-	req, _ = http.NewRequest(http.MethodGet, "http://"+sess.ProxyListenAddr+"/capture/telemetry", nil)
-	resp, err = hc.Transport.RoundTrip(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusMethodNotAllowed {
-		t.Fatalf("GET /capture/telemetry: status = %d, want 405", resp.StatusCode)
-	}
-
-	// (4) POST with no enable field -> 400.
-	body = strings.NewReader(`{}`)
-	req, _ = http.NewRequest(http.MethodPost, "http://"+sess.ProxyListenAddr+"/capture/telemetry", body)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-CCWRAP-Profile-Token", state.profileToken)
-	resp, err = hc.Transport.RoundTrip(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("missing enable: status = %d, want 400", resp.StatusCode)
-	}
 }
 
 // TestHandleAnthropicMITM_RefusesWhenAuthMissing — request-time
@@ -4017,122 +3437,6 @@ func TestHandleAnthropicMITM_RefusesWhenAuthMissing(t *testing.T) {
 	}
 }
 
-// TestSessionProxy_ProfileTest_HappyPath exercises POST /profile/test
-// end-to-end through the proxy dispatch (proxy.go case "/profile/test").
-// Complements handle_profile_probe_test.go's handler-level tests by
-// living next to the other proxy integration tests (e.g.
-// TestHandleProfileSwitch_AcceptsRightToken_ReturnsSwitchOutcome).
-func TestSessionProxy_ProfileTest_HappyPath(t *testing.T) {
-	upstream2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(200)
-		_, _ = io.WriteString(w, `{"model":"x"}`)
-	}))
-	defer upstream2.Close()
-	srv, _, sess, hc, upstream := headerInspectorSessionWithSupervisor(t, "pte-integ-ok.sock")
-	defer upstream.Close()
-	state := srv.getSession(sess.ID)
-	writeProfilesJSON(t, srv, fmt.Sprintf(`{"profiles":{"glm":{"base_url":%q,"auth":{"mode":"ccwrap_x_api_key","key":"sk-fake"}}}}`, upstream2.URL))
-
-	url := "http://" + sess.ProxyListenAddr + "/profile/test"
-	body := strings.NewReader(`{"name":"glm"}`)
-	req, _ := http.NewRequest(http.MethodPost, url, body)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-CCWRAP-Profile-Token", state.profileToken)
-	resp, err := hc.Transport.RoundTrip(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status: got %d, want 200; body=%s", resp.StatusCode, respBody)
-	}
-	var got map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if got["status"] != "OK" {
-		t.Errorf("status field: got %v, want OK", got["status"])
-	}
-	if got["profile"] != "glm" {
-		t.Errorf("profile field: got %v, want glm", got["profile"])
-	}
-}
-
-// TestSessionProxy_ProfileTest_CSRFRejection exercises the CSRF guard
-// through the proxy dispatch. Confirms the dispatch arm doesn't bypass
-// the handler's CSRF check.
-func TestSessionProxy_ProfileTest_CSRFRejection(t *testing.T) {
-	srv, _, sess, hc, upstream := headerInspectorSessionWithSupervisor(t, "pte-integ-csrf.sock")
-	defer upstream.Close()
-	_ = srv
-	url := "http://" + sess.ProxyListenAddr + "/profile/test"
-	req, _ := http.NewRequest(http.MethodPost, url, strings.NewReader(`{"name":"glm"}`))
-	req.Header.Set("Content-Type", "application/json")
-	// NO X-CCWRAP-Profile-Token header.
-	resp, err := hc.Transport.RoundTrip(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("status = %d, want 403", resp.StatusCode)
-	}
-}
-
-// TestSessionProxy_EgressTest_HappyPath — exercises POST /profile/test-egress
-// through the proxy mux end-to-end. Companion of
-// TestSessionProxy_ProfileTest_HappyPath; covers the route dispatch
-// in proxy.go::case "/profile/test-egress".
-func TestSessionProxy_EgressTest_HappyPath(t *testing.T) {
-	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(2 * time.Millisecond)
-		_, _ = w.Write([]byte(`{"ip":"1.2.3.4","country":"US"}`))
-	}))
-	defer stub.Close()
-	t.Setenv("CCWRAP_EGRESS_TEST_URL", stub.URL)
-
-	srv, _, sess, hc, upstream := headerInspectorSessionWithSupervisor(t, "psp-egress-ok.sock")
-	defer upstream.Close()
-	state := srv.getSession(sess.ID)
-	writeEgressProbeProfilesJSON(t, srv, `{"profiles":{"gw":{"egress":{"mode":"direct"}}}}`)
-
-	url := "http://" + sess.ProxyListenAddr + "/profile/test-egress"
-	req, _ := http.NewRequest(http.MethodPost, url, strings.NewReader(`{"name":"gw"}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-CCWRAP-Profile-Token", state.profileToken)
-	resp, err := hc.Transport.RoundTrip(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status = %d, body=%s, want 200", resp.StatusCode, string(body))
-	}
-}
-
-// TestSessionProxy_EgressTest_CSRFRejection — POST /profile/test-egress
-// without the X-CCWRAP-Profile-Token header must return 403 at the
-// handler level (defense-in-depth, same as /profile/test).
-func TestSessionProxy_EgressTest_CSRFRejection(t *testing.T) {
-	srv, _, sess, hc, upstream := headerInspectorSessionWithSupervisor(t, "psp-egress-csrf.sock")
-	defer upstream.Close()
-	_ = srv
-	url := "http://" + sess.ProxyListenAddr + "/profile/test-egress"
-	req, _ := http.NewRequest(http.MethodPost, url, strings.NewReader(`{"name":"any"}`))
-	req.Header.Set("Content-Type", "application/json")
-	// NO X-CCWRAP-Profile-Token header.
-	resp, err := hc.Transport.RoundTrip(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", resp.StatusCode)
-	}
-}
-
 func TestNativeTLSInfoEndpoint(t *testing.T) {
 	sp := &sessionProxy{session: &sessionState{}}
 
@@ -4211,4 +3515,79 @@ func TestNativeTLSClientHelloDownload(t *testing.T) {
 	if !bytes.Equal(rec.Body.Bytes(), raw) {
 		t.Error("served bytes != stored bytes")
 	}
+}
+
+// A session port only proxies. A request addressed to the port itself —
+// any of the old page and info paths, any method, any Host — gets a fixed
+// 404 that points at ccwrap open and carries no session data. The session
+// is read over the control socket, whose activity lists are arrays even
+// when empty.
+func TestSessionPortOnlyProxies(t *testing.T) {
+	paths := testutil.ShortAppPaths(t, "s.sock")
+	srv, err := New(paths, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Run(ctx) }()
+	client := control.NewClient(paths.SocketPath)
+	waitForSupervisor(t, client)
+	sess, err := client.CreateSession(context.Background(), model.SessionCreateRequest{LauncherPID: os.Getpid(), Name: "info"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct{ method, path, host string }{
+		{"GET", "/", ""}, {"GET", "/healthz", ""}, {"GET", "/recent", ""}, {"GET", "/recent/body?id=ab", ""},
+		{"GET", "/events", ""}, {"GET", "/native-tls", ""}, {"GET", "/native-tls/clienthello.bin", ""},
+		{"GET", "/profile/catalog", ""}, {"POST", "/profile/switch", ""}, {"POST", "/capture/bodies", ""},
+		{"GET", "/recent", "rebound.example"},
+	} {
+		req, _ := http.NewRequest(tc.method, "http://"+sess.ProxyListenAddr+tc.path, strings.NewReader(`{}`))
+		if tc.host != "" {
+			req.Host = tc.host
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound || !strings.Contains(string(body), "run `ccwrap open`") || strings.Contains(string(body), sess.ID) {
+			t.Errorf("%s %s (host %q): %d %q", tc.method, tc.path, tc.host, resp.StatusCode, body)
+		}
+	}
+
+	status, act := apiCall(t, paths.SocketPath, "GET", "/api/v1/activity", "")
+	reqs, okR := act["requests"].([]any)
+	errs, okE := act["errors"].([]any)
+	if status != 200 || !okR || !okE || len(reqs) != 0 || len(errs) != 0 {
+		t.Fatalf("empty activity must be arrays: %d %v", status, act)
+	}
+}
+
+// openV1Events opens the session's /api/v1/events over its control socket.
+func openV1Events(t *testing.T, socket string) *http.Response {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, "http://unix/api/v1/events", nil)
+	resp, err := (&http.Client{Transport: control.UnixTransport(socket)}).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+// apiGetRaw sends GET path to the session's v1 API over its control socket.
+func apiGetRaw(t *testing.T, socket, path string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, "http://unix"+path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := (&http.Client{Transport: control.UnixTransport(socket), Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
 }

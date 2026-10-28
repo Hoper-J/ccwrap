@@ -8,9 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/Hoper-J/ccwrap/internal/control"
 	"github.com/Hoper-J/ccwrap/internal/model"
 )
 
@@ -122,18 +120,4 @@ func TestForwardedRequestRecordsHeaderChanges(t *testing.T) {
 	if !found {
 		t.Fatalf("the activity carries no header changes:\n%s", body)
 	}
-}
-
-// apiGetRaw sends GET path to the session's v1 API over its control socket.
-func apiGetRaw(t *testing.T, socket, path string) *http.Response {
-	t.Helper()
-	req, err := http.NewRequest(http.MethodGet, "http://unix"+path, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp, err := (&http.Client{Transport: control.UnixTransport(socket), Timeout: 10 * time.Second}).Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return resp
 }

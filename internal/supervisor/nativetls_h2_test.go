@@ -78,10 +78,7 @@ func TestSessionProxyDoesNotMirrorHTTP2HellosUpstream(t *testing.T) {
 		t.Fatalf("HTTP/2-offering client: status %d", code)
 	}
 
-	resp, err := http.Get("http://" + sess.ProxyListenAddr + "/native-tls")
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp := apiGetRaw(t, paths.SocketPath, "/api/v1/native-tls")
 	defer resp.Body.Close()
 	var info struct {
 		Stacks []struct {

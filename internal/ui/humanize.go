@@ -196,10 +196,8 @@ func HumanAuthPolicy(p model.AuthPolicy) string {
 //	rejected [a] ✗ requested (reason)
 //
 // Returns "" when detail does not parse or carries neither a target nor a
-// request — callers fall back to their raw rendering. Wording is the
-// single source for the web first paint (unifiedActivityRows) and the TUI
-// trace rows; the web live decorator (renderSwitchMarker, JS) repeats the
-// same words — keep all three in lockstep.
+// request — callers fall back to their raw rendering. The TUI trace rows
+// use it.
 func HumanProfileSwitch(detail string) string {
 	var d struct {
 		From      string `json:"from"`
@@ -226,8 +224,7 @@ func HumanProfileSwitch(detail string) string {
 // NativeTLSPresentation maps the session native_tls field (+ block-episode
 // count + loaded flag) to a (value, detail, state) tuple. state is one of
 // native-off / native-active / native-blocked. Single wording source for
-// the web ribbon cell (and its JS live-patch twin) and the TUI summary
-// line. See the supervisor wrapper for the per-state rationale.
+// the ribbon cell (the session's display.cells) and the TUI summary line. See the supervisor wrapper for the per-state rationale.
 func NativeTLSPresentation(nativeTLS string, blocks int, loaded bool) (value, detail, state string) {
 	switch {
 	case nativeTLS == "" || nativeTLS == "off":
@@ -247,8 +244,8 @@ func NativeTLSPresentation(nativeTLS string, blocks int, loaded bool) (value, de
 
 // BodiesPresentation maps the capture toggles to a (value, detail, state)
 // tuple; state is bodies-off / bodies-on / bodies-unmasked. Single wording
-// source for the web Bodies cell (and its JS twin) and the TUI capture
-// line. The unmasked state applies only when request capture is also on.
+// source for the Bodies cell (the session's display.cells) and the TUI
+// capture line. The unmasked state applies only when request capture is also on.
 func BodiesPresentation(captureBodies, captureBodiesUnmasked, captureTelemetry bool) (value, detail, state string) {
 	if !captureBodies && !captureTelemetry {
 		return "off", "click to choose what to capture", "bodies-off"

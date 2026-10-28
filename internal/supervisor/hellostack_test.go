@@ -352,13 +352,14 @@ func TestSessionProxyMirrorsEachConnectionsHelloUpstream(t *testing.T) {
 	nativeRootsForTest = pool
 	t.Cleanup(func() { nativeRootsForTest = nil })
 	proxyURL := "http://" + proxy.addr
-	caBundle, sess := routedSession(t, model.SessionRouteRequest{
+	paths, sess := routedSessionPaths(t, model.SessionRouteRequest{
 		APIBaseURL: "https://api.anthropic.com", ExactUpstreamHost: "api.anthropic.com", ExactUpstreamBase: "https://api.anthropic.com",
 		RouteClass: model.RouteClassFirstParty, RouteSource: model.RouteSourceExplicit,
 		AuthMode: model.AuthModePassthrough, AuthSource: model.AuthSourceNone,
 		Egress:     model.EgressConfig{Mode: "explicit", HTTPProxy: proxyURL, HTTPSProxy: proxyURL, Source: "test", Summary: proxyURL},
 		FailPolicy: model.FailClosed, NativeTLS: true,
 	})
+	caBundle := paths.CABundlePath
 	other := shapedClaudeClient(t, caBundle, sess, plainShape)
 	api := shapedClaudeClient(t, caBundle, sess, alpnShape)
 	getHead := rawHead("GET /api/claude_code/settings HTTP/1.1", "Host: api.anthropic.com", "Accept: application/json", "Connection: keep-alive")
@@ -371,10 +372,7 @@ func TestSessionProxyMirrorsEachConnectionsHelloUpstream(t *testing.T) {
 		}
 	}
 
-	resp, err := http.Get("http://" + sess.ProxyListenAddr + "/native-tls")
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp := apiGetRaw(t, paths.SocketPath, "/api/v1/native-tls")
 	defer resp.Body.Close()
 	var info struct {
 		JA4    string `json:"ja4"`

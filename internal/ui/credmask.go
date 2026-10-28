@@ -15,11 +15,11 @@ import (
 //
 // This is the WIRE masker. The supervisor applies it to a RequestRecord's
 // headers BEFORE the record enters the activity ring, so the raw credential
-// never reaches /recent, the page bootstrap, the SSE stream, a HAR export, or
-// a spill file — masking is correct-by-construction at the single store-side
-// convergence point, not a property each emit site must remember. Render-time
-// redaction (RenderHeaderGroupsWithRedaction and its web.js twin) is now
-// defense in depth on top of it. The only bypass is the launch-time
+// never reaches the activity API, the event stream, ccwrap capture or a
+// spill file — masking is correct-by-construction at the single store-side
+// convergence point, not a property each emit site must remember. ccwrap ui
+// masks credential headers again when it shows them, as defense in depth on
+// top of it. The only bypass is the launch-time
 // CCWRAP_UNMASK_CREDENTIALS=1 opt-in, gated by the caller (the supervisor
 // stores raw under that flag, and the ribbon shows a persistent UNMASKED
 // marker while it is set).

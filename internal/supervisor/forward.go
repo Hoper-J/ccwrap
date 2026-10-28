@@ -114,7 +114,7 @@ func (sp *sessionProxy) forwardToUpstream(w http.ResponseWriter, r *http.Request
 			// the inspect drawer surfaces what was attempted. Without this,
 			// captureBodies=on + rewrite-rejected requests leave orphan body
 			// files on disk (bounded by bodystore LRU but unreachable through
-			// /recent).
+			// the activity API).
 			sp.supervisor.recordRequest(sp.session.public.ID, model.RequestRecord{
 				// Timestamp is the request boundary (handler entry), matching
 				// the success path below. Stamping time.Now() (the failure

@@ -2,7 +2,7 @@
 // ccwrap profile: POST /v1/messages with max_tokens=1 against the
 // configured upstream, then classify the response. The probe is
 // direct in-process — it does not depend on a running ccwrap session
-// and does not appear in the inspect web /recent timeline.
+// and does not appear in any session's activity.
 package profiletest
 
 import (

@@ -1,10 +1,10 @@
 // Package localpeer identifies which local user owns the other end of a
 // loopback TCP connection, so a session port can refuse other users.
 //
-// A ccwrap session listens on 127.0.0.1:<random>; that one port is both the
-// HTTP proxy Claude Code uses (requests leave with the user's gateway
-// credential injected) and the dashboard/info endpoints (captured bodies).
-// Loopback binding keeps the network out but not other accounts on the same
+// A ccwrap session listens on 127.0.0.1:<random>: the HTTP proxy Claude
+// Code uses (requests leave with the user's gateway credential injected).
+// ccwrap ui listens on another loopback port and shows every session's
+// captured traffic, so it is guarded the same way. Loopback binding keeps the network out but not other accounts on the same
 // machine, and a token in the proxy URL is no defence because HTTPS_PROXY
 // reaches Claude Code on argv, which `ps` shows to everyone. The kernel does
 // know who opened the connecting socket, so the listener asks it: the peer

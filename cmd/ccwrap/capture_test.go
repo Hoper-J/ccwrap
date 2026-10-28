@@ -110,7 +110,7 @@ func TestParseCaptureArgs_UserPromptOverridesProbe(t *testing.T) {
 // The struct-preserving credential masker moved to internal/ui
 // (ui.MaskCredentialHeaders); its unit tests live in
 // internal/ui/credmask_test.go. Capture no longer masks headers itself — it
-// trusts the server-masked /recent wire (supervisor.recordRequest), so the
+// trusts the server-masked activity API (supervisor.recordRequest), so the
 // emit-path coverage is now the supervisor wire test plus the ui masker tests.
 
 func TestBuildCaptureResult_RequestPlusResponse(t *testing.T) {
@@ -185,6 +185,12 @@ func TestBuildCaptureResult_401Note(t *testing.T) {
 	}
 }
 
+// urlSource reads a capture's records from a plain HTTP server standing in
+// for the session's control socket.
+func urlSource(u string) captureSource {
+	return captureSource{base: u, client: &http.Client{Timeout: 5 * time.Second}}
+}
+
 func TestFetchRecentMatch_FindsExactPath(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"requests": []model.RequestRecord{
@@ -196,7 +202,7 @@ func TestFetchRecentMatch_FindsExactPath(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	rec, ok := fetchRecentMatch(srv.URL, captureOpts{Response: true, Path: "/v1/messages", Host: ""})
+	rec, ok := fetchRecentMatch(urlSource(srv.URL), captureOpts{Response: true, Path: "/v1/messages", Host: ""})
 	if !ok {
 		t.Fatal("expected a match")
 	}
@@ -220,7 +226,7 @@ func TestFetchRecentMatch_IgnoresQueryString(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	rec, ok := fetchRecentMatch(srv.URL, captureOpts{Response: true, Path: "/v1/messages", Host: ""})
+	rec, ok := fetchRecentMatch(urlSource(srv.URL), captureOpts{Response: true, Path: "/v1/messages", Host: ""})
 	if !ok {
 		t.Fatal("expected /v1/messages?beta=true to match /v1/messages")
 	}
@@ -238,8 +244,8 @@ func TestFetchRecentMatch_MainInferenceSkipsQuota(t *testing.T) {
 		"main":  `{"model":"claude-opus-4-8","system":[{"type":"text","text":"x"}],"tools":[{"name":"Bash"}],"messages":[{"role":"user","content":"ping"}]}`,
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/recent/body" {
-			_, _ = w.Write([]byte(bodies[r.URL.Query().Get("id")]))
+		if id, ok := strings.CutPrefix(r.URL.Path, "/api/v1/bodies/"); ok {
+			_, _ = w.Write([]byte(bodies[id]))
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"requests": []model.RequestRecord{
@@ -249,7 +255,7 @@ func TestFetchRecentMatch_MainInferenceSkipsQuota(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	rec, ok := fetchRecentMatch(srv.URL, captureOpts{Response: true, Path: "/v1/messages", MainInference: true})
+	rec, ok := fetchRecentMatch(urlSource(srv.URL), captureOpts{Response: true, Path: "/v1/messages", MainInference: true})
 	if !ok {
 		t.Fatal("expected the tools-bearing main inference to match")
 	}
@@ -258,7 +264,7 @@ func TestFetchRecentMatch_MainInferenceSkipsQuota(t *testing.T) {
 	}
 
 	// Without MainInference, the first record (quota) is returned as before.
-	rec2, ok2 := fetchRecentMatch(srv.URL, captureOpts{Response: true, Path: "/v1/messages"})
+	rec2, ok2 := fetchRecentMatch(urlSource(srv.URL), captureOpts{Response: true, Path: "/v1/messages"})
 	if !ok2 || rec2.BodyRef.ID != "quota" {
 		t.Fatalf("default behavior must return the first match (quota), got ok=%v rec=%+v", ok2, rec2)
 	}
@@ -299,8 +305,8 @@ func TestFetchRecentMatch_MainInferenceSkipsWarmup(t *testing.T) {
 		"main":   `{"model":"claude-opus-4-8","tools":[{"name":"Bash"}],"messages":[{"role":"user","content":[{"type":"text","text":"<system-reminder>ctx</system-reminder>"},{"type":"text","text":"Reply with the single word: ping"}]}]}`,
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/recent/body" {
-			_, _ = w.Write([]byte(bodies[r.URL.Query().Get("id")]))
+		if id, ok := strings.CutPrefix(r.URL.Path, "/api/v1/bodies/"); ok {
+			_, _ = w.Write([]byte(bodies[id]))
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"requests": []model.RequestRecord{
@@ -310,13 +316,13 @@ func TestFetchRecentMatch_MainInferenceSkipsWarmup(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	rec, ok := fetchRecentMatch(srv.URL, captureOpts{Response: true, Path: "/v1/messages", MainInference: true})
+	rec, ok := fetchRecentMatch(urlSource(srv.URL), captureOpts{Response: true, Path: "/v1/messages", MainInference: true})
 	if !ok || rec.BodyRef.ID != "main" {
 		t.Fatalf("MainInference must skip the warmup probe and pick the prompt inference, got ok=%v id=%q", ok, rec.BodyRef.ID)
 	}
 
 	// Without MainInference, the first record (warmup) is returned unchanged.
-	rec2, ok2 := fetchRecentMatch(srv.URL, captureOpts{Response: true, Path: "/v1/messages"})
+	rec2, ok2 := fetchRecentMatch(urlSource(srv.URL), captureOpts{Response: true, Path: "/v1/messages"})
 	if !ok2 || rec2.BodyRef.ID != "warmup" {
 		t.Fatalf("default behavior must return the first match (warmup), got ok=%v rec=%+v", ok2, rec2)
 	}
@@ -329,7 +335,7 @@ func TestFetchRecentMatch_SyntheticWakes(t *testing.T) {
 		}})
 	}))
 	defer srv.Close()
-	rec, ok := fetchRecentMatch(srv.URL, captureOpts{Response: true, Path: "/v1/messages"})
+	rec, ok := fetchRecentMatch(urlSource(srv.URL), captureOpts{Response: true, Path: "/v1/messages"})
 	if !ok || !rec.Synthetic {
 		t.Fatalf("synthetic 502 must satisfy the matcher, got ok=%v rec=%+v", ok, rec)
 	}
@@ -346,14 +352,14 @@ func TestFetchBody_RetriesOnMiss(t *testing.T) {
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
 	defer srv.Close()
-	b, err := fetchBody(srv.URL, "id1", 5, 5*time.Millisecond)
+	b, err := fetchBody(urlSource(srv.URL), "id1", 5, 5*time.Millisecond)
 	if err != nil || string(b) != `{"ok":true}` {
 		t.Fatalf("retry failed: b=%s err=%v", b, err)
 	}
 }
 
 // TestBuildCaptureResult_EmitsHeadersVerbatim pins that capture no longer masks
-// headers itself: the record carries whatever /recent served — already masked
+// headers itself: the record carries whatever the activity API served — already masked
 // server-side by supervisor.recordRequest, or raw when this capture launched
 // its child with CCWRAP_UNMASK_CREDENTIALS=1 (--unmask). buildCaptureResult
 // emits it verbatim. Critically, an already server-masked value must NOT be
@@ -362,7 +368,7 @@ func TestFetchBody_RetriesOnMiss(t *testing.T) {
 // test; capture's job is faithful pass-through of the wire it polled.
 func TestBuildCaptureResult_EmitsHeadersVerbatim(t *testing.T) {
 	hdr := http.Header{}
-	// Exactly what the server-masked /recent wire carries for a credential.
+	// Exactly what the server-masked activity API carries for a credential.
 	const wireAuth = "Bearer sk-ant-‹redacted 26 chars›"
 	hdr.Set("Authorization", wireAuth)
 	hdr.Set("Content-Type", "application/json")
@@ -435,7 +441,7 @@ func TestBuildCaptureResult_MainInferenceFallbackNote(t *testing.T) {
 func TestStrictMatcherFor_MemoizesBodyVerdicts(t *testing.T) {
 	var bodyFetches atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/recent/body" {
+		if strings.HasPrefix(r.URL.Path, "/api/v1/bodies/") {
 			bodyFetches.Add(1)
 			_, _ = w.Write([]byte(`{"model":"claude-3-5-haiku","messages":[{"role":"user","content":"q"}]}`))
 			return
@@ -444,7 +450,7 @@ func TestStrictMatcherFor_MemoizesBodyVerdicts(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	match := strictMatcherFor(srv.URL, captureOpts{Response: true, Path: "/v1/messages", MainInference: true})
+	match := strictMatcherFor(urlSource(srv.URL), captureOpts{Response: true, Path: "/v1/messages", MainInference: true})
 	rec := model.RequestRecord{Path: "/v1/messages", StatusCode: 200,
 		BodyRef:         &model.RequestBodyRef{ID: "quota"},
 		ResponseBodyRef: &model.RequestBodyRef{ID: "resp"}}

@@ -13,12 +13,6 @@ import (
 //   - Auth=nil expresses "ccwrap does not own auth for this profile" — the
 //     wire field is omitted (or "auth": null) instead of carrying empty mode
 //   - UpstreamHeaderCount is a count; header values are never emitted
-//
-// control.SafeCatalogItem in internal/control mirrors this shape for the
-// wire boundary (same JSON tags); the supervisor converts between them via
-// a struct conversion. Keeping SafeCatalogItem in internal/profiles
-// preserves the dependency direction (control depends on no package; the
-// supervisor depends on both).
 type SafeCatalogItem struct {
 	Name                string            `json:"name"`
 	Provider            string            `json:"provider"`

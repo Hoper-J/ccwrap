@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Hoper-J/ccwrap/internal/app"
+	"github.com/Hoper-J/ccwrap/internal/control"
 	"github.com/Hoper-J/ccwrap/internal/model"
 	"github.com/Hoper-J/ccwrap/internal/preflight"
 	"github.com/Hoper-J/ccwrap/internal/profiles"
@@ -217,7 +218,7 @@ func buildCaptureResult(opts captureOpts, in captureInputs) captureResult {
 	}
 	if opts.Headers {
 		// Credential headers are already masked SERVER-SIDE before they reach
-		// /recent (supervisor.recordRequest), unless this capture launched its
+		// the activity API (supervisor.recordRequest), unless this capture launched its
 		// child with CCWRAP_UNMASK_CREDENTIALS=1 (set in captureCommand when
 		// --unmask). Emit what the record carries verbatim — capture trusts the
 		// wire it polled.
@@ -336,12 +337,12 @@ func matchesRequestOnly(rec model.RequestRecord, opts captureOpts) bool {
 	return rec.Synthetic || rec.BodyRef != nil
 }
 
-// fetchRecentMatch GETs <base>/recent once and returns the first record
+// fetchRecentMatch reads the session's requests once and returns the first record
 // satisfying the strict matcher for opts (strictMatcherFor). Single-shot
 // convenience: the polling loop builds the matcher ONCE instead, so the
 // --main-inference body-verdict memo survives across polls.
-func fetchRecentMatch(base string, opts captureOpts) (model.RequestRecord, bool) {
-	return fetchRecentMatchWith(base, opts, strictMatcherFor(base, opts))
+func fetchRecentMatch(src captureSource, opts captureOpts) (model.RequestRecord, bool) {
+	return fetchRecentMatchWith(src, opts, strictMatcherFor(src, opts))
 }
 
 // strictMatcherFor returns the strict record matcher for opts. Plain capture
@@ -359,7 +360,7 @@ func fetchRecentMatch(base string, opts captureOpts) (model.RequestRecord, bool)
 // re-downloads every candidate body on every tick. Fetch failures are NOT
 // memoized (the body may simply not have spilled yet; best-effort false now,
 // retry next poll).
-func strictMatcherFor(base string, opts captureOpts) func(model.RequestRecord, captureOpts) bool {
+func strictMatcherFor(src captureSource, opts captureOpts) func(model.RequestRecord, captureOpts) bool {
 	if !opts.MainInference {
 		return matchesRecord
 	}
@@ -377,7 +378,7 @@ func strictMatcherFor(base string, opts captureOpts) func(model.RequestRecord, c
 		if v, ok := verdict[rec.BodyRef.ID]; ok {
 			return v
 		}
-		b, err := fetchBody(base, rec.BodyRef.ID, 3, 30*time.Millisecond)
+		b, err := fetchBody(src, rec.BodyRef.ID, 3, 30*time.Millisecond)
 		if err != nil {
 			return false
 		}
@@ -439,24 +440,24 @@ func lastText(content json.RawMessage) string {
 	return ""
 }
 
-// fetchRecentMatchRequestOnly GETs <base>/recent once and returns the first
+// fetchRecentMatchRequestOnly reads the session's requests once and returns the first
 // record satisfying the relaxed matchesRequestOnly (request landed, response
 // ignored). Used only on the give-up poll. It does NOT filter on --main-inference:
 // if the strict matcher never found the real agent inference, reporting whatever
 // landed (including a quota/warm-up call) is more useful than failing outright —
 // the auxiliary-vs-main distinction is classified downstream from the captured
 // body, not enforced here.
-func fetchRecentMatchRequestOnly(base string, opts captureOpts) (model.RequestRecord, bool) {
-	return fetchRecentMatchWith(base, opts, matchesRequestOnly)
+func fetchRecentMatchRequestOnly(src captureSource, opts captureOpts) (model.RequestRecord, bool) {
+	return fetchRecentMatchWith(src, opts, matchesRequestOnly)
 }
 
-// fetchRecentMatchWith GETs <base>/recent once and returns the first record for
+// fetchRecentMatchWith reads the session's requests once and returns the first record for
 // which match reports true.
-func fetchRecentMatchWith(base string, opts captureOpts, match func(model.RequestRecord, captureOpts) bool) (model.RequestRecord, bool) {
+func fetchRecentMatchWith(src captureSource, opts captureOpts, match func(model.RequestRecord, captureOpts) bool) (model.RequestRecord, bool) {
 	var out struct {
 		Requests []model.RequestRecord `json:"requests"`
 	}
-	if err := getJSONInto(base+"/recent", &out); err != nil {
+	if err := src.getJSON("/api/v1/activity?kind=requests", &out); err != nil {
 		return model.RequestRecord{}, false
 	}
 	for _, rec := range out.Requests {
@@ -467,13 +468,13 @@ func fetchRecentMatchWith(base string, opts captureOpts, match func(model.Reques
 	return model.RequestRecord{}, false
 }
 
-// fetchBody GETs <base>/recent/body?id=<id>, retrying on a 404/empty (the body
+// fetchBody reads the captured body <id>, retrying on a 404/empty (the body
 // store spills asynchronously, so a just-set ref may not be on disk yet).
-func fetchBody(base, id string, retries int, every time.Duration) ([]byte, error) {
-	u := base + "/recent/body?id=" + url.QueryEscape(id)
+func fetchBody(src captureSource, id string, retries int, every time.Duration) ([]byte, error) {
+	path := "/api/v1/bodies/" + url.PathEscape(id)
 	var lastErr error
 	for i := 0; i <= retries; i++ {
-		b, code, err := getBytes(u)
+		b, code, err := src.get(path)
 		if err == nil && code == 200 && len(b) > 0 {
 			return b, nil
 		}
@@ -483,20 +484,32 @@ func fetchBody(base, id string, retries int, every time.Duration) ([]byte, error
 	return nil, fmt.Errorf("body %s not available after %d retries: %v", id, retries, lastErr)
 }
 
-func getJSONInto(u string, out interface{}) error {
-	b, code, err := getBytes(u)
+// captureSource is where capture reads the session's requests, bodies and
+// ClientHellos: the session's control socket (/api/v1). Tests point it at
+// any HTTP server that serves the same paths.
+type captureSource struct {
+	base   string
+	client *http.Client
+}
+
+// socketSource reads from the session supervisor's control socket.
+func socketSource(socket string) captureSource {
+	return captureSource{base: "http://ccwrap", client: &http.Client{Transport: control.UnixTransport(socket), Timeout: 5 * time.Second}}
+}
+
+func (s captureSource) getJSON(path string, out interface{}) error {
+	b, code, err := s.get(path)
 	if err != nil {
 		return err
 	}
 	if code != 200 {
-		return fmt.Errorf("GET %s: status %d", u, code)
+		return fmt.Errorf("GET %s: status %d", path, code)
 	}
 	return json.Unmarshal(b, out)
 }
 
-func getBytes(u string) ([]byte, int, error) {
-	c := &http.Client{Timeout: 5 * time.Second}
-	resp, err := c.Get(u)
+func (s captureSource) get(path string) ([]byte, int, error) {
+	resp, err := s.client.Get(s.base + path)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -510,12 +523,12 @@ func getBytes(u string) ([]byte, int, error) {
 // main one when key is empty. It returns a nil result (and no error) when no
 // hello has been captured yet — TLS is best-effort and never fails the
 // capture.
-func fetchTLS(base, key string) (*tlsfp.Result, string) {
-	u := base + "/native-tls/clienthello.bin"
+func fetchTLS(src captureSource, key string) (*tlsfp.Result, string) {
+	path := "/api/v1/native-tls/clienthello.bin"
 	if key != "" {
-		u += "?key=" + url.QueryEscape(key)
+		path += "?key=" + url.QueryEscape(key)
 	}
-	raw, _, _ := getBytes(u)
+	raw, _, _ := src.get(path)
 	if len(raw) == 0 {
 		return nil, ""
 	}
@@ -526,7 +539,7 @@ func fetchTLS(base, key string) (*tlsfp.Result, string) {
 	return &r, hex.EncodeToString(raw)
 }
 
-// runCaptureLoop polls <base>/recent until a matching record appears
+// runCaptureLoop polls the session's requests until a matching record appears
 // (matchesRecord), then fetches the request/response bodies and TLS per opts
 // and assembles the result. It returns a non-nil error only on a hard failure
 // (no match before the deadline). childExited (may be nil) lets the loop abort
@@ -534,7 +547,7 @@ func fetchTLS(base, key string) (*tlsfp.Result, string) {
 // one final poll then gives up. The synthetic return is true when the matched
 // record was a synthetic (e.g. auth-missing 502) so the caller can choose a
 // non-zero exit even though the object itself is well-formed.
-func runCaptureLoop(base string, opts captureOpts, deadline time.Time, childExited <-chan struct{}) (captureResult, bool, error) {
+func runCaptureLoop(src captureSource, opts captureOpts, deadline time.Time, childExited <-chan struct{}) (captureResult, bool, error) {
 	// --tls-only: the fingerprint of the matching request's connection (by
 	// default the first /v1/messages). Claude Code runs more than one TLS
 	// stack, so another connection's hello may differ. If no matching request
@@ -544,13 +557,13 @@ func runCaptureLoop(base string, opts captureOpts, deadline time.Time, childExit
 		defer tick.Stop()
 		childGone := false
 		for {
-			if rec, ok := fetchRecentMatchWith(base, opts, matchesRequestPath); ok {
-				if tls, hexStr := fetchTLS(base, rec.ClientHelloKey); tls != nil {
+			if rec, ok := fetchRecentMatchWith(src, opts, matchesRequestPath); ok {
+				if tls, hexStr := fetchTLS(src, rec.ClientHelloKey); tls != nil {
 					return buildCaptureResult(opts, captureInputs{tls: tls, clientHelloHex: hexStr}), false, nil
 				}
 			}
 			if childGone || time.Now().After(deadline) {
-				if tls, hexStr := fetchTLS(base, ""); tls != nil {
+				if tls, hexStr := fetchTLS(src, ""); tls != nil {
 					return buildCaptureResult(opts, captureInputs{tls: tls, clientHelloHex: hexStr}), false, nil
 				}
 				return captureResult{}, false, fmt.Errorf(
@@ -570,17 +583,17 @@ func runCaptureLoop(base string, opts captureOpts, deadline time.Time, childExit
 	childGone := false
 	// Build the strict matcher once so the --main-inference body-verdict memo
 	// persists across polls (see strictMatcherFor).
-	match := strictMatcherFor(base, opts)
+	match := strictMatcherFor(src, opts)
 	for {
-		if rec, ok := fetchRecentMatchWith(base, opts, match); ok {
-			return assembleCapture(base, opts, rec), rec.Synthetic, nil
+		if rec, ok := fetchRecentMatchWith(src, opts, match); ok {
+			return assembleCapture(src, opts, rec), rec.Synthetic, nil
 		}
 		// childExited gives us one more poll (handled by the loop's top) then
 		// we give up: the child has gone but no STRICT match landed. Before
 		// failing, try the relaxed give-up path so a body-less successful
 		// response is reported instead of timing out.
 		if childGone || time.Now().After(deadline) {
-			return giveUp(base, opts)
+			return giveUp(src, opts)
 		}
 		select {
 		case <-tick.C:
@@ -593,7 +606,7 @@ func runCaptureLoop(base string, opts captureOpts, deadline time.Time, childExit
 }
 
 // giveUp runs the final relaxed poll after the strict matcher never fired (the
-// child exited or the deadline passed). It does ONE more /recent fetch with the
+// child exited or the deadline passed). It does ONE more fetch of the requests with the
 // request-only matcher so a captured request whose response body was empty or
 // never spilled is still reported:
 //
@@ -603,32 +616,32 @@ func runCaptureLoop(base string, opts captureOpts, deadline time.Time, childExit
 //     emit an absent response block + note (success for a non-synthetic record;
 //     the synthetic flag is preserved so the caller keeps the non-zero exit);
 //   - no relaxed match at all → the canonical no-request error.
-func giveUp(base string, opts captureOpts) (captureResult, bool, error) {
-	rec, ok := fetchRecentMatchRequestOnly(base, opts)
+func giveUp(src captureSource, opts captureOpts) (captureResult, bool, error) {
+	rec, ok := fetchRecentMatchRequestOnly(src, opts)
 	if !ok {
 		return captureResult{}, false, noMatchError(opts)
 	}
 	// With --no-response, or when the response actually spilled, the normal
 	// assembly path is correct.
 	if !opts.Response || rec.ResponseBodyRef != nil {
-		return assembleCapture(base, opts, rec), rec.Synthetic, nil
+		return assembleCapture(src, opts, rec), rec.Synthetic, nil
 	}
 	// Request landed but no response body: emit it as absent.
-	return assembleCaptureAbsentResponse(base, opts, rec), rec.Synthetic, nil
+	return assembleCaptureAbsentResponse(src, opts, rec), rec.Synthetic, nil
 }
 
 // assembleCaptureAbsentResponse fetches the request body (and TLS) for a matched
 // record whose response body was never captured, then builds a result with the
 // response marked absent. Mirrors assembleCapture minus the response fetch.
-func assembleCaptureAbsentResponse(base string, opts captureOpts, rec model.RequestRecord) captureResult {
+func assembleCaptureAbsentResponse(src captureSource, opts captureOpts, rec model.RequestRecord) captureResult {
 	in := captureInputs{record: rec, respStatus: rec.StatusCode, respAbsent: true}
 	if rec.BodyRef != nil {
-		if b, err := fetchBody(base, rec.BodyRef.ID, 20, 50*time.Millisecond); err == nil {
+		if b, err := fetchBody(src, rec.BodyRef.ID, 20, 50*time.Millisecond); err == nil {
 			in.reqBody = b
 		}
 	}
 	if opts.TLS || opts.TLSOnly {
-		if tls, hexStr := fetchTLS(base, rec.ClientHelloKey); tls != nil {
+		if tls, hexStr := fetchTLS(src, rec.ClientHelloKey); tls != nil {
 			in.tls = tls
 			in.clientHelloHex = hexStr
 		}
@@ -640,20 +653,20 @@ func assembleCaptureAbsentResponse(base string, opts captureOpts, rec model.Requ
 // record and builds the capture result. A synthetic record carries the
 // upstream StatusCode (502 for auth-missing) so buildCaptureResult emits the
 // >=400 note; it may have no spilled bodies.
-func assembleCapture(base string, opts captureOpts, rec model.RequestRecord) captureResult {
+func assembleCapture(src captureSource, opts captureOpts, rec model.RequestRecord) captureResult {
 	in := captureInputs{record: rec, respStatus: rec.StatusCode}
 	if rec.BodyRef != nil {
-		if b, err := fetchBody(base, rec.BodyRef.ID, 20, 50*time.Millisecond); err == nil {
+		if b, err := fetchBody(src, rec.BodyRef.ID, 20, 50*time.Millisecond); err == nil {
 			in.reqBody = b
 		}
 	}
 	if opts.Response && !rec.Synthetic && rec.ResponseBodyRef != nil {
-		if b, err := fetchBody(base, rec.ResponseBodyRef.ID, 20, 50*time.Millisecond); err == nil {
+		if b, err := fetchBody(src, rec.ResponseBodyRef.ID, 20, 50*time.Millisecond); err == nil {
 			in.respBody = b
 		}
 	}
 	if opts.TLS || opts.TLSOnly {
-		if tls, hexStr := fetchTLS(base, rec.ClientHelloKey); tls != nil {
+		if tls, hexStr := fetchTLS(src, rec.ClientHelloKey); tls != nil {
 			in.tls = tls
 			in.clientHelloHex = hexStr
 		}
@@ -693,11 +706,11 @@ func captureCommand(paths app.Paths, args []string) error {
 	}
 
 	// --unmask wants raw secrets in the output. Header masking is now done
-	// SERVER-SIDE — the record is masked before it ever reaches /recent (see
+	// SERVER-SIDE — the record is masked before it ever reaches the activity API (see
 	// supervisor.recordRequest + ui.MaskCredentialHeaders) — so capture can no
 	// longer unmask after the fact. Instead it sets the same launch-time opt-in
 	// the supervisor honors, so THIS capture's child supervisor stores raw
-	// credentials (request headers AND bodies) and serves them on /recent. The
+	// credentials (request headers AND bodies) and serves them over /api/v1. The
 	// supervisor prints its own one-time stderr warning; capture adds a second
 	// below. Set before the child supervisor starts (New reads the env once).
 	if opts.Unmask {
@@ -799,7 +812,7 @@ func captureCommand(paths app.Paths, args []string) error {
 		}
 	}
 
-	base := "http://" + l.session.ProxyListenAddr
+	src := socketSource(l.sessionPaths.SocketPath)
 
 	// Wait for the child in a goroutine so the capture loop can abort early
 	// when Claude exits. We never propagate Claude's exit code.
@@ -809,7 +822,7 @@ func captureCommand(paths app.Paths, args []string) error {
 		close(childExited)
 	}()
 
-	res, synthetic, err := runCaptureLoop(base, opts, time.Now().Add(opts.Timeout), childExited)
+	res, synthetic, err := runCaptureLoop(src, opts, time.Now().Add(opts.Timeout), childExited)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "ccwrap capture: "+err.Error())
 		return err

@@ -335,7 +335,7 @@ func printStatus(discovered []model.DiscoveredSession, sessions []*model.Session
 		if sess.ProjectDir != "" {
 			fmt.Println("  " + pal.Dim("project") + "   " + ui.DisplayDir(sess.ProjectDir))
 		}
-		fmt.Println("  " + pal.Dim("proxy") + "     " + proxyInfoURL(sess.ProxyListenAddr))
+		fmt.Println("  " + pal.Dim("proxy") + "     " + proxyURL(sess.ProxyListenAddr))
 		fmt.Println("  " + pal.Dim("route") + "     " + ui.HumanRouteClass(sess.RouteClass) + " · " + strings.ToLower(ui.HumanRouteSource(sess.RouteSource)))
 		fmt.Println("  " + pal.Dim("auth") + "      " + auth)
 		fmt.Println("  " + pal.Dim("models") + "    " + statusModelsLine(sess))
@@ -362,9 +362,10 @@ func statusModelsLine(sess *model.Session) string {
 	}
 }
 
-func proxyInfoURL(addr string) string {
+// proxyURL is a session's proxy address as Claude Code's HTTPS_PROXY has it.
+func proxyURL(addr string) string {
 	if strings.TrimSpace(addr) == "" {
 		return ""
 	}
-	return "http://" + addr + "/"
+	return "http://" + addr
 }

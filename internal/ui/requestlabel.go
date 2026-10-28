@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/Hoper-J/ccwrap/internal/model"
@@ -22,24 +21,6 @@ func RequestModelLabel(rec model.RequestRecord) string {
 	default:
 		return rec.Model
 	}
-}
-
-// RequestFailureHead is the one-line heading for a failed request, e.g.
-// "upstream returned 404 · not_found_error". Kept in sync with
-// failureHead in the web template.
-func RequestFailureHead(rec model.RequestRecord) string {
-	f := rec.Failure
-	if f == nil {
-		return ""
-	}
-	if f.Source == "ccwrap" {
-		return "no upstream response"
-	}
-	head := fmt.Sprintf("upstream returned %d", rec.StatusCode)
-	if f.Type != "" {
-		head += " · " + f.Type
-	}
-	return head
 }
 
 // RequestFailureBrief is the failure message cut to n runes, for the

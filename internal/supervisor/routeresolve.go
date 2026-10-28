@@ -230,8 +230,8 @@ func applyAuthOverride(h http.Header, override *model.AuthOverride) {
 	}
 	// MUST stay aligned with ui/headerclass.go::credentialDenyList:
 	// every credential ccwrap strips from upstream must also be
-	// redacted in inspect rendering, otherwise the same secret gets
-	// removed from the forward but rendered raw in /recent. Both
+	// masked in recorded requests, otherwise the same secret gets
+	// removed from the forward but shown raw in the activity. Both
 	// directions are enforced by
 	// routeresolve_test.go::TestApplyAuthOverride_StripListMatchesDenyList.
 	//

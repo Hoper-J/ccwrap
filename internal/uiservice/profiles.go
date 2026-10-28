@@ -22,9 +22,8 @@ import (
 	"github.com/Hoper-J/ccwrap/internal/unmapped"
 )
 
-// The Profiles page's API. Edits go through profileapi, the same code a
-// session's own page uses; an edit to a profile sessions are running on is
-// applied to them right away.
+// The Profiles page's API. Edits go through profileapi; an edit to a
+// profile sessions are running on is applied to them right away.
 
 // maxProfileBody bounds a profile request body.
 const maxProfileBody = 1 << 20

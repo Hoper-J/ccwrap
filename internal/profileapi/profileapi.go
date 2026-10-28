@@ -1,7 +1,7 @@
-// Package profileapi edits and tests the profiles in profiles.json for the
-// browser surfaces: a session's own page and the ccwrap ui service. Every
-// edit runs under the cross-process profiles lock, so the CLI, sessions and
-// the ui service can edit the same file.
+// Package profileapi edits and tests the profiles in profiles.json for
+// ccwrap ui and the sessions' API. Every edit runs under the cross-process
+// profiles lock, so the CLI, sessions and the ui service can edit the same
+// file.
 package profileapi
 
 import (
