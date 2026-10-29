@@ -253,7 +253,7 @@ func (sp *sessionProxy) forwardToUpstream(w http.ResponseWriter, r *http.Request
 		},
 	}
 	rw := newCaptureResponseWriter(w)
-	proxy.ServeHTTP(rw, withWireOrder(r, t.wireOrder))
+	aborted := serveAbortable(proxy, rw, withWireOrder(r, t.wireOrder))
 	latency := time.Since(start)
 	sp.session.noteHelloUse(t.hello, t.logicalHost, r.Method, r.URL.Path)
 	var helloKey string
@@ -288,4 +288,26 @@ func (sp *sessionProxy) forwardToUpstream(w http.ResponseWriter, r *http.Request
 	}
 	tap.stamp(&record)
 	sp.supervisor.recordRequest(sp.session.public.ID, record)
+	if aborted {
+		panic(http.ErrAbortHandler)
+	}
+}
+
+// serveAbortable serves r through h and reports whether h aborted with
+// http.ErrAbortHandler, which ReverseProxy does when a response breaks off
+// mid-stream (the upstream dropped it, or the client went away). The caller
+// records the request first, so it shows in Activity and its captured bodies
+// stay referenced, then aborts the response as h meant to, by panicking with
+// http.ErrAbortHandler again. Any other panic goes on as it was.
+func serveAbortable(h http.Handler, w http.ResponseWriter, r *http.Request) (aborted bool) {
+	defer func() {
+		if p := recover(); p != nil {
+			if p != http.ErrAbortHandler {
+				panic(p)
+			}
+			aborted = true
+		}
+	}()
+	h.ServeHTTP(w, r)
+	return false
 }

@@ -746,7 +746,7 @@ func (sp *sessionProxy) telemetryMITMHandler(host string) http.Handler {
 			},
 		}
 		rw := newCaptureResponseWriter(w)
-		proxy.ServeHTTP(rw, r)
+		aborted := serveAbortable(proxy, rw, r)
 		latency := time.Since(start)
 		sp.supervisor.recordRequest(sp.session.public.ID, model.RequestRecord{
 			Timestamp:             start,
@@ -764,6 +764,9 @@ func (sp *sessionProxy) telemetryMITMHandler(host string) http.Handler {
 			ActiveProfileName:     ap.r.profileName,
 			ActiveProfileProvider: ap.r.profileProvider,
 		})
+		if aborted {
+			panic(http.ErrAbortHandler)
+		}
 	})
 }
 
