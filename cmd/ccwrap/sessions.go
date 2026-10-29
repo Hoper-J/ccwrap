@@ -138,7 +138,12 @@ func stopCommand(paths app.Paths, args []string) error {
 		if err := requestStop(ds); err != nil {
 			return err
 		}
-		if waitForSessionStop(paths, ds.Manifest.SessionID, 3*time.Second) {
+	}
+	// Each session forwards the stop to its Claude Code and waits for it to
+	// exit, killing it after stopGrace; wait that long plus teardown time.
+	deadline := time.Now().Add(stopGrace + 5*time.Second)
+	for _, ds := range targets {
+		if waitForSessionStop(paths, ds.Manifest.SessionID, time.Until(deadline)) {
 			fmt.Println(stopMessage(ds.Manifest.SessionID))
 		} else {
 			fmt.Printf("stop requested %s\n", ui.ShortID(ds.Manifest.SessionID))

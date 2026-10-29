@@ -22,10 +22,30 @@ import (
 )
 
 func main() {
-	if err := realMain(); err != nil {
-		fmt.Fprintf(os.Stderr, "ccwrap: %v\n", err)
-		os.Exit(1)
+	code, msg := exitFor(realMain())
+	if msg != "" {
+		fmt.Fprintf(os.Stderr, "ccwrap: %s\n", msg)
 	}
+	os.Exit(code)
+}
+
+// exitCodeError ends ccwrap with Claude Code's exit code. runClaude returns
+// it rather than calling os.Exit, so its deferred teardown runs first.
+type exitCodeError struct{ code int }
+
+func (e exitCodeError) Error() string { return fmt.Sprintf("exit status %d", e.code) }
+
+// exitFor is the process exit code for realMain's result, and the message to
+// print, if any.
+func exitFor(err error) (int, string) {
+	if err == nil {
+		return 0, ""
+	}
+	var ec exitCodeError
+	if errors.As(err, &ec) {
+		return ec.code, ""
+	}
+	return 1, err.Error()
 }
 
 func realMain() error {
@@ -363,8 +383,7 @@ func runClaude(paths app.Paths, args []string) error {
 	}
 
 	l := newSessionLauncher(paths, launch, pre, inspect, outOpts, cwd, newID())
-	defer l.rollback.run()
-	defer l.cancelCtx()
+	defer l.teardown()
 	// ccwrap ui starts while the session does; the banner waits for it only
 	// briefly.
 	appStart := startUIInBackground(paths, os.Getenv, ui.IsTerminal(os.Stderr))
@@ -398,7 +417,7 @@ func runClaude(paths app.Paths, args []string) error {
 		return err
 	}
 	if code != 0 {
-		os.Exit(code)
+		return exitCodeError{code: code}
 	}
 	return nil
 }

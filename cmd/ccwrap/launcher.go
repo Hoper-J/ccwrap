@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -117,6 +118,9 @@ type sessionLauncher struct {
 	childStdout      io.Writer // nil -> os.Stdout; capture sets this to redirect the child's stdout off our stdout
 
 	closeReason string
+	// stopSig is the first stop signal received while Claude Code ran (a
+	// syscall.Signal), 0 if none; it names the session's end reason.
+	stopSig atomic.Int32
 
 	rollback rollbackStack
 }
@@ -146,6 +150,16 @@ func newSessionLauncher(paths app.Paths, launch launchArgs, pre *preflight.Resul
 		cancelCtx:   cancel,
 		closeReason: "launcher rollback",
 	}
+}
+
+// teardown undoes the launch: the rollback first, which closes the session
+// and then stops the supervisor, so whoever watches the session (ccwrap ui)
+// hears it end; then the context, for anything the rollback did not stop.
+// Cancelling the context first would stop the supervisor before the
+// session closed.
+func (l *sessionLauncher) teardown() {
+	l.rollback.run()
+	l.cancelCtx()
 }
 
 // PreparePaths ensures runtime + session directories exist and the
@@ -383,7 +397,7 @@ func (l *sessionLauncher) SpawnChild() error {
 			_, _ = cmd.Process.Wait()
 		}
 	})
-	l.stopSignals = forwardSignalsToChild(l.cancelCtx, cmd.Process)
+	l.stopSignals = forwardSignalsToChild(cmd.Process, l.noteStopSignal)
 	l.rollback.push(l.stopSignals)
 	return nil
 }
@@ -510,12 +524,15 @@ func (l *sessionLauncher) Wait() (int, error) {
 	select {
 	case waitErr := <-childDone:
 		l.closeReason = "claude process exited"
+		if sig := syscall.Signal(l.stopSig.Load()); sig != 0 {
+			l.closeReason = "stopped by " + signalName(sig)
+		}
 		if waitErr == nil {
 			return 0, nil
 		}
 		var exitErr *exec.ExitError
 		if errors.As(waitErr, &exitErr) {
-			return exitErr.ExitCode(), nil
+			return exitStatus(exitErr), nil
 		}
 		return 0, waitErr
 	case svErr := <-l.supervisorErr:
@@ -593,29 +610,116 @@ func waitForControl(ctx context.Context, client *control.Client) error {
 	return fmt.Errorf("session supervisor did not become ready on %s", client.SocketPath())
 }
 
-func forwardSignalsToChild(cancel context.CancelFunc, p *os.Process) func() {
+// stopGrace is how long Claude Code has to exit on its own after a stop
+// signal before ccwrap kills it.
+const stopGrace = 10 * time.Second
+
+// stopRepeatGap separates a second stop from the same stop delivered twice.
+// Closing a terminal sends SIGHUP more than once within milliseconds: the
+// shell passes it on to its jobs and the kernel sends it to the foreground
+// process group. Only a signal this long after the first one asks to kill.
+const stopRepeatGap = time.Second
+
+// forwardSignalsToChild passes stop signals (Ctrl-C, ccwrap stop, a closed
+// terminal) on to Claude Code and lets it exit by itself, running its own
+// exit handling. The supervisor keeps serving meanwhile, so once Claude Code
+// exits the launch tears down in order: the session closes, then the
+// supervisor stops. If Claude Code is still running stopGrace after the
+// first signal, or another signal arrives stopRepeatGap or more after the
+// first, ccwrap kills it. onStop hears the first signal.
+func forwardSignalsToChild(p *os.Process, onStop func(os.Signal)) func() {
 	sigCh := make(chan os.Signal, 8)
-	stopCh := make(chan struct{})
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
+	stop := relaySignals(sigCh, p, onStop, stopGrace, stopRepeatGap)
+	return func() {
+		signal.Stop(sigCh)
+		stop()
+	}
+}
+
+// relaySignals is forwardSignalsToChild's loop over sigCh; grace and
+// repeatGap are stopGrace and stopRepeatGap outside tests.
+func relaySignals(sigCh <-chan os.Signal, p *os.Process, onStop func(os.Signal), grace, repeatGap time.Duration) func() {
+	stopCh := make(chan struct{})
 	go func() {
+		var first os.Signal
+		var firstAt time.Time
+		var graceC <-chan time.Time
+		killed := false
+		kill := func() {
+			if p == nil || killed {
+				return
+			}
+			killed = true
+			fmt.Fprintf(os.Stderr, "ccwrap: Claude Code is still running after %s; killing it\n", signalLabel(first))
+			_ = p.Kill()
+		}
 		for {
 			select {
 			case sig := <-sigCh:
 				if p != nil {
 					_ = p.Signal(sig)
 				}
-				if cancel != nil {
-					cancel()
+				if first != nil {
+					if time.Since(firstAt) >= repeatGap {
+						kill()
+					}
+					continue
 				}
+				first, firstAt = sig, time.Now()
+				if onStop != nil {
+					onStop(sig)
+				}
+				timer := time.NewTimer(grace)
+				defer timer.Stop()
+				graceC = timer.C
+			case <-graceC:
+				graceC = nil
+				kill()
 			case <-stopCh:
 				return
 			}
 		}
 	}()
-	return func() {
-		signal.Stop(sigCh)
-		close(stopCh)
+	return sync.OnceFunc(func() { close(stopCh) })
+}
+
+// noteStopSignal records the first stop signal, for the session's end reason.
+func (l *sessionLauncher) noteStopSignal(sig os.Signal) {
+	if s, ok := sig.(syscall.Signal); ok {
+		l.stopSig.CompareAndSwap(0, int32(s))
 	}
+}
+
+// exitStatus is Claude Code's exit code, or 128+n when signal n ended it,
+// as a shell reports it.
+func exitStatus(e *exec.ExitError) int {
+	if ws, ok := e.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+		return 128 + int(ws.Signal())
+	}
+	return e.ExitCode()
+}
+
+// signalName is the SIG… name of a stop signal.
+func signalName(s syscall.Signal) string {
+	switch s {
+	case syscall.SIGINT:
+		return "SIGINT"
+	case syscall.SIGTERM:
+		return "SIGTERM"
+	case syscall.SIGHUP:
+		return "SIGHUP"
+	case syscall.SIGQUIT:
+		return "SIGQUIT"
+	}
+	return s.String()
+}
+
+func signalLabel(sig os.Signal) string {
+	if s, ok := sig.(syscall.Signal); ok {
+		return signalName(s)
+	}
+	return sig.String()
 }
 
 func nilSafeSettings(parsed *settings.ParsedFlagSettings) map[string]any {

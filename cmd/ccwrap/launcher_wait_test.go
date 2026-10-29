@@ -1,11 +1,18 @@
 package main
 
 import (
+	"bufio"
 	"errors"
+	"net/http"
 	"os/exec"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Hoper-J/ccwrap/internal/control"
+	"github.com/Hoper-J/ccwrap/internal/preflight"
+	"github.com/Hoper-J/ccwrap/internal/settings"
+	"github.com/Hoper-J/ccwrap/internal/testutil"
 )
 
 // TestWait_ChildExitsFirst is the normal path: Claude exits, Wait returns
@@ -109,5 +116,47 @@ func TestWait_SupervisorDiesNilError(t *testing.T) {
 	}
 	if err == nil || !strings.Contains(err.Error(), "proxy no longer available") {
 		t.Fatalf("nil supervisor return must still surface a proxy-gone error, got %v", err)
+	}
+}
+
+// Ending a launch closes the session before the supervisor stops, so the
+// session's event stream, which ccwrap ui follows, says it ended.
+func TestTeardownAnnouncesTheEnd(t *testing.T) {
+	paths := testutil.ShortAppPaths(t, "td.sock")
+	l := newSessionLauncher(paths, launchArgs{}, &preflight.Result{}, &settings.InspectionResult{}, preflight.Options{}, t.TempDir(), "td00000000000001")
+	for _, step := range []func() error{l.PreparePaths, l.StartSupervisor, l.AwaitControl, l.CreateSession} {
+		if err := step(); err != nil {
+			l.teardown()
+			t.Fatal(err)
+		}
+	}
+	req, _ := http.NewRequest(http.MethodGet, "http://unix/api/v1/events", nil)
+	resp, err := (&http.Client{Transport: control.UnixTransport(l.sessionPaths.SocketPath)}).Do(req)
+	if err != nil {
+		l.teardown()
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	events := make(chan string, 16)
+	go func() {
+		sc := bufio.NewScanner(resp.Body)
+		for sc.Scan() {
+			if line := sc.Text(); strings.HasPrefix(line, "event: ") {
+				events <- strings.TrimPrefix(line, "event: ")
+			}
+		}
+		close(events)
+	}()
+	if ev := <-events; ev != "hello" {
+		t.Fatalf("first event %q", ev)
+	}
+	l.closeReason = "claude process exited"
+	l.teardown()
+	var got []string
+	for ev := range events {
+		got = append(got, ev)
+	}
+	if len(got) == 0 || got[len(got)-1] != "session.ended" {
+		t.Fatalf("events after teardown = %v", got)
 	}
 }

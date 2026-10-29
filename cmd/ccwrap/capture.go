@@ -823,8 +823,7 @@ func captureCommand(paths app.Paths, args []string) error {
 	}
 
 	l := newSessionLauncher(paths, launch, pre, inspect, outOpts, cwd, newID())
-	defer l.rollback.run()
-	defer l.cancelCtx()
+	defer l.teardown()
 	// Keep Claude's print output off our stdout so the only thing on stdout is
 	// the capture JSON.
 	l.childStdout = io.Discard
