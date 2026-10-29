@@ -677,3 +677,32 @@ func TestResolveProfile_AuthNil_EnvStillSuppliesAuth(t *testing.T) {
 		t.Fatalf("auth:null must let env supply auth; override = %#v", res.OverrideAuth)
 	}
 }
+
+// A key the profile owns reaches the auth resolver through env, but the
+// session's config list names the profile as its source; a profile with
+// auth:null leaves auth, and its source, to the environment.
+func TestResolveProfile_AuthConfigSourceNamesTheProfile(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  []string
+		auth *AuthSpec
+		want string
+	}{
+		{"inline key", []string{"PATH=/usr/bin", "ANTHROPIC_AUTH_TOKEN=ambient"}, &AuthSpec{Mode: "ccwrap_bearer", Key: "profile-key"}, "profile"},
+		{"key_env", []string{"PATH=/usr/bin", "GW_KEY=from-env"}, &AuthSpec{Mode: "ccwrap_x_api_key", KeyEnv: "GW_KEY"}, "profile"},
+		{"auth null", []string{"PATH=/usr/bin", "ANTHROPIC_AUTH_TOKEN=ambient"}, nil, "inherited_env"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := ResolveProfile(Options{
+				ParentEnv: tc.env,
+				Profile:   &ProfileInput{Name: "gw", Provider: "p", BaseURL: "https://gateway.example", Auth: tc.auth},
+			}, nil)
+			if err != nil {
+				t.Fatalf("ResolveProfile: %v", err)
+			}
+			if res.AuthConfigSource != tc.want {
+				t.Fatalf("AuthConfigSource = %q, want %q", res.AuthConfigSource, tc.want)
+			}
+		})
+	}
+}

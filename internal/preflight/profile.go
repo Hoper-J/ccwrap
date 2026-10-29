@@ -420,6 +420,11 @@ func ResolveProfile(opts Options, inspect *settings.InspectionResult) (*Result, 
 	if err != nil {
 		return nil, err
 	}
+	// The profile's key reached the resolver as an env key (above); its
+	// source is the profile. Display only: source stays the env key's kind.
+	if profileAuthKey != "" && override != nil {
+		authConfigSource = "profile"
+	}
 	parentCustomAuthHeaderEnv := inheritedCustomAuthHeaderConflicts(env)
 	customAuthHeaderEnv := appendEnvConflicts(inspect.CustomAuthHeaderEnv, parentCustomAuthHeaderEnv)
 	authPolicy, authBootstrap, authBootstrapKind, authBootstrapEnvKey := hiddenAuthContract(thirdPartyRoute, opts.AllowAuthPassthroughToThirdParty, mode)
