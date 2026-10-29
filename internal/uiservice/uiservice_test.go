@@ -746,6 +746,7 @@ func TestProfileEditReachesItsSessions(t *testing.T) {
 // A connection test is kept as the profile's last test until the profile
 // changes; tests of unknown profiles say so.
 func TestProfileTests(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir()) // tests of an inherit egress read Claude settings
 	var probed profiles.Profile
 	probeProfile = func(p profiles.Profile, _ profiletest.ProbeOptions) profiletest.ProbeResult {
 		probed = p

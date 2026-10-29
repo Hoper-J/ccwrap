@@ -268,9 +268,16 @@ func runProfileTestEgress(paths app.Paths, args []string) int {
 		fmt.Fprintln(stdErr(), "ccwrap profile test-egress:", err)
 		return 2
 	}
+	env, fromSettings, err := probeEnvFor(targets)
+	if err != nil {
+		fmt.Fprintln(stdErr(), "ccwrap profile test-egress: read Claude settings:", err)
+		return 2
+	}
 	results := runEgressProbes(targets, profiletest.EgressProbeOptions{
-		Timeout: opts.Timeout,
-		Target:  opts.Target,
+		Timeout:         opts.Timeout,
+		Target:          opts.Target,
+		Env:             env,
+		EnvFromSettings: fromSettings,
 	})
 	switch opts.Format {
 	case "json":

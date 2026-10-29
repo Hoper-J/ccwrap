@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/Hoper-J/ccwrap/internal/egress"
+	"github.com/Hoper-J/ccwrap/internal/model"
 	"github.com/Hoper-J/ccwrap/internal/modelalias"
 	"github.com/Hoper-J/ccwrap/internal/profiles"
 	"github.com/Hoper-J/ccwrap/internal/upstreamerr"
@@ -91,6 +92,9 @@ type ProbeOptions struct {
 	Model string
 	// Timeout caps the entire probe (DNS+connect+TLS+request+response).
 	Timeout time.Duration
+	// Env, when non-nil, is the environment an inherit egress resolves its
+	// proxy against (see ClaudeSettingsEnv); nil means this process's.
+	Env map[string]string
 }
 
 // ProbeResult is what one probe returns.
@@ -222,7 +226,7 @@ func Probe(profile profiles.Profile, opts ProbeOptions) ProbeResult {
 	// so this caller doesn't honor NO_PROXY for mode=http profiles).
 	// The egress-self-test path (ProbeEgress) is where the supervisor
 	// passes its posture's NoProxy explicitly via opts.
-	client := buildEgressAwareHTTPClient(profile.Egress, "", timeout)
+	client := buildEgressAwareHTTPClient(profile.Egress, "", timeout, opts.Env)
 
 	start := time.Now()
 	resp, err := client.Do(req)
@@ -326,9 +330,8 @@ func hostOnly(rawURL string) string {
 // URL (the typical posture-substitution case) needs the caller to pass
 // NoProxy explicitly, otherwise the probe routes through the proxy for
 // hosts the forward path would bypass via shouldBypass.
-func buildEgressAwareHTTPClient(spec profiles.EgressSpec, noProxy string, timeout time.Duration) *http.Client {
-	flagVal := profileEgressToTransportFlag(spec)
-	cfg, _, _ := egress.Resolve(flagVal, envMap())
+func buildEgressAwareHTTPClient(spec profiles.EgressSpec, noProxy string, timeout time.Duration, env map[string]string) *http.Client {
+	cfg := probeEgressConfig(spec, env)
 	if strings.TrimSpace(noProxy) != "" {
 		cfg.NoProxy = noProxy
 	}
@@ -354,6 +357,16 @@ func buildEgressAwareHTTPClient(spec profiles.EgressSpec, noProxy string, timeou
 			return http.ErrUseLastResponse
 		},
 	}
+}
+
+// probeEgressConfig resolves spec the way the probe dials: an inherit
+// egress against env, or this process's environment when env is nil.
+func probeEgressConfig(spec profiles.EgressSpec, env map[string]string) model.EgressConfig {
+	if env == nil {
+		env = envMap()
+	}
+	cfg, _, _ := egress.Resolve(profileEgressToTransportFlag(spec), env)
+	return cfg
 }
 
 // profileEgressToTransportFlag is the single source of truth for

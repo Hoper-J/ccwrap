@@ -347,9 +347,15 @@ func runProfileTest(paths app.Paths, args []string) int {
 		fmt.Fprintln(stdErr(), "ccwrap profile test:", err)
 		return 2
 	}
+	env, _, err := probeEnvFor(targets)
+	if err != nil {
+		fmt.Fprintln(stdErr(), "ccwrap profile test: read Claude settings:", err)
+		return 2
+	}
 	results := runProfileTestProbes(targets, profiletest.ProbeOptions{
 		Timeout: opts.Timeout,
 		Model:   opts.Model,
+		Env:     env,
 	})
 	switch opts.Format {
 	case "json":
@@ -358,6 +364,18 @@ func runProfileTest(paths app.Paths, args []string) int {
 		renderProfileTestTable(stdOut(), results)
 	}
 	return exitCodeForProfileTestResults(results)
+}
+
+// probeEnvFor is what the probes of targets resolve an inherit egress
+// against: this process's env with the proxy from the user's Claude
+// settings, as a session sees it. nil when no target inherits its egress.
+func probeEnvFor(targets []profiles.Profile) (env map[string]string, fromSettings bool, err error) {
+	for _, p := range targets {
+		if mode := strings.ToLower(strings.TrimSpace(p.Egress.Mode)); mode == "" || mode == "inherit" {
+			return profiletest.ClaudeSettingsEnv(os.Environ())
+		}
+	}
+	return nil, false, nil
 }
 
 // stdOut/stdErr are package-level vars so tests can capture. Default

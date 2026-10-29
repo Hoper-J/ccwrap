@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Hoper-J/ccwrap/internal/egress"
 	"github.com/Hoper-J/ccwrap/internal/profiles"
 )
 
@@ -47,6 +48,13 @@ type EgressProbeOptions struct {
 	// NO_PROXY hosts that the running session would bypass. Same
 	// comma-separated shape as the standard NO_PROXY env var.
 	NoProxy string
+
+	// Env, when non-nil, is the environment an inherit egress resolves its
+	// proxy against (see ClaudeSettingsEnv); nil means this process's.
+	// EnvFromSettings says Claude settings set a proxy variable in Env, so
+	// the result can say where the proxy came from.
+	Env             map[string]string
+	EnvFromSettings bool
 }
 
 // EgressProbeResult is what one egress probe returns. Status reuses
@@ -231,7 +239,12 @@ func ProbeEgress(profile profiles.Profile, opts EgressProbeOptions) EgressProbeR
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
-	client := buildEgressAwareHTTPClient(profile.Egress, opts.NoProxy, timeout)
+	client := buildEgressAwareHTTPClient(profile.Egress, opts.NoProxy, timeout, opts.Env)
+	if res.EgressVia == "inherit" && opts.EnvFromSettings {
+		if via := egress.Summary(probeEgressConfig(profile.Egress, opts.Env)); via != "direct" {
+			res.EgressVia = "Claude settings · " + via
+		}
+	}
 
 	// context.WithTimeout drives early cancellation in connect/TLS phase;
 	// client.Timeout is the outer belt-and-braces bound.

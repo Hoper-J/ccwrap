@@ -6,13 +6,17 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Hoper-J/ccwrap/internal/app"
 	"github.com/Hoper-J/ccwrap/internal/profiles"
 	"github.com/Hoper-J/ccwrap/internal/profiletest"
+	"github.com/Hoper-J/ccwrap/internal/testutil"
 )
 
 func TestParseProfileTestArgs_DefaultsAndPositional(t *testing.T) {
@@ -386,5 +390,46 @@ func TestExitCodeForResults(t *testing.T) {
 				t.Errorf("got %d, want %d", got, c.want)
 			}
 		})
+	}
+}
+
+// `ccwrap profile test` resolves an inherit egress the way a session does,
+// with the proxy from the user's Claude settings, and reports malformed
+// settings instead of probing along a different path.
+func TestRunProfileTestReportsMalformedClaudeSettings(t *testing.T) {
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	if err := os.WriteFile(filepath.Join(cfg, "settings.json"), []byte(`{"env":"not an object"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	paths := testutil.ShortAppPaths(t, "pt.sock")
+	file := &profiles.File{Profiles: map[string]profiles.Profile{
+		"gw": {Name: "gw", BaseURL: "http://127.0.0.1:9", Auth: &profiles.AuthSpec{Mode: "ccwrap_bearer", Key: "k"}, Egress: profiles.EgressSpec{Mode: "inherit"}},
+	}}
+	if err := profiles.OverwriteFile(profiles.DefaultPath(paths.StateDir), file, "seed"); err != nil {
+		t.Fatal(err)
+	}
+	for _, run := range []func(app.Paths, []string) int{runProfileTest, runProfileTestEgress} {
+		var code int
+		_, errOut := withCapturedStdio(t, func() { code = run(paths, []string{"gw"}) })
+		if code != 2 || !strings.Contains(errOut, "read Claude settings") {
+			t.Fatalf("exit %d, stderr %q", code, errOut)
+		}
+	}
+}
+
+func TestProbeEnvForOnlyReadsSettingsForInherit(t *testing.T) {
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	if err := os.WriteFile(filepath.Join(cfg, "settings.json"), []byte(`{"env":{"HTTPS_PROXY":"http://127.0.0.1:10800"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	direct := []profiles.Profile{{Name: "d", Egress: profiles.EgressSpec{Mode: "direct"}}}
+	if env, _, err := probeEnvFor(direct); err != nil || env != nil {
+		t.Fatalf("direct targets: env %v err %v", env, err)
+	}
+	env, fromSettings, err := probeEnvFor(append(direct, profiles.Profile{Name: "i"}))
+	if err != nil || !fromSettings || env["HTTPS_PROXY"] != "http://127.0.0.1:10800" {
+		t.Fatalf("inherit target: env %v from settings %v err %v", env, fromSettings, err)
 	}
 }

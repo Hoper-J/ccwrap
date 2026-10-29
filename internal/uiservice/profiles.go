@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -354,7 +355,11 @@ func (s *Server) handleTestProfile(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, status, code, msg)
 		return
 	}
-	res := probeProfile(p, profiletest.ProbeOptions{Timeout: 15 * time.Second})
+	env, _, ok := probeEnv(w, p.Egress)
+	if !ok {
+		return
+	}
+	res := probeProfile(p, profiletest.ProbeOptions{Timeout: 15 * time.Second, Env: env})
 	data, err := profiletest.MarshalResult(res)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "internal", "marshal result")
@@ -410,5 +415,25 @@ func (s *Server) testEgress(w http.ResponseWriter, r *http.Request, name string)
 		}
 		p.Egress = *req.Egress
 	}
-	writeJSON(w, probeEgress(p, profiletest.EgressProbeOptions{Timeout: 5 * time.Second}))
+	env, fromSettings, ok := probeEnv(w, p.Egress)
+	if !ok {
+		return
+	}
+	writeJSON(w, probeEgress(p, profiletest.EgressProbeOptions{Timeout: 5 * time.Second, Env: env, EnvFromSettings: fromSettings}))
+}
+
+// probeEnv is what a test of an inherit egress resolves its proxy against:
+// this process's env with the proxy from the user's Claude settings, as a
+// session sees it. Other egress modes don't read the env (nil env). ok is
+// false once it has answered with the settings error.
+func probeEnv(w http.ResponseWriter, eg profiles.EgressSpec) (env map[string]string, fromSettings, ok bool) {
+	if mode := strings.ToLower(strings.TrimSpace(eg.Mode)); mode != "" && mode != "inherit" {
+		return nil, false, true
+	}
+	env, fromSettings, err := profiletest.ClaudeSettingsEnv(os.Environ())
+	if err != nil {
+		writeAPIError(w, http.StatusUnprocessableEntity, "claude_settings", "read Claude settings: "+err.Error())
+		return nil, false, false
+	}
+	return env, fromSettings, true
 }
