@@ -226,13 +226,17 @@ func TestEvictBodyFiles_ReclaimsBothRefs(t *testing.T) {
 	clientPath := filepath.Join(dir, "bodies", "client-1.json")
 	upstreamPath := filepath.Join(dir, "bodies", "upstream-1.json")
 
-	// Wait for both async writes to land.
+	// Wait for both async writes to land; without them, "reclaimed" below
+	// would hold trivially.
 	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
+	for {
 		_, e1 := os.Stat(clientPath)
 		_, e2 := os.Stat(upstreamPath)
 		if e1 == nil && e2 == nil {
 			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("setup: body files never appeared (client: %v, upstream: %v)", e1, e2)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

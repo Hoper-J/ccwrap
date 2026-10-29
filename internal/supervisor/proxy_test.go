@@ -2749,29 +2749,18 @@ func TestRingEvictionDeletesBodyFileAndCloseRemovesDir(t *testing.T) {
 	if err := srv.closeSession(sess.ID, "test cleanup"); err != nil {
 		t.Fatalf("closeSession: %v", err)
 	}
+	// The phase above already left no *.json, so only the directory itself
+	// going away shows that closeSession removed it.
 	deadline = time.Now().Add(2 * time.Second)
-	wiped := false
-	for time.Now().Before(deadline) {
-		if entries, rerr := os.ReadDir(bodiesDir); os.IsNotExist(rerr) {
-			wiped = true
+	for {
+		_, rerr := os.Stat(bodiesDir)
+		if os.IsNotExist(rerr) {
 			break
-		} else if rerr == nil {
-			anyJSON := false
-			for _, e := range entries {
-				if strings.HasSuffix(e.Name(), ".json") {
-					anyJSON = true
-					break
-				}
-			}
-			if !anyJSON {
-				wiped = true
-				break
-			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("closeSession did not remove %s (stat: %v)", bodiesDir, rerr)
 		}
 		time.Sleep(10 * time.Millisecond)
-	}
-	if !wiped {
-		t.Fatalf("closeSession did not remove %s (or it still holds *.json)", bodiesDir)
 	}
 }
 
@@ -3146,10 +3135,21 @@ func TestDrainSupersededTransports(t *testing.T) {
 		t.Fatalf("setup: expected both keyA and keyB cached (preCount=%d, hasA=%v, hasB=%v)", preCount, hasA, hasB)
 	}
 
+	// trA holds an idle upstream connection: draining must close it, not
+	// only drop trA from the cache.
+	upstream, open := connCountingServer(t)
+	keepIdleConn(t, trA, upstream)
+	if !openSettles(open, 1) {
+		t.Fatalf("setup: %d upstream connections open, want 1", open())
+	}
+
 	// Drain everything that is not keyB. cfgA's transport must be evicted
-	// AND have CloseIdleConnections() called on it; cfgB's transport must
-	// survive at the same pointer.
+	// AND have its idle connections closed; cfgB's transport must survive at
+	// the same pointer.
 	sp.drainSupersededTransports(keyB)
+	if !openSettles(open, 0) {
+		t.Errorf("the drained transport kept %d idle upstream connection(s) open", open())
+	}
 
 	sp.mu.Lock()
 	postCount := len(sp.transports)
@@ -3176,12 +3176,8 @@ func TestDrainSupersededTransports(t *testing.T) {
 		t.Errorf("post-drain upstreamTransport(cfgB) = %p, want %p (cache hit)", trB2, trB)
 	}
 
-	// Lazy-create on the drained key: a FRESH transport, not trA. Pointer
-	// inequality is the indirect evidence that drain removed trA from the
-	// cache (so the second call could not return the drained instance);
-	// CloseIdleConnections() on trA was the side-effect that bounds the old
-	// pool — by definition idempotent and safe-to-call on a now-orphan
-	// transport.
+	// Lazy-create on the drained key: a FRESH transport, not trA, since drain
+	// removed trA from the cache.
 	trA2 := sp.upstreamTransport(cfgA)
 	if trA2 == nil {
 		t.Fatal("post-drain upstreamTransport(cfgA) returned nil")

@@ -224,9 +224,6 @@ func TestAPIv1Events(t *testing.T) {
 			break
 		}
 	}
-	if _, err := io.ReadAll(io.LimitReader(resp.Body, 0)); err != nil {
-		t.Fatal(err)
-	}
 }
 
 // After a request a session.updated follows with the new counts and state.
