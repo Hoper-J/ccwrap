@@ -81,7 +81,7 @@ ccwrap --profile deepseek
 
 #### web
 
-Ctrl + 点击启动横幅里 `inspect` 后面那个本地 URL 打开 dashboard，然后点 `profile` -> `new profile`：
+运行 `ccwrap open` 打开 ccwrap ui（启动横幅里 `inspect` 后面的链接也可以直接 Ctrl + 点击），在 Profiles 页点 `New profile`：
 
 ![image-20260620180955100](assets/image-20260620180955100.png)
 
@@ -126,7 +126,7 @@ Ctrl + 点击启动横幅里 `inspect` 后面那个本地 URL 打开 dashboard�
    ccwrap profile edit <name> --model-alias '*=gpt-5.5'
    ```
 
-   这样像 settings 里配的 `fable` 这类没有单独映射的模型也会落到这个目标上，响应里仍然还原成各自的名字。启动时如果 Claude Code 将要用的模型（按 `--model` > `ANTHROPIC_MODEL` > settings 里的 `model`）在当前路由上没有映射，启动横幅和 `ccwrap doctor`（`model_aliases` 一项）会直接给出这条命令。没有用这几种方式指定模型时，ccwrap 事先不知道 Claude Code 自带的默认模型是哪个，所以改看实际流量：会话里只要有 Claude 模型没有映射就发了出去，Claude Code 退出时 ccwrap 会提示，之后用这个 profile 启动也会提醒，直到补上映射为止。dashboard 的 Models 格子这时会变黄，点开就能一键选择发给哪个模型，或者保持原名，选完立即生效。
+   这样像 settings 里配的 `fable` 这类没有单独映射的模型也会落到这个目标上，响应里仍然还原成各自的名字。启动时如果 Claude Code 将要用的模型（按 `--model` > `ANTHROPIC_MODEL` > settings 里的 `model`）在当前路由上没有映射，启动横幅和 `ccwrap doctor`（`model_aliases` 一项）会直接给出这条命令。没有用这几种方式指定模型时，ccwrap 事先不知道 Claude Code 自带的默认模型是哪个，所以改看实际流量：会话里只要有 Claude 模型没有映射就发了出去，Claude Code 退出时 ccwrap 会提示，之后用这个 profile 启动也会提醒，直到补上映射为止。这时 ccwrap ui 里会出现一张问题卡片，Models 格子也会变黄，点一下就能选择发给哪个模型，或者保持原名，选完立即生效。
 
    如果上游本身认 Claude 的模型名，只是另外配了几条别名，可以用 `'*=*'` 表示其余 Claude 模型保持原名发送，ccwrap 也就不再提醒：
 
@@ -166,7 +166,7 @@ Ctrl + 点击启动横幅里 `inspect` 后面那个本地 URL 打开 dashboard�
 
 5. **配置热切换**
 
-   在浏览器检查器里（或命令行 `ccwrap profile switch <name>`）切换上游 profile、改 model alias，会在当前会话立即生效：
+   在 ccwrap ui 的会话页里（或命令行 `ccwrap profile switch <name>`）切换上游 profile，或者在 Profiles 页改 model alias，都会在当前会话立即生效：
 
    ![image-20260619210619928](assets/image-20260619210619928.png)
 
@@ -196,7 +196,7 @@ Ctrl + 点击启动横幅里 `inspect` 后面那个本地 URL 打开 dashboard�
 
 8. **请求和响应阅读**
 
-   使用 `--capture-bodies`（或在 dashboard 勾选 bodies），可以逐字读到 Claude Code 发出的每一条 `/v1/messages`：
+   使用 `--capture-bodies`（或在 ccwrap ui 的会话页打开 Bodies），可以逐字读到 Claude Code 发出的每一条 `/v1/messages`：
 
    ![image-20260620115343451](assets/image-20260620115343451.png)
 
@@ -213,6 +213,8 @@ ccwrap [CCWRAP_FLAGS...] [CLAUDE_ARGS...]      # 启动一个 Claude 会话
 ccwrap [CCWRAP_FLAGS...] -- [CLAUDE_ARGS...]   # 显式分隔
 ccwrap run [CCWRAP_FLAGS...] [--] [CLAUDE_ARGS...]   # 消除歧义
 ccwrap status     [--json] [--session ID]
+ccwrap open       [--print] [SESSION-ID | PROJECT]
+ccwrap ui         [status | stop]
 ccwrap dashboard  [--session ID] [--view overview|requests|errors|diagnostics]
 ccwrap doctor     [--json] [--verbose] [--session ID] [--profile NAME]
 ccwrap stop       [--session ID | --all]
@@ -228,6 +230,10 @@ ccwrap profile    {ls | status | switch <name> | test [name] | test-egress [name
 ```
 
 不带管理子命令时，`ccwrap` 会直接启动 Claude Code。在启动模式下，ccwrap 只消费它认识的flag，不认识的 flag、位置参数或 `--` 会原封不动传给 Claude。
+
+`ccwrap ui` 是每个用户一个的本地网页，看会话、管理 profile、按项目启动会话都在这里。启动会话时它会在后台自动拉起（`CCWRAP_NO_UI=1` 关闭；stderr 不是终端时也不拉起）；没有页面开着、也没有会话在跑时，10 分钟后自己退出。`ccwrap open` 会在需要时启动它，然后在浏览器里打开当前所在的会话，没有会话时打开 Projects 页。
+
+在 SSH 里或者没有图形界面时，`ccwrap open` 不开浏览器，而是打印链接和一条 `ssh -L <端口>:127.0.0.1:<端口> <这台机器>` 转发命令，在自己的电脑上执行后就能打开；想让这条命令一直有效，用 `CCWRAP_UI_PORT` 固定端口。Projects 页里在终端中启动会话目前只支持 macOS（Terminal、iTerm、Ghostty）。
 
 ## 启动 flags
 
@@ -279,7 +285,7 @@ profile 是预定义的配置：base URL、auth、model alias、上游 header、
 }
 ```
 
-`base_url` 填网关的根地址，不要带 `/v1`：Claude Code 会自己拼上 `/v1/messages`，写成 `https://gateway.example/v1` 请求就会发到 `/v1/v1/messages`（不少网关文档给的是 OpenAI 风格、带 `/v1` 的地址）。写错时启动横幅和 `ccwrap doctor`（`upstream_path` 一项）会提示，并给出改好的地址。
+`base_url` 填网关的根地址，不要带 `/v1`：Claude Code 会自己拼上 `/v1/messages`，写成 `https://gateway.example/v1` 请求就会发到 `/v1/v1/messages`（不少网关文档给的是 OpenAI 风格、带 `/v1` 的地址）。写错时启动横幅和 `ccwrap doctor`（`upstream_path` 一项）会提示，并给出改好的地址。填成服务商的 OpenAI 兼容地址（比如百炼的 `/compatible-mode`、方舟的 `/api/v3`）时也会提示，并给出这家的 Anthropic 兼容地址；在 ccwrap ui 的 Profiles 页里点「Use it」就能换上。
 
 Auth 模式：
 
@@ -293,7 +299,7 @@ Egress 模式：`inherit`（用启动时解析的 proxy）、`direct`、`http`�
 
 ### 默认配置：`official`
 
-`official` profile 在 `profiles.json` 不存在时首次启动自动 seed。它代表官方 Claude Code 路径：无 `base_url`、无 `auth` 块、Claude 自己的凭据直达 `api.anthropic.com`。删掉当前 default 时，dashboard 的 `chooseFallbackDefault` 会优先回到 `official`（若它还在；否则取剩下的第一个 profile，再否则 inherit-env）；而 CLI 的 `ccwrap profile rm` 删 default 时直接重置为 inherit-env，`official` 下次启动自动重新 seed。
+`official` profile 在 `profiles.json` 不存在时首次启动自动 seed。它代表官方 Claude Code 路径：无 `base_url`、无 `auth` 块、Claude 自己的凭据直达 `api.anthropic.com`。在 ccwrap ui 里删掉当前 default 时，会优先回到 `official`（若它还在；否则取剩下的第一个 profile，再否则 inherit-env）；而 CLI 的 `ccwrap profile rm` 删 default 时直接重置为 inherit-env，`official` 下次启动自动重新 seed。
 
 ### 解析优先级
 
@@ -322,7 +328,7 @@ ccwrap profile rm old-gateway
 
 ### 热切换 vs 需要重启
 
-profile 切换大多数（1P → 网关、网关 → 网关等）是热切换：代理在内部重新绑定路由，Claude 进程会正常运行。唯一一种需要重启的转换是从第三方切回第一方，这时 dashboard / CLI 会显示 `refused_needs_relaunch`。
+profile 切换大多数（1P → 网关、网关 → 网关等）是热切换：代理在内部重新绑定路由，Claude 进程会正常运行。唯一一种需要重启的转换是从第三方切回第一方，这时 ccwrap ui / CLI 会显示 `refused_needs_relaunch`。
 
 ### Egress 出口自检
 
@@ -336,6 +342,8 @@ profile 切换大多数（1P → 网关、网关 → 网关等）是热切换：
 默认探测目标 `https://ipinfo.io/json`。可用 `CCWRAP_EGRESS_TEST_URL=<自托管端点>` 覆盖 — 任何返回 ipinfo schema (`{ip, country, region, city, org}`) 的 HTTPS endpoint 都可以。
 
 该探测不发送任何 Claude API 流量，也不携带 profile 的任何凭据，只测出口路径。与 `ccwrap profile test`（测上游 auth）互补。
+
+出口为 inherit 的 profile，这两个测试（以及 ccwrap ui 里的测试）都和会话一样，在当前环境之上叠加用户级 Claude settings 里配置的代理（项目级配置不计入），出口测试的结果会写明「Claude settings · <代理地址>」。Claude settings 格式有错时直接报错。
 
 ```
 $ ccwrap profile test-egress gateway
@@ -495,7 +503,7 @@ Activity 区是单一的实时列表 + 类别筛选器：
 
 筛选感知截断：切到 "Forwarded API" 后，可见窗口是从全量 forwarded-api 中的最新一批重建的（不是从当前显示里切片），所以高频的 synthetic/tunnel 流量不会把网关请求淹没。
 
-实时更新走 SSE（`/events`）。
+实时更新走 SSE（ccwrap ui 的 `/api/v1/events`）。
 
 </details>
 
@@ -511,6 +519,7 @@ Claude 和它继承的子进程启动时会带上：
 - `NODE_EXTRA_CA_CERTS` → ccwrap 的根证书
 - 复合 CA bundle env（`系统根 + ccwrap 根`）给 Python / curl / Git
 - 仅 loopback 的 `NO_PROXY`
+- `CCWRAP_SESSION_ID` → 这次的 ccwrap 会话 ID，Claude Code 里跑的命令和 hook 可以靠它找到对应的会话
 - `CLAUDE_CODE_GZIP_REQUEST_BODIES=0` → 请求 body 不压缩。ccwrap 的别名改写、system 块裁剪和请求查看器都要读 body；Claude Code 走代理时本来就不压缩，这一项只是盖过显式设置的 `=1`
 - 一份 ccwrap 生成的 `--settings`，把上面这些值镜像到 Claude flag 设置里。默认以 inline JSON 传入：Claude Code 会把 `--settings` 文件所在目录随请求上报，inline 时报的是它自己的临时目录，不会带出 ccwrap 的路径。你自己传了 `--settings` 文件时，合并结果改写进 `/tmp/claude-<uid>/` 下的 0600 文件，免得文件内容出现在进程列表里
 
@@ -557,8 +566,10 @@ ccwrap **解析并重新注入**模型偏好 env（`ANTHROPIC_MODEL`、`ANTHROPI
 | `CCWRAP_CAPTURE_TELEMETRY=1` | opt-in 遥测 MITM + body 抓取（同 `--capture-telemetry`）。默认关 |
 | `CCWRAP_NATIVE_TLS=0` | ⚠ 原生 TLS 指纹镜像的 kill switch。stderr 会打危险提示 |
 | `CCWRAP_NATIVE_TLS_HELLO` | 指向一份 `clienthello.bin`，用它钉死镜像指纹（取代实时捕获）。启动时 fail-fast 校验 |
-| `CCWRAP_WEB_ALLOWED_HOSTS` | 逗号分隔的额外 `Host` 值，放行到仪表盘/info endpoint。默认只允许 loopback（DNS-rebinding 防护）；经隧道/反代访问仪表盘时需要设置 |
-| `CCWRAP_LOCAL_PEER_CHECK=0` | ⚠ 关掉会话端口的本机用户检查（默认只接受与 ccwrap 同 uid 的进程和 root）。只有隧道/反代以其他非 root 用户运行时才需要 |
+| `CCWRAP_WEB_ALLOWED_HOSTS` | 逗号分隔的额外 `Host` 值，放行到 ccwrap ui。默认只允许 loopback（DNS-rebinding 防护）；经隧道/反代访问 ccwrap ui 时需要设置。ccwrap ui 启动时读取，改了以后先 `ccwrap ui stop` |
+| `CCWRAP_NO_UI=1` | 启动会话时不顺带拉起 ccwrap ui（`ccwrap open` 仍会启动它） |
+| `CCWRAP_UI_PORT` | 固定 ccwrap ui 的端口。默认沿用上次的端口，被占用时换一个 |
+| `CCWRAP_LOCAL_PEER_CHECK=0` | ⚠ 关掉会话端口和 ccwrap ui 的本机用户检查（默认只接受与 ccwrap 同 uid 的进程和 root）。只有隧道/反代以其他非 root 用户运行时才需要 |
 | `CCWRAP_QUIET=1` | 把启动横幅收成一行（同 `--quiet`）。默认关 |
 | `CCWRAP_KEEP_CLAUDE_METADATA=1` | 关闭非 claude-* 上游的 Claude Code 系统提示词裁剪，以及对话中途提醒的关闭 |
 | `CCWRAP_UNMASK_CREDENTIALS=1` | ⚠ 关闭检查器里 header + body 凭据打码。ccwrap 会往 stderr 打警告 |
@@ -591,12 +602,23 @@ Runtime：
   control.sock
   ccwrap-session-settings.json   # 生成的 settings 副本，仅供排查（不传给 Claude）
   bodies/<spill-id>.json   # 仅在 --capture-bodies 开启时存在（请求 + 响应）
+<runtime>/ui/
+  ui.json                  # ccwrap ui 的地址和进程信息（不含 token）
+  ui.lock
+  ui.sock                  # ccwrap 命令和 ccwrap ui 通信用的 unix socket
+  ui.log
+  launch/                  # Projects 页启动会话用的一次性脚本，运行后自删
 ```
 
 State：
 
 ```text
 <state>/profiles.json        # 命名 profile（首次启动自动 seed `official`）
+<state>/projects.json        # 每个项目上次用的 profile
+<state>/ui-port.json         # ccwrap ui 上次用的端口
+<state>/terminal.json        # Projects 页选的终端
+<state>/unmapped-models.json # 各 profile 实际发出过、但没有映射的 Claude 模型
+<state>/timezone             # 首次运行时对时区提问的回答
 <state>/certs/
   ca-cert.pem
   ca-key.pem
@@ -608,8 +630,10 @@ State：
 `<runtime>` 和 `<state>` 默认位置：
 
 - macOS：state 在 `~/Library/Application Support/ccwrap/`，runtime 在 `$TMPDIR/ccwrap-<UID>/`（通常在 `/var/folders/...` 下）
-- Linux：state 在 `~/.config/ccwrap/`（或 `$XDG_STATE_HOME/ccwrap/`），runtime 同上
+- Linux：state 在 `~/.local/state/ccwrap/`（或 `$XDG_STATE_HOME/ccwrap/`），runtime 在 `$XDG_RUNTIME_DIR/ccwrap/`，没有 `XDG_RUNTIME_DIR` 时是 `/tmp/ccwrap-<UID>/`
 - 可用 `CCWRAP_STATE_DIR` / `CCWRAP_RUNTIME_DIR` 覆盖
+
+runtime 目录必须是当前用户自己的：不能是符号链接，属主必须是你，其他用户不能写入。不满足时 ccwrap 拒绝使用它，并提示设置 `CCWRAP_RUNTIME_DIR`。
 
 </details>
 
@@ -618,14 +642,14 @@ State：
 - 网关凭据（API key、bearer token、上游专属 header）不会进入 Claude 子进程 env、生成的 `--settings`、manifest、status 输出或浏览器 UI
 - 路由到第三方上游时，Claude 始终只看到 Claude model id；provider 特定的 id 被限制在 ccwrap 内部数据里
 - OAuth host body 在保存到磁盘给检查器看之前会把凭据 JSON 字段打码，但原始字节会原样发到上游
-- Auth 风格的请求 header（`Authorization`、`X-API-Key` 等）在 store 侧就被掩码：记录进入 inspector wire 之前原文已被抹除，`/recent`、页面 bootstrap、SSE 流、HAR 导出、保存的 body 里都不会出现原文，只有保结构的 `Bearer sk-…‹redacted N chars›` 形式。`CCWRAP_UNMASK_CREDENTIALS=1` 是保留原文的 launch-time opt-in（ribbon 显示持久的 UNMASKED 标记）
+- Auth 风格的请求 header（`Authorization`、`X-API-Key` 等）在 store 侧就被掩码：记录进入 inspector wire 之前原文已被抹除，会话 API（活动列表、事件流）、`ccwrap capture`、保存的 body 里都不会出现原文，只有保结构的 `Bearer sk-…‹redacted N chars›` 形式。`CCWRAP_UNMASK_CREDENTIALS=1` 是保留原文的 launch-time opt-in（ribbon 显示持久的 UNMASKED 标记）
 - 向 Anthropic host 的上游拨号带的是 Claude Code 自己的 TLS 指纹（原生 TLS 镜像，**fail-closed**：镜像失败会阻断该次拨号，而不是暴露 Go 指纹）；请求头也保持 Claude Code 原本的顺序和大小写
-- 仪表盘/info 监听拒绝 `Host` header 非 loopback 形态的请求（DNS-rebinding 防护，HTTP 421）。隧道/反代主机名需用 `CCWRAP_WEB_ALLOWED_HOSTS` 显式放行
-- **经隧道访问 = 无鉴权仪表盘。** 一旦用 `CCWRAP_WEB_ALLOWED_HOSTS` 放行隧道/反代访问，**任何拿到该 URL 的人**都能读 `/recent`（请求元数据 + 脱敏 body）、抓取页面里的 CSRF token 并驱动 mutation（切 profile、改 alias、开关抓取）。凭据已脱敏，但 prompt / response body、profile 名、上游 host 都是明文——只在受信网络 / 受信隧道上开放，别把该 URL 贴到公开处
-- 会话端口只接受本机同一用户的连接：每个连接进来时，ccwrap 会向内核查对端 socket 的属主 uid（Linux 读 `/proc/net/tcp`，macOS 读 `net.inet.tcp.pcblist_n`），只放行与 ccwrap 同 uid 的进程和 root，其他用户的连接直接断开并记进 supervisor 日志——同机其他账号既借不了会话代理去用你的网关 key，也读不到仪表盘里抓到的对话。查不到属主时放行；`ccwrap doctor` 的 `local_access` 一行会显示是否生效。隧道/反代如果以其他非 root 用户运行也会被拒，这时用 `CCWRAP_LOCAL_PEER_CHECK=0` 关掉检查
-- Linux 上 `XDG_RUNTIME_DIR` 未设时，runtime 目录 fallback 到 `/tmp/ccwrap-<uid>`，其中的请求/响应 body 是**明文落盘**（文件 `0600`、目录 `0700`，同机他人读不到，会话结束即清）；裸 SSH / `su` 等场景建议设 `XDG_RUNTIME_DIR`
+- ccwrap ui 拒绝 `Host` header 非 loopback 形态的请求（DNS-rebinding 防护，HTTP 421），写操作还要求同站请求并带上页面里的 token。隧道/反代主机名需用 `CCWRAP_WEB_ALLOWED_HOSTS` 显式放行
+- **经隧道访问 = 无鉴权的 ccwrap ui。** 一旦用 `CCWRAP_WEB_ALLOWED_HOSTS` 放行隧道/反代访问，**任何拿到该 URL 的人**都能看所有会话的请求（元数据 + 脱敏 body），拿到页面里的 token 后还能执行写操作：切换和编辑 profile（包括改上游地址）、开关抓取、在你的终端里为已知项目启动会话。凭据已脱敏，但 prompt / response body、profile 名、上游 host 都是明文——只在受信网络 / 受信隧道上开放，别把该 URL 贴到公开处
+- 会话端口和 ccwrap ui 只接受本机同一用户的连接：每个连接进来时，ccwrap 会向内核查对端 socket 的属主 uid（Linux 读 `/proc/net/tcp`，macOS 读 `net.inet.tcp.pcblist_n`），只放行与 ccwrap 同 uid 的进程和 root，其他用户的连接直接断开并记进日志——同机其他账号既借不了会话代理去用你的网关 key，也读不到 ccwrap ui 里抓到的对话。查不到属主时，会话端口放行，ccwrap ui 拒绝（它能启动会话、修改 profile）；`ccwrap doctor` 的 `local_access` 一行会显示是否生效。隧道/反代如果以其他非 root 用户运行也会被拒，这时用 `CCWRAP_LOCAL_PEER_CHECK=0` 关掉检查
+- Linux 上 `XDG_RUNTIME_DIR` 未设时，runtime 目录 fallback 到 `/tmp/ccwrap-<uid>`，其中的请求/响应 body 是**明文落盘**（文件 `0600`、目录 `0700`，同机他人读不到，会话结束即清）；这个目录如果不是你自己建的（属主不是你、是符号链接、或其他用户可写），ccwrap 会拒绝使用。裸 SSH / `su` 等场景建议设 `XDG_RUNTIME_DIR`
 - ccwrap 拥有上游凭据时会注入 `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1`，此时 Claude-protected env key（proxy、CA）不会被 Claude 自己的设置源覆盖；例外是"企业 proxy / CA 注意事项"里列的那几类不受保护。一方透传时不注入该 flag（当前版本的 Claude Code 会因它彻底拒读本地登录凭据）；路由/auth 的 env 通路仍由 ccwrap 自己的 spawn 清洗和生成 settings 剥离兜住
-- 会话监听只服务 `/`、`/healthz`、`/recent`、`/recent/body`、`/events`、`/native-tls`、`/native-tls/clienthello.bin`，加上 `/profile/*` 下的 profile API endpoint 和抓取开关 `/capture/bodies`、`/capture/telemetry`。其他路径返回 404
+- 会话端口只做代理：发给端口本身的请求一律返回 404，只有一句提示，不带任何会话数据。会话的数据和操作走控制 socket（靠文件权限保护），ccwrap ui 和 `ccwrap capture` 都经由它访问
 - 更新检查是一个不带任何标识的 plain GET（默认打到 `registry.npmjs.org`，每日最多一次，走 egress 出口，UA 为 versionless 的 `ccwrap-update-check`，响应限 1 MiB）。首次检查前横幅会有一次性声明；`CCWRAP_NO_UPDATE_CHECK=1` 关闭，`CCWRAP_UPDATE_CHECK_URL` 可指向自托管端点。`ccwrap upgrade` 的二进制自替换与 install.sh 同规格：sha256 必须匹配 checksums.txt（cosign 验签见 SECURITY.md）
 
 ## TODO

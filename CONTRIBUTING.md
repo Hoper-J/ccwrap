@@ -32,7 +32,7 @@ When opening an issue, please include as much of the following as you can:
 - **Steps to reproduce**: the command you started from, what you expected, what actually happened
 - **Version info**: the output of `ccwrap version`, and your OS (macOS / Linux)
 - **Routing shape**: first-party passthrough or a third-party gateway (do **not** paste API keys or any credentials)
-- Relevant terminal output or dashboard behavior
+- Relevant terminal output or what ccwrap ui shows
 
 ## Proposing features
 
@@ -49,7 +49,7 @@ Prerequisites:
 | Tool | Version | Notes |
 | --- | --- | --- |
 | Go | 1.24+ | required by `go.mod` |
-| Node.js | LTS | the web dashboard's behavioral tests run the rendered JS under a real `node` process; without node they silently `t.Skip` |
+| Node.js | LTS | ccwrap ui's JS tests run the page's modules under a real `node` process; without node they silently `t.Skip` |
 | shellcheck | any recent | optional, only needed when touching `install.sh` (CI runs it) |
 
 Clone and build:

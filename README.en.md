@@ -81,7 +81,7 @@ You can also pass an env var name: `--auth-key-env DEEPSEEK_KEY`.
 
 #### web
 
-Ctrl+click the local URL after `inspect` in the launch banner to open the dashboard, then click `profile` → `new profile`:
+Run `ccwrap open` to open ccwrap ui (or Ctrl+click the link after `inspect` in the launch banner), then click `New profile` on the Profiles page:
 
 ![image-20260620180955100](assets/image-20260620180955100.png)
 
@@ -126,7 +126,7 @@ Ctrl+click the local URL after `inspect` in the launch banner to open the dashbo
    ccwrap profile edit <name> --model-alias '*=gpt-5.5'
    ```
 
-   Models without their own alias, like a `fable` set in your settings, then land on that target, and responses still come back under their own names. If the model Claude Code is about to start on (`--model` > `ANTHROPIC_MODEL` > the `model` setting) has no alias on the current route, the launch banner and `ccwrap doctor` (the `model_aliases` row) print that command for you. When none of those sets the model, ccwrap can't see Claude Code's built-in default ahead of time, so it goes by the traffic instead: once a session sends a Claude model with no alias, ccwrap says so after Claude Code exits, and later launches on that profile keep saying so until the route covers it. The dashboard's Models cell turns amber too; open it to pick a target model, or keep the Claude names, in one click, and it applies right away.
+   Models without their own alias, like a `fable` set in your settings, then land on that target, and responses still come back under their own names. If the model Claude Code is about to start on (`--model` > `ANTHROPIC_MODEL` > the `model` setting) has no alias on the current route, the launch banner and `ccwrap doctor` (the `model_aliases` row) print that command for you. When none of those sets the model, ccwrap can't see Claude Code's built-in default ahead of time, so it goes by the traffic instead: once a session sends a Claude model with no alias, ccwrap says so after Claude Code exits, and later launches on that profile keep saying so until the route covers it. ccwrap ui then shows an issue card and turns the Models cell amber; one click picks a target model, or keeps the Claude names, and it applies right away.
 
    If the upstream does serve Claude model names and only a few need aliases, `'*=*'` keeps every other Claude model's name on purpose, and ccwrap stops flagging them:
 
@@ -166,7 +166,7 @@ Ctrl+click the local URL after `inspect` in the launch banner to open the dashbo
 
 5. **Live config hot-swap**
 
-   Switching the upstream profile or editing a model alias in the browser inspector (or via `ccwrap profile switch <name>`) takes effect in the current session immediately:
+   Switching the upstream profile in a session in ccwrap ui (or via `ccwrap profile switch <name>`), or editing a model alias on its Profiles page, takes effect in the current session immediately:
 
    ![image-20260619210619928](assets/image-20260619210619928.png)
 
@@ -196,7 +196,7 @@ Ctrl+click the local URL after `inspect` in the launch banner to open the dashbo
 
 8. **Read requests and responses**
 
-   With `--capture-bodies` (or the bodies checkbox in the dashboard), you can read every `/v1/messages` Claude Code emits, verbatim:
+   With `--capture-bodies` (or Bodies turned on for the session in ccwrap ui), you can read every `/v1/messages` Claude Code emits, verbatim:
 
    ![image-20260620115343451](assets/image-20260620115343451.png)
 
@@ -213,6 +213,8 @@ ccwrap [CCWRAP_FLAGS...] [CLAUDE_ARGS...]      # launch a Claude session
 ccwrap [CCWRAP_FLAGS...] -- [CLAUDE_ARGS...]   # explicit boundary
 ccwrap run [CCWRAP_FLAGS...] [--] [CLAUDE_ARGS...]   # disambiguate
 ccwrap status     [--json] [--session ID]
+ccwrap open       [--print] [SESSION-ID | PROJECT]
+ccwrap ui         [status | stop]
 ccwrap dashboard  [--session ID] [--view overview|requests|errors|diagnostics]
 ccwrap doctor     [--json] [--verbose] [--session ID] [--profile NAME]
 ccwrap stop       [--session ID | --all]
@@ -228,6 +230,10 @@ ccwrap profile    {ls | status | switch <name> | test [name] | test-egress [name
 ```
 
 Without a management subcommand, `ccwrap` launches Claude Code directly. In launch mode it consumes only the flags it recognizes; unknown flags, positional arguments, or `--` are passed to Claude verbatim.
+
+`ccwrap ui` is one local web app per user: look at sessions, manage profiles, and start sessions by project there. A launch starts it in the background (`CCWRAP_NO_UI=1` turns that off; it also stays off when stderr is not a terminal), and it exits on its own after 10 minutes with no page open and no session running. `ccwrap open` starts it when needed and opens the session you are in, or the Projects page when no session is running.
+
+Over SSH or without a graphical session, `ccwrap open` opens no browser: it prints the link and an `ssh -L <port>:127.0.0.1:<port> <this host>` command to run on your own machine. To keep that command valid, pin the port with `CCWRAP_UI_PORT`. Starting a session in a terminal from the Projects page works on macOS only for now (Terminal, iTerm, Ghostty).
 
 ## Launch flags
 
@@ -279,7 +285,7 @@ A profile is a named bundle of config: base URL, auth, model aliases, upstream h
 }
 ```
 
-Set `base_url` to the gateway's root, without `/v1`: Claude Code appends `/v1/messages` itself, so `https://gateway.example/v1` sends requests to `/v1/v1/messages` (many gateway docs quote the OpenAI-style `/v1` address). The launch banner and `ccwrap doctor` (the `upstream_path` row) flag it with the corrected address.
+Set `base_url` to the gateway's root, without `/v1`: Claude Code appends `/v1/messages` itself, so `https://gateway.example/v1` sends requests to `/v1/v1/messages` (many gateway docs quote the OpenAI-style `/v1` address). The launch banner and `ccwrap doctor` (the `upstream_path` row) flag it with the corrected address. They also flag a provider's OpenAI-compatible address (such as Alibaba Cloud Model Studio's `/compatible-mode` or Volcengine Ark's `/api/v3`) and give that provider's Anthropic-compatible address; the Profiles page in ccwrap ui swaps it in with "Use it".
 
 Auth modes:
 
@@ -293,7 +299,7 @@ Egress modes: `inherit` (use the launch-time resolved proxy), `direct`, `http` (
 
 ### Reserved profile: `official`
 
-The `official` profile is auto-seeded on first launch when `profiles.json` does not exist. It represents the first-party Claude Code path: no `base_url`, no `auth` block, Claude's own credentials reach `api.anthropic.com` directly. When you remove the current default, the dashboard's `chooseFallbackDefault` prefers `official` if it is still present (else the first remaining profile, else inherit-env); the CLI `ccwrap profile rm` simply resets the default to inherit-env, and `official` is re-seeded on the next launch.
+The `official` profile is auto-seeded on first launch when `profiles.json` does not exist. It represents the first-party Claude Code path: no `base_url`, no `auth` block, Claude's own credentials reach `api.anthropic.com` directly. When you remove the current default in ccwrap ui, it falls back to `official` if it is still present (else the first remaining profile, else inherit-env); the CLI `ccwrap profile rm` simply resets the default to inherit-env, and `official` is re-seeded on the next launch.
 
 ### Resolution precedence
 
@@ -322,7 +328,7 @@ ccwrap profile rm old-gateway
 
 ### Hot-swap vs needs-relaunch
 
-Most profile switches (1P → gateway, gateway → gateway, etc.) are hot-swaps: the proxy rebinds the route internally and the Claude process keeps running. The one transition that needs a relaunch is switching from a third-party back to first-party, where the dashboard / CLI shows `refused_needs_relaunch`.
+Most profile switches (1P → gateway, gateway → gateway, etc.) are hot-swaps: the proxy rebinds the route internally and the Claude process keeps running. The one transition that needs a relaunch is switching from a third-party back to first-party, where ccwrap ui / the CLI shows `refused_needs_relaunch`.
 
 ### Egress self-test
 
@@ -336,6 +342,8 @@ Most profile switches (1P → gateway, gateway → gateway, etc.) are hot-swaps:
 Default probe target: `https://ipinfo.io/json`. Override with `CCWRAP_EGRESS_TEST_URL=<your-endpoint>` — any HTTPS endpoint that returns the ipinfo schema (`{ip, country, region, city, org}`) works.
 
 The probe sends NO Claude API traffic and carries NONE of the profile's credentials — it tests only the egress path. It complements `ccwrap profile test` (which tests upstream auth).
+
+For a profile whose egress is inherit, both tests (and the tests in ccwrap ui) resolve the proxy the way a session does: the current environment with the proxy from your user-level Claude settings laid over it (project settings are not included). The egress result then reads "Claude settings · <proxy>". Malformed Claude settings are reported as an error.
 
 ```
 $ ccwrap profile test-egress gateway
@@ -495,7 +503,7 @@ The Activity section is a single live feed with class filters:
 
 Filter-aware capping: switching to "Forwarded API" rebuilds the visible window from the newest forwarded-api rows (rather than slicing the current display), so high-volume synthetic/tunnel traffic never buries the gateway requests.
 
-Live updates flow via SSE (`/events`).
+Live updates flow via SSE (ccwrap ui's `/api/v1/events`).
 
 </details>
 
@@ -511,6 +519,7 @@ Claude and inherited child processes are launched with:
 - `NODE_EXTRA_CA_CERTS` → ccwrap root certificate
 - a composite CA bundle env (`system roots + ccwrap root`) for Python / curl / Git
 - loopback-only `NO_PROXY`
+- `CCWRAP_SESSION_ID` → this ccwrap session's ID, so commands and hooks run inside Claude Code can find their session
 - `CLAUDE_CODE_GZIP_REQUEST_BODIES=0` → uncompressed request bodies. Model aliasing, system-block stripping and the request inspector all read them; Claude Code skips gzip behind a proxy anyway, so this only overrides an explicit `=1`
 - a ccwrap-generated `--settings` mirroring the values above into Claude flag settings. It is passed as inline JSON: Claude Code reports the directory of a `--settings` file upstream, and for inline JSON it reports its own temp dir, so no ccwrap path leaves the machine. If you pass your own `--settings` file, the merged result goes into a 0600 file under `/tmp/claude-<uid>/` instead, keeping its contents out of the process list
 
@@ -557,8 +566,10 @@ User-facing:
 | `CCWRAP_CAPTURE_TELEMETRY=1` | Opt-in telemetry MITM + body capture (= `--capture-telemetry`). Default OFF. |
 | `CCWRAP_NATIVE_TLS=0` | ⚠ Kill switch for native TLS fingerprint mirroring. Prints a stderr danger notice. |
 | `CCWRAP_NATIVE_TLS_HELLO` | Path to a `clienthello.bin` that pins the mirrored fingerprint instead of live capture. Fail-fast validation at launch. |
-| `CCWRAP_WEB_ALLOWED_HOSTS` | Comma-separated extra `Host` values admitted to the dashboard/info endpoints. Default loopback-only (DNS-rebinding guard); set this when serving the dashboard through a tunnel / reverse proxy. |
-| `CCWRAP_LOCAL_PEER_CHECK=0` | ⚠ Turn off the session-port local-user check (by default only processes running as ccwrap's own uid, and root, may connect). Only needed when a tunnel / reverse proxy runs as another non-root user. |
+| `CCWRAP_WEB_ALLOWED_HOSTS` | Comma-separated extra `Host` values admitted to ccwrap ui. Default loopback-only (DNS-rebinding guard); set this when serving ccwrap ui through a tunnel / reverse proxy. ccwrap ui reads it when it starts, so run `ccwrap ui stop` after changing it. |
+| `CCWRAP_NO_UI=1` | Don't start ccwrap ui when a session launches (`ccwrap open` still starts it). |
+| `CCWRAP_UI_PORT` | Pin ccwrap ui's port. By default it reuses its last port, or picks another when that one is taken. |
+| `CCWRAP_LOCAL_PEER_CHECK=0` | ⚠ Turn off the local-user check on session ports and ccwrap ui (by default only processes running as ccwrap's own uid, and root, may connect). Only needed when a tunnel / reverse proxy runs as another non-root user. |
 | `CCWRAP_QUIET=1` | Collapse the launch banner to one line (= `--quiet`). Default off. |
 | `CCWRAP_KEEP_CLAUDE_METADATA=1` | Disable Claude Code system-prompt stripping and the mid-conversation reminder switch-off on non-claude-* upstreams. |
 | `CCWRAP_UNMASK_CREDENTIALS=1` | ⚠ Disable header + body credential redaction in the inspector. ccwrap prints a stderr warning. |
@@ -591,12 +602,23 @@ Runtime:
   control.sock
   ccwrap-session-settings.json   # copy of the generated settings, for inspection only (not passed to Claude)
   bodies/<spill-id>.json   # only when --capture-bodies is on (request + response)
+<runtime>/ui/
+  ui.json                  # ccwrap ui's address and process info (no token)
+  ui.lock
+  ui.sock                  # unix socket ccwrap commands use to reach ccwrap ui
+  ui.log
+  launch/                  # one-shot scripts the Projects page starts sessions with; they delete themselves
 ```
 
 State:
 
 ```text
 <state>/profiles.json        # named profiles (auto-seeded with `official` on first run)
+<state>/projects.json        # the profile each project used last
+<state>/ui-port.json         # ccwrap ui's last port
+<state>/terminal.json        # the terminal picked on the Projects page
+<state>/unmapped-models.json # Claude models each profile sent without a mapping
+<state>/timezone             # the answer to the first-run timezone question
 <state>/certs/
   ca-cert.pem
   ca-key.pem
@@ -608,8 +630,10 @@ State:
 Default `<runtime>` and `<state>`:
 
 - macOS: state in `~/Library/Application Support/ccwrap/`, runtime in `$TMPDIR/ccwrap-<UID>/` (typically under `/var/folders/...`)
-- Linux: state in `~/.config/ccwrap/` (or `$XDG_STATE_HOME/ccwrap/`), runtime the same
+- Linux: state in `~/.local/state/ccwrap/` (or `$XDG_STATE_HOME/ccwrap/`), runtime in `$XDG_RUNTIME_DIR/ccwrap/`, or `/tmp/ccwrap-<UID>/` without `XDG_RUNTIME_DIR`
 - Override with `CCWRAP_STATE_DIR` / `CCWRAP_RUNTIME_DIR`
+
+The runtime dir must be your own: not a symlink, owned by you, and not writable by other users. Otherwise ccwrap refuses to use it and suggests setting `CCWRAP_RUNTIME_DIR`.
 
 </details>
 
@@ -618,14 +642,14 @@ Default `<runtime>` and `<state>`:
 - Gateway credentials (API keys, bearer tokens, upstream-only headers) never enter the Claude child process env, the generated `--settings` file, the manifest, the status output, or the browser UI.
 - When routing to a third-party upstream, Claude only ever sees Claude model IDs; provider-specific IDs are confined to ccwrap-internal data.
 - OAuth host bodies have their credential JSON fields redacted before being saved to disk for the inspector, but the original bytes still reach the upstream untouched.
-- Auth-style request headers (`Authorization`, `X-API-Key`, etc.) are masked **store-side**: the raw value is erased before any record reaches the inspector wire, so it never appears in `/recent`, the page bootstrap, the SSE stream, a HAR export, or a saved body — only a structure-preserving `Bearer sk-…‹redacted N chars›` form. `CCWRAP_UNMASK_CREDENTIALS=1` is the launch-time opt-in to keep raw values (the ribbon shows a persistent UNMASKED marker).
+- Auth-style request headers (`Authorization`, `X-API-Key`, etc.) are masked **store-side**: the raw value is erased before any record reaches the inspector wire, so it never appears in the session API (activity, event stream), `ccwrap capture`, or a saved body — only a structure-preserving `Bearer sk-…‹redacted N chars›` form. `CCWRAP_UNMASK_CREDENTIALS=1` is the launch-time opt-in to keep raw values (the ribbon shows a persistent UNMASKED marker).
 - Anthropic-host upstream dials carry Claude Code's own TLS fingerprint (native-TLS mirror, **fail-closed**: a failed mirror blocks the dial instead of exposing a Go fingerprint), and request headers keep Claude Code's own order and casing.
-- The dashboard/info listener refuses requests whose `Host` header is not loopback-shaped (DNS-rebinding guard, HTTP 421). Tunnel / reverse-proxy hostnames must be allowlisted explicitly via `CCWRAP_WEB_ALLOWED_HOSTS`.
-- **Tunneled access = an unauthenticated dashboard.** Once you allowlist tunnel / reverse-proxy access via `CCWRAP_WEB_ALLOWED_HOSTS`, **anyone with the URL** can read `/recent` (request metadata + redacted bodies), scrape the CSRF token from the page, and drive mutations (switch profiles, edit aliases, toggle capture). Credentials are redacted, but prompt / response bodies, profile names, and upstream hosts are plaintext — only expose it on a trusted network / trusted tunnel, and don't post the URL anywhere public.
-- Session ports only accept connections from your own account: for every incoming connection ccwrap asks the kernel which uid owns the other end (Linux `/proc/net/tcp`, macOS `net.inet.tcp.pcblist_n`) and admits only processes running as ccwrap's own uid, plus root. Other users' connections are closed and noted in the supervisor log, so other accounts on the machine can neither use your gateway key through the session proxy nor read captured conversations from the dashboard. When the owner can't be determined the connection is allowed; `ccwrap doctor`'s `local_access` row shows whether the check is active. A tunnel / reverse proxy running as another non-root user is refused too — set `CCWRAP_LOCAL_PEER_CHECK=0` in that case.
-- On Linux, when `XDG_RUNTIME_DIR` is unset the runtime dir falls back to `/tmp/ccwrap-<uid>`, where request/response bodies are written **in plaintext** (files `0600`, dirs `0700` — not readable by others on the machine, cleared when the session ends); set `XDG_RUNTIME_DIR` on bare SSH / `su` setups.
+- ccwrap ui refuses requests whose `Host` header is not loopback-shaped (DNS-rebinding guard, HTTP 421), and its writes also require a same-site request carrying the page's token. Tunnel / reverse-proxy hostnames must be allowlisted explicitly via `CCWRAP_WEB_ALLOWED_HOSTS`.
+- **Tunneled access = an unauthenticated ccwrap ui.** Once you allowlist tunnel / reverse-proxy access via `CCWRAP_WEB_ALLOWED_HOSTS`, **anyone with the URL** can see every session's requests (metadata + redacted bodies), take the token from the page, and make changes: switch and edit profiles (upstream URLs included), toggle capture, and start sessions in your terminal for known projects. Credentials are redacted, but prompt / response bodies, profile names, and upstream hosts are plaintext — only expose it on a trusted network / trusted tunnel, and don't post the URL anywhere public.
+- Session ports and ccwrap ui only accept connections from your own account: for every incoming connection ccwrap asks the kernel which uid owns the other end (Linux `/proc/net/tcp`, macOS `net.inet.tcp.pcblist_n`) and admits only processes running as ccwrap's own uid, plus root. Other users' connections are closed and noted in the log, so other accounts on the machine can neither use your gateway key through the session proxy nor read captured conversations in ccwrap ui. When the owner can't be determined, a session port allows the connection and ccwrap ui refuses it (it can start sessions and edit profiles); `ccwrap doctor`'s `local_access` row shows whether the check is active. A tunnel / reverse proxy running as another non-root user is refused too — set `CCWRAP_LOCAL_PEER_CHECK=0` in that case.
+- On Linux, when `XDG_RUNTIME_DIR` is unset the runtime dir falls back to `/tmp/ccwrap-<uid>`, where request/response bodies are written **in plaintext** (files `0600`, dirs `0700` — not readable by others on the machine, cleared when the session ends). If that directory is not one you created (owned by someone else, a symlink, or writable by others), ccwrap refuses to use it. Set `XDG_RUNTIME_DIR` on bare SSH / `su` setups.
 - When ccwrap owns the upstream credential it injects `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1`, and Claude-protected env keys (proxy, CA) cannot be overridden by Claude's own settings sources — except for the unprotected categories listed under "Enterprise proxy / CA notes." In first-party passthrough the flag is omitted (current Claude Code would otherwise refuse local login credentials entirely); ccwrap's spawn scrub and generated-settings sanitisation still close the routing/auth env paths on ccwrap's side.
-- The session listener only serves `/`, `/healthz`, `/recent`, `/recent/body`, `/events`, `/native-tls`, `/native-tls/clienthello.bin`, plus the profile API endpoints under `/profile/*` and the capture toggles `/capture/bodies` and `/capture/telemetry`. Other paths return 404.
+- Session ports only proxy: a request addressed to the port itself gets a 404 with a one-line hint and no session data. A session's data and actions go over its control socket (guarded by file permissions), which ccwrap ui and `ccwrap capture` use.
 - The update check is a single unidentified plain GET (to `registry.npmjs.org` by default, at most once daily, through your egress path, with the versionless UA `ccwrap-update-check`, response capped at 1 MiB). A one-time banner notice precedes the first check; disable with `CCWRAP_NO_UPDATE_CHECK=1`, or point `CCWRAP_UPDATE_CHECK_URL` at a self-hosted endpoint. `ccwrap upgrade`'s binary self-replace matches install.sh's rigor: the sha256 must match checksums.txt (cosign verification: see SECURITY.md)
 
 ## TODO
