@@ -67,6 +67,7 @@ func newSessionProxy(supervisor *Supervisor, session *sessionState) (*sessionPro
 	sp.httpServer = &http.Server{
 		Handler:           http.HandlerFunc(sp.handleProxy),
 		ReadHeaderTimeout: 15 * time.Second,
+		IdleTimeout:       proxyIdleTimeout,
 	}
 	go func() {
 		err := sp.httpServer.Serve(ln)

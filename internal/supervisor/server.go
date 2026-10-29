@@ -50,6 +50,16 @@ var procmetaMatches = procmeta.Matches
 // client's writes well inside it. A variable for tests.
 var sseWriteTimeout = 30 * time.Second
 
+// controlIdleTimeout and proxyIdleTimeout close a client's keep-alive
+// connection to the control socket or the session proxy after it has sat
+// idle this long, so a client that never closes cannot pile up connections
+// over a long session. They only run between requests: event streams and
+// tunnels are not cut. Variables for tests.
+var (
+	controlIdleTimeout = 60 * time.Second
+	proxyIdleTimeout   = 120 * time.Second
+)
+
 // LaunchContext is the secret-bearing in-process snapshot the supervisor retains
 // from launch. It is never serialized, never crosses the socket, and never
 // appears in any SwitchOutcome/CLI output. GC'd on supervisor exit.
@@ -318,6 +328,7 @@ func (s *Supervisor) Run(ctx context.Context) error {
 	s.httpServer = &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 15 * time.Second,
+		IdleTimeout:       controlIdleTimeout,
 	}
 
 	go s.monitorSessions(ctx)

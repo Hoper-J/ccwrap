@@ -28,6 +28,11 @@ type Client struct {
 func UnixTransport(socketPath string) *http.Transport {
 	return &http.Transport{
 		Proxy: nil,
+		// Each request closes its connection. Callers make a transport per
+		// request or per probe (ccwrap ui probes every session every 2s);
+		// kept-alive idle connections in those throwaway transports are never
+		// closed, and pile up as open sockets on both ends.
+		DisableKeepAlives: true,
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			var d net.Dialer
 			return d.DialContext(ctx, "unix", socketPath)

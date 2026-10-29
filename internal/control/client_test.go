@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Hoper-J/ccwrap/internal/model"
 )
@@ -250,4 +251,80 @@ func TestSwitchProfile_DecodesRefusedOutcome(t *testing.T) {
 	if out.Message != "<redacted>" {
 		t.Errorf("Message = %q, want <redacted>", out.Message)
 	}
+}
+
+// countingListener counts the connections it accepted that are still open.
+type countingListener struct {
+	net.Listener
+	open chan int // buffered 1: the current count
+}
+
+func (l *countingListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	l.open <- <-l.open + 1
+	return &countedConn{Conn: c, l: l}, nil
+}
+
+type countedConn struct {
+	net.Conn
+	l      *countingListener
+	closed bool
+}
+
+func (c *countedConn) Close() error {
+	if !c.closed {
+		c.closed = true
+		c.l.open <- <-c.l.open - 1
+	}
+	return c.Conn.Close()
+}
+
+// Long-lived callers (ccwrap ui polls every session every 2s) make a fresh
+// client per probe; each request's connection must not stay open after it.
+// Kept-alive idle connections in throwaway transports were never closed, so
+// a ui running for hours held tens of thousands of sockets on both ends.
+func TestUnixTransportLeavesNoConnectionOpen(t *testing.T) {
+	sock := filepath.Join(shortTempDir(t), "c.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cl := &countingListener{Listener: ln, open: make(chan int, 1)}
+	cl.open <- 0
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(model.StatusResponse{})
+	})}
+	go func() { _ = srv.Serve(cl) }()
+	t.Cleanup(func() { _ = srv.Close() })
+
+	for i := 0; i < 20; i++ {
+		if _, err := NewClient(sock).Status(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		n := <-cl.open
+		cl.open <- n
+		if n == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d connections still open after 20 one-off status probes", n)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func shortTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "cc-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
 }
