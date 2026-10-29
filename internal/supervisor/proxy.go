@@ -27,6 +27,7 @@ type sessionProxy struct {
 	session          *sessionState
 	listener         net.Listener
 	httpServer       *http.Server
+	mitmTimeout      time.Duration // mitmHandshakeTimeout, read once when the proxy is made
 	closeOnce        sync.Once
 	mu               sync.Mutex
 	closed           bool
@@ -63,6 +64,7 @@ func newSessionProxy(supervisor *Supervisor, session *sessionState) (*sessionPro
 		transports:       map[string]*http.Transport{},
 		nativeTransports: map[string]*http.Transport{},
 		stackTransports:  map[stackTransportKey]*http.Transport{},
+		mitmTimeout:      mitmHandshakeTimeout,
 	}
 	sp.httpServer = &http.Server{
 		Handler:           http.HandlerFunc(sp.handleProxy),
@@ -77,6 +79,10 @@ func newSessionProxy(supervisor *Supervisor, session *sessionState) (*sessionPro
 	}()
 	return sp, nil
 }
+
+// mitmHandshakeTimeout bounds a MITM tunnel's start: reading the client's
+// ClientHello (native TLS) and the TLS handshake. A variable for tests.
+var mitmHandshakeTimeout = 20 * time.Second
 
 func (sp *sessionProxy) ListenAddr() string {
 	return sp.listener.Addr().String()
@@ -97,8 +103,15 @@ func (sp *sessionProxy) Close() error {
 		for conn := range sp.tracked {
 			tracked = append(tracked, conn)
 		}
-		transports := make([]*http.Transport, 0, len(sp.transports))
+		// Every cache: plain, native TLS per egress, native TLS per hello shape.
+		transports := make([]*http.Transport, 0, len(sp.transports)+len(sp.nativeTransports)+len(sp.stackTransports))
 		for _, tr := range sp.transports {
+			transports = append(transports, tr)
+		}
+		for _, tr := range sp.nativeTransports {
+			transports = append(transports, tr)
+		}
+		for _, tr := range sp.stackTransports {
 			transports = append(transports, tr)
 		}
 		sp.mu.Unlock()
@@ -573,7 +586,7 @@ func (sp *sessionProxy) handleTelemetryMITM(w http.ResponseWriter, r *http.Reque
 		MinVersion:   tls.VersionTLS12,
 		NextProtos:   []string{"http/1.1"},
 	})
-	_ = tlsConn.SetDeadline(time.Now().Add(20 * time.Second))
+	_ = tlsConn.SetDeadline(time.Now().Add(sp.mitmTimeout))
 	if err := tlsConn.Handshake(); err != nil {
 		// Cert-pinning fallback: the telemetry SDK rejected our cert. Mark the
 		// host so subsequent CONNECTs self-heal to blind tunnel (this one event
@@ -894,6 +907,10 @@ func (sp *sessionProxy) handleAnthropicMITM(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// One deadline covers reading the ClientHello below and the TLS
+	// handshake, so a client that opens the tunnel and goes silent is dropped.
+	_ = clientConn.SetDeadline(time.Now().Add(sp.mitmTimeout))
+
 	// Native TLS: peek CC's raw ClientHello before the CC<->ccwrap tls.Server
 	// handshake consumes it, so this connection's requests go upstream
 	// mirroring its shape (hellostack.go). tls.Server gets a replay conn, so
@@ -932,7 +949,7 @@ func (sp *sessionProxy) handleAnthropicMITM(w http.ResponseWriter, r *http.Reque
 		MinVersion:   tls.VersionTLS12,
 		NextProtos:   []string{"http/1.1"},
 	})
-	_ = tlsConn.SetDeadline(time.Now().Add(20 * time.Second))
+	_ = tlsConn.SetDeadline(time.Now().Add(sp.mitmTimeout))
 	if err := tlsConn.Handshake(); err != nil {
 		sp.supervisor.recordError(sp.session.public.ID, model.ErrorRecord{
 			Timestamp:       time.Now(),

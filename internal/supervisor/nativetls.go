@@ -93,6 +93,11 @@ func specOffersHTTP2(spec *utls.ClientHelloSpec) bool {
 	return false
 }
 
+// nativeHandshakeTimeout bounds the mirrored TLS handshake, as
+// TLSHandshakeTimeout does for Go's own TLS dials (it does not apply to a
+// custom DialTLSContext). A variable for tests.
+var nativeHandshakeTimeout = 15 * time.Second
+
 // nativeUTLSDialOver mirrors CC's ClientHello (rawHello) over rawConn to host,
 // verifying with roots. The spec is re-parsed here (fresh per dial -- utls
 // mutates extension state per connection, so specs MUST NOT be shared) and its
@@ -111,9 +116,13 @@ func nativeUTLSDialOver(rawConn net.Conn, host string, roots *x509.CertPool, raw
 	if err := u.ApplyPreset(spec); err != nil {
 		return nil, err
 	}
+	// The deadline covers only the handshake; it is cleared after so a long
+	// response stream on the connection is not cut.
+	_ = rawConn.SetDeadline(time.Now().Add(nativeHandshakeTimeout))
 	if err := u.Handshake(); err != nil {
 		return nil, err
 	}
+	_ = rawConn.SetDeadline(time.Time{})
 	return u, nil
 }
 
