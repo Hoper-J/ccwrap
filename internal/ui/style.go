@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"golang.org/x/term"
 )
 
 type Palette struct {
@@ -12,19 +14,14 @@ type Palette struct {
 
 func New(enabled bool) Palette { return Palette{Enabled: enabled} }
 
+// IsTerminal reports whether f is a terminal (TERM set and not "dumb").
+// It asks the terminal driver: /dev/null is a character device too.
 func IsTerminal(f *os.File) bool {
-	if f == nil {
+	if f == nil || !term.IsTerminal(int(f.Fd())) {
 		return false
 	}
-	info, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	if (info.Mode() & os.ModeCharDevice) == 0 {
-		return false
-	}
-	term := strings.ToLower(strings.TrimSpace(os.Getenv("TERM")))
-	return term != "" && term != "dumb"
+	t := strings.ToLower(strings.TrimSpace(os.Getenv("TERM")))
+	return t != "" && t != "dumb"
 }
 
 func (p Palette) wrap(code, s string) string {
