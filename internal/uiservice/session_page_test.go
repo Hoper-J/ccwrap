@@ -400,6 +400,32 @@ console.log(JSON.stringify({ got: urls.map((u) => openAIBase(u, table)), warn: p
 	}
 }
 
+// The egress test sends nothing for a saved profile whose egress is
+// unchanged, so the server tests the saved egress with any proxy
+// credentials the page never sees; otherwise it sends the draft. A saved
+// socks profile opens with its proxy URL and can be saved again.
+func TestProfileFormEgressTest(t *testing.T) {
+	out := runModule(t, `
+import { draftFrom, problems, egressTestBody } from '$JS/profiles/form.js';
+const socks = { name: 'p', provider: '', base_url: 'https://x.example', auth: { mode: 'ccwrap_bearer', has_inline_key: true },
+  model_aliases: {}, egress_mode: 'socks5', egress_url: 'socks5://proxy:1080' };
+const inherit = { ...socks, egress_mode: 'inherit', egress_url: '' };
+const d = draftFrom(socks);
+console.log(JSON.stringify({
+  unchanged: egressTestBody(socks, d),
+  inherit: egressTestBody(inherit, draftFrom(inherit)),
+  changed: egressTestBody(socks, { ...d, egress_url: ' socks5://other:1080 ' }),
+  mode: egressTestBody(socks, { ...d, egress_mode: 'direct' }),
+  fresh: egressTestBody(null, { ...draftFrom(null), egress_mode: 'http', egress_url: 'http://p:8080' }),
+  errs: problems(d, socks, []).errs,
+}));
+`)
+	want := `{"unchanged":{},"inherit":{},"changed":{"egress":{"mode":"socks5","url":"socks5://other:1080"}},"mode":{"egress":{"mode":"direct","url":""}},"fresh":{"egress":{"mode":"http","url":"http://p:8080"}},"errs":{}}`
+	if strings.TrimSpace(out) != want {
+		t.Fatalf("got  %s\nwant %s", strings.TrimSpace(out), want)
+	}
+}
+
 // Test connectivity tests the saved profile, so it waits until a new
 // profile or unsaved changes are saved instead of testing what was there.
 func TestProfileFormTestButton(t *testing.T) {

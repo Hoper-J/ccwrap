@@ -54,6 +54,15 @@ export function testButton(isNew, dirty, running) {
   return { disabled: !!running, title: 'Send one small model request with this profile' };
 }
 
+// egressTestBody is what the egress test sends. For a saved profile whose
+// egress is unchanged it sends nothing, so the server tests the saved egress,
+// including proxy credentials the page never sees; otherwise the draft's.
+export function egressTestBody(orig, d) {
+  const url = isProxyMode(d.egress_mode) ? d.egress_url.trim() : '';
+  if (orig && d.egress_mode === (orig.egress_mode || 'inherit') && url === (orig.egress_url || '')) return {};
+  return { egress: { mode: d.egress_mode, url } };
+}
+
 // aliasDefaultChoices is what "other Claude models →" offers: not set, each
 // alias target (one marked suggested when every alias maps to it), the
 // stored value, keep their Claude names, other model…. A new profile
@@ -433,7 +442,7 @@ export function mountProfileForm(main, deps) {
   async function runEgressTest() {
     egressTest = { running: true };
     draw();
-    const body = { egress: { mode: draft.egress_mode, url: isProxyMode(draft.egress_mode) ? draft.egress_url.trim() : '' } };
+    const body = egressTestBody(isNew ? null : orig, draft);
     try {
       const path = isNew ? '/egress-test' : '/profiles/' + encodeURIComponent(orig.name) + '/test-egress';
       egressTest = { result: await deps.api.post(path, body) };

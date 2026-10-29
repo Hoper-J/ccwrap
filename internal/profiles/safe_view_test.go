@@ -87,25 +87,22 @@ func TestSafeView_BaseURL_StripsUserinfo(t *testing.T) {
 	}
 }
 
-// TestSafeView_EgressURL_HttpModeOnly verifies EgressURL mirrors the
-// existing EgressHost gating: populated only when EgressMode=http, empty
-// otherwise. Userinfo is stripped in both cases.
-func TestSafeView_EgressURL_HttpModeOnly(t *testing.T) {
-	p := &Profile{
-		BaseURL: "https://api.example.com",
-		Egress:  EgressSpec{Mode: "http", URL: "http://user:pw@proxy:8080"},
-	}
-	v := p.SafeView()
-	if v.EgressURL != "http://proxy:8080" {
-		t.Fatalf("EgressURL: got %q, want userinfo-stripped", v.EgressURL)
-	}
-
-	p2 := &Profile{
-		BaseURL: "https://api.example.com",
-		Egress:  EgressSpec{Mode: "inherit", URL: "http://anything"}, // ignored when mode=inherit
-	}
-	v2 := p2.SafeView()
-	if v2.EgressURL != "" {
-		t.Fatalf("EgressURL should be empty for non-http mode; got %q", v2.EgressURL)
+// TestSafeView_EgressURL_ProxyModesOnly verifies EgressURL is populated
+// for every proxy mode (http, socks5, socks5h) with userinfo stripped, and
+// empty for inherit and direct. The Profiles form edits the proxy URL from
+// this field, so a proxy mode without it could not be saved again.
+func TestSafeView_EgressURL_ProxyModesOnly(t *testing.T) {
+	for _, tc := range []struct{ mode, url, want, host string }{
+		{"http", "http://user:pw@proxy:8080", "http://proxy:8080", "proxy:8080"},
+		{"socks5", "socks5://user:pw@proxy:1080", "socks5://proxy:1080", "proxy:1080"},
+		{"socks5h", "socks5h://proxy:1080", "socks5h://proxy:1080", "proxy:1080"},
+		{"inherit", "http://anything", "", ""}, // ignored when mode=inherit
+		{"direct", "", "", ""},
+	} {
+		p := &Profile{BaseURL: "https://api.example.com", Egress: EgressSpec{Mode: tc.mode, URL: tc.url}}
+		v := p.SafeView()
+		if v.EgressURL != tc.want || v.EgressHost != tc.host {
+			t.Errorf("mode %s: EgressURL=%q EgressHost=%q, want %q %q", tc.mode, v.EgressURL, v.EgressHost, tc.want, tc.host)
+		}
 	}
 }

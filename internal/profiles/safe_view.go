@@ -24,7 +24,7 @@ type SafeCatalogItem struct {
 	UpstreamHeaderCount int               `json:"upstream_header_count,omitempty"`
 	EgressMode          string            `json:"egress_mode"`
 	EgressHost          string            `json:"egress_host,omitempty"`
-	EgressURL           string            `json:"egress_url,omitempty"` // full URL minus userinfo, only set when EgressMode=http
+	EgressURL           string            `json:"egress_url,omitempty"` // full URL minus userinfo, only set for proxy modes (http, socks5, socks5h)
 }
 
 // SafeAuthSpec is the wire mirror of an AuthSpec without secret bytes.
@@ -62,7 +62,7 @@ func (p *Profile) SafeView() SafeCatalogItem {
 	if mode == "" {
 		mode = "inherit"
 	}
-	if mode == "http" {
+	if mode == "http" || mode == "socks5" || mode == "socks5h" {
 		if raw := strings.TrimSpace(p.Egress.URL); raw != "" {
 			if u, err := url.Parse(raw); err == nil && u.Hostname() != "" {
 				egressHost = u.Host
