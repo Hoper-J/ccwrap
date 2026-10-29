@@ -25,15 +25,18 @@ import (
 // SessionSummary is one session in the sidebar. The page shows the times as
 // they pass: how long it has run, how long ago it ended.
 type SessionSummary struct {
-	ID             string     `json:"id"`
-	ProjectDir     string     `json:"project_dir,omitempty"`
-	Profile        string     `json:"profile"`
-	State          string     `json:"state"`
-	Health         string     `json:"health"`
-	StartedAt      time.Time  `json:"started_at"`
-	EndedAt        *time.Time `json:"ended_at,omitempty"`
-	LastActivityAt *time.Time `json:"last_activity_at,omitempty"`
-	Display        struct {
+	ID         string `json:"id"`
+	ProjectDir string `json:"project_dir,omitempty"`
+	// ClaudeSessionID is the Claude Code conversation to resume after the
+	// session ends.
+	ClaudeSessionID string     `json:"claude_session_id,omitempty"`
+	Profile         string     `json:"profile"`
+	State           string     `json:"state"`
+	Health          string     `json:"health"`
+	StartedAt       time.Time  `json:"started_at"`
+	EndedAt         *time.Time `json:"ended_at,omitempty"`
+	LastActivityAt  *time.Time `json:"last_activity_at,omitempty"`
+	Display         struct {
 		Title string `json:"title"`
 		// Path is the project folder as shown (~ for home).
 		Path     string `json:"path,omitempty"`
@@ -85,7 +88,7 @@ func (s *Server) summarize(ctx context.Context, ls liveSession) (SessionSummary,
 		return SessionSummary{}, summaryFailed
 	}
 	sum := SessionSummary{
-		ID: m.SessionID, ProjectDir: canonicalDir(sess.ProjectDir), Profile: sess.ActiveProfileName,
+		ID: m.SessionID, ProjectDir: canonicalDir(sess.ProjectDir), ClaudeSessionID: sess.ClaudeSessionID, Profile: sess.ActiveProfileName,
 		State: string(sess.State), Health: string(sess.Health), StartedAt: sess.CreatedAt,
 		EndedAt: sess.EndedAt, LastActivityAt: sess.LastActivityAt, socket: m.ControlSocket,
 	}

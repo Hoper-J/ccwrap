@@ -439,6 +439,19 @@ console.log(JSON.stringify([testButton(true, false, false), testButton(false, tr
 	}
 }
 
+// An ended session resumes its own conversation when it reported one;
+// otherwise it continues the folder's latest.
+func TestContinueLaunch(t *testing.T) {
+	out := runModule(t, `
+import { continueLaunch } from '$JS/projects.js';
+console.log(JSON.stringify([continueLaunch('0b6c2a4e-5f1d-4c3b-9a8e-7d6f5e4c3b2a'), continueLaunch(''), continueLaunch(undefined)]));
+`)
+	want := `[{"mode":"resume","session":"0b6c2a4e-5f1d-4c3b-9a8e-7d6f5e4c3b2a"},{"mode":"continue"},{"mode":"continue"}]`
+	if strings.TrimSpace(out) != want {
+		t.Fatalf("got  %s\nwant %s", strings.TrimSpace(out), want)
+	}
+}
+
 // A folder's conversation is named by its title, else its last prompt; a
 // conversation without either is still one to continue.
 func TestConversationLabel(t *testing.T) {
@@ -452,6 +465,30 @@ console.log(JSON.stringify([
 ]));
 `)
 	want := `[{"text":"Fix login","none":false},{"text":"hello there","none":false},{"text":"Untitled conversation","none":true},{"text":"No conversations yet","none":true}]`
+	if strings.TrimSpace(out) != want {
+		t.Fatalf("got  %s\nwant %s", strings.TrimSpace(out), want)
+	}
+}
+
+// A Resume list entry names the conversation like a project row does, and
+// says where it stands: the running session it is open in (which opens
+// instead of a second Claude Code), or its branch and age.
+func TestConversationItem(t *testing.T) {
+	out := runModule(t, `
+import { conversationItem } from '$JS/projects.js';
+const now = Date.parse('2026-10-30T10:00:00Z');
+const sessions = [{ id: 'sess1', profile: 'deepseek', started_at: '2026-10-30T09:48:00Z', state: 'active' }];
+console.log(JSON.stringify([
+  conversationItem({ id: 'a', title: 'Fix login', last_prompt: 'hi', git_branch: 'main', last_active_at: '2026-10-30T09:57:00Z' }, sessions, now),
+  conversationItem({ id: 'b', last_prompt: 'why does it fail', last_active_at: '2026-10-28T10:00:00Z' }, sessions, now),
+  conversationItem({ id: 'c', title: 'Open work', open_in: ['sess1'], last_active_at: '2026-10-30T09:59:00Z' }, sessions, now),
+  conversationItem({ id: 'd', open_in: ['gone'], last_active_at: '2026-10-30T09:59:00Z' }, sessions, now),
+]));
+`)
+	want := `[{"text":"Fix login","none":false,"meta":"main · 3m ago","open":""},` +
+		`{"text":"why does it fail","none":false,"meta":"2d ago","open":""},` +
+		`{"text":"Open work","none":false,"meta":"open · deepseek · 12m","open":"sess1"},` +
+		`{"text":"Untitled conversation","none":true,"meta":"open in another session","open":"gone"}]`
 	if strings.TrimSpace(out) != want {
 		t.Fatalf("got  %s\nwant %s", strings.TrimSpace(out), want)
 	}

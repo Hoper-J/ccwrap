@@ -60,9 +60,30 @@ export function conversationLabel(p) {
   return { text: p.has_conversation ? 'Untitled conversation' : 'No conversations yet', none: true };
 }
 
+// continueLaunch is how an ended session continues: it resumes its own
+// conversation when it reported one, and otherwise the folder's latest.
+export function continueLaunch(conversation) {
+  return conversation ? { mode: 'resume', session: conversation } : { mode: 'continue' };
+}
+
+// conversationItem is one entry of the Resume list: the conversation's
+// title (else its last prompt), and its branch and age — or the running
+// session it is open in, which opens instead of a second Claude Code on
+// the same conversation.
+export function conversationItem(c, sessions, now) {
+  const text = c.title || c.last_prompt || '';
+  const open = (c.open_in || [])[0] || '';
+  const s = open ? sessions.find((x) => x.id === open) : null;
+  let meta;
+  if (s) meta = 'open · ' + (s.profile || 'no profile') + ' · ' + since(s.started_at, now);
+  else if (open) meta = 'open in another session';
+  else meta = [c.git_branch, ago(c.last_active_at, now)].filter(Boolean).join(' · ');
+  return { text: text || 'Untitled conversation', none: !text, meta, open };
+}
+
 // mountProjects shows the Projects page in main. deps: {api, toast, go,
-// openSession(id), launch(project, profile, mode), store}. It returns
-// {update(state), unmount()}.
+// openSession(id), launch(project, profile, mode, session), store}. It
+// returns {update(state), unmount()}.
 export function mountProjects(main, deps) {
   let st = null;
   let query = '';
@@ -70,6 +91,9 @@ export function mountProjects(main, deps) {
   let terminals = null; // GET /settings/terminal
   const picks = {};     // path → chosen profile ('' = no profile)
   let menuFor = '';     // path whose row menu is open
+  let convFor = '';     // path whose Resume list is open
+  let convs = null;     // its conversations; null while they load
+  let convErr = '';
 
   const title = h('h1', { class: 'page-title' }, 'Projects');
   const sub = h('p', { class: 'page-sub' });
@@ -88,11 +112,14 @@ export function mountProjects(main, deps) {
       e.preventDefault();
       search.focus();
     }
+    if (e.key === 'Escape' && convFor) { closeResume(true); return; }
     if (e.key === 'Escape' && (termOpen || menuFor)) { termOpen = false; menuFor = ''; drawTerm(); drawList(); }
   };
   const onDown = (e) => {
+    const inside = (sel) => e.target.closest && e.target.closest(sel);
     if (termOpen && !termSlot.contains(e.target)) { termOpen = false; drawTerm(); }
-    if (menuFor && !(e.target.closest && e.target.closest('.row-menu-wrap'))) { menuFor = ''; drawList(); }
+    if (menuFor && !inside('.row-menu-wrap')) { menuFor = ''; drawList(); }
+    if (convFor && !inside('.conv-menu') && !inside('[data-conv-trigger]')) closeResume(false);
   };
   document.addEventListener('keydown', onKey);
   document.addEventListener('mousedown', onDown);
@@ -182,9 +209,28 @@ export function mountProjects(main, deps) {
       return;
     }
     const now = Date.now();
+    const keep = focusKey();
     show(listSlot, h('div', { class: 'proj-list', role: 'list', 'aria-label': 'Projects' },
       h('div', { class: 'proj-head', 'aria-hidden': 'true' }, h('span', null, 'Project'), h('span', { class: 'proj-wide' }, 'Last conversation'), h('span', null, 'Profile'), h('span')),
       rows.map((p) => rowEl(p, now))));
+    refocus(keep);
+  }
+
+  // The list redraws as sessions and times change; focusKey names the
+  // control that had focus (its row's folder and its data-focus), and
+  // refocus gives focus back to the control that replaces it.
+  function focusKey() {
+    const a = document.activeElement;
+    const row = a && listSlot.contains(a) && a.dataset.focus ? a.closest('[data-path]') : null;
+    return row ? { path: row.dataset.path, key: a.dataset.focus } : null;
+  }
+
+  function refocus(k) {
+    const row = k && listSlot.querySelector('[data-path="' + CSS.escape(k.path) + '"]');
+    const el = row && row.querySelector('[data-focus="' + CSS.escape(k.key) + '"]');
+    if (!el) return false;
+    el.focus({ preventScroll: true });
+    return true;
   }
 
   function rowEl(p, now) {
@@ -207,30 +253,40 @@ export function mountProjects(main, deps) {
       actions = h('span', { class: 'status-line', role: 'status' }, icon('loader', 'spin'), 'Opening in ' + term + '…');
     } else if (live.length) {
       const newest = live.slice().sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at))[0];
+      // Continue would most likely land in the running conversation;
+      // the Resume list marks it and opens its session instead.
       actions = [
-        h('button', { type: 'button', class: 'btn btn-sm btn-primary', onclick: () => deps.openSession(newest.id) }, 'Open session'),
+        h('button', { type: 'button', class: 'btn btn-sm btn-primary', 'data-focus': 'open', onclick: () => deps.openSession(newest.id) }, 'Open session'),
         h('div', { class: 'row-menu-wrap' },
-          h('button', { type: 'button', class: 'icon-btn icon-btn-sm', 'aria-haspopup': 'menu', 'aria-expanded': String(menuFor === p.path), 'aria-label': 'More for ' + p.name, title: 'More for ' + p.name, onclick: () => { menuFor = menuFor === p.path ? '' : p.path; drawList(); revealMenu(); } }, icon('more')),
+          h('button', { type: 'button', class: 'icon-btn icon-btn-sm', 'data-focus': 'more', 'aria-haspopup': 'menu', 'aria-expanded': String(menuFor === p.path), 'aria-label': 'More for ' + p.name, title: 'More for ' + p.name, onclick: () => { menuFor = menuFor === p.path ? '' : p.path; convFor = ''; drawList(); revealMenu(); } }, icon('more')),
           menuFor === p.path ? h('div', { class: 'menu', role: 'menu' },
-            live.map((s) => h('button', { type: 'button', class: 'menu-item', role: 'menuitem', onclick: () => { menuFor = ''; deps.openSession(s.id); } },
+            live.map((s) => h('button', { type: 'button', class: 'menu-item', role: 'menuitem', 'data-focus': 'open:' + s.id, onclick: () => { menuFor = ''; deps.openSession(s.id); } },
               h('span', { class: 'dot', 'data-health': s.health || 'ok' }), 'Open ' + (s.profile || 'no profile') + ' · ' + since(s.started_at, now))),
-            h('button', { type: 'button', class: 'menu-item', role: 'menuitem', onclick: () => { menuFor = ''; deps.launch(p, profileFor(p), 'new'); } }, icon('plus'), 'Start another session')) : null),
+            h('button', { type: 'button', class: 'menu-item', role: 'menuitem', 'data-focus': 'another', onclick: () => { menuFor = ''; deps.launch(p, profileFor(p), 'new'); } }, icon('plus'), 'Start another session'),
+            h('button', { type: 'button', class: 'menu-item', role: 'menuitem', 'data-focus': 'resume-more', 'data-conv-trigger': true, 'aria-haspopup': 'menu', onclick: () => openResume(p) }, icon('clock'), 'Resume a conversation…')) : null),
       ];
     } else {
       const canContinue = !!p.has_conversation;
       actions = [
         h('button', {
-          type: 'button', class: 'btn btn-sm', 'aria-disabled': canContinue ? null : 'true',
+          type: 'button', class: 'btn btn-sm', 'data-focus': 'continue', 'aria-disabled': canContinue ? null : 'true',
           title: canContinue ? 'Continue the latest conversation here' : 'No conversation to resume yet',
           onclick: () => { if (canContinue) deps.launch(p, profileFor(p), 'continue'); },
         }, 'Continue'),
-        h('button', { type: 'button', class: 'btn btn-sm', title: 'Start a new conversation here', onclick: () => deps.launch(p, profileFor(p), 'new') }, 'New'),
+        h('button', {
+          type: 'button', class: 'btn btn-sm', 'data-focus': 'resume', 'data-conv-trigger': true, 'aria-haspopup': 'menu', 'aria-expanded': String(convFor === p.path),
+          'aria-disabled': canContinue ? null : 'true',
+          title: canContinue ? 'Pick a conversation here to resume' : 'No conversation to resume yet',
+          onclick: () => { if (!canContinue) return; if (convFor === p.path) closeResume(false); else openResume(p); },
+        }, 'Resume…'),
+        h('button', { type: 'button', class: 'btn btn-sm', 'data-focus': 'new', title: 'Start a new conversation here', onclick: () => deps.launch(p, profileFor(p), 'new') }, 'New'),
       ];
     }
+    if (convFor === p.path && !opening) actions = [actions, resumeList(p, now)];
     let note = null;
     if (launch && launch.state === 'timeout') {
       note = noteEl('warn', 'alert', 'No session appeared after 30s — check the ' + term + ' window.', [
-        ['Try again', () => deps.launch(p, profileFor(p), launch.mode)], ['Dismiss', () => deps.dismiss(p.path)]]);
+        ['Try again', () => deps.launch(p, profileFor(p), launch.mode, launch.session)], ['Dismiss', () => deps.dismiss(p.path)]]);
     } else if (launch && launch.state === 'rejected') {
       note = noteEl('danger', 'alert', launch.message, [['Dismiss', () => deps.dismiss(p.path)]]);
     } else if (!p.trusted && !live.length) {
@@ -238,7 +294,7 @@ export function mountProjects(main, deps) {
     }
     const health = worstHealth(live);
     const status = live.length ? runningText(live, now) : '';
-    return h('div', { class: 'proj-row', role: 'listitem' },
+    return h('div', { class: 'proj-row', role: 'listitem', 'data-path': p.path },
       h('div', { class: 'proj-grid' },
         h('div', { class: 'proj-main' },
           h('div', { class: 'proj-name-line' },
@@ -259,10 +315,80 @@ export function mountProjects(main, deps) {
     if (menu) menu.scrollIntoView({ block: 'nearest' });
   }
 
+  // openResume opens the Resume list under p's actions and loads the
+  // folder's conversations; an answer for a list closed meanwhile is dropped.
+  async function openResume(p) {
+    menuFor = '';
+    convFor = p.path;
+    convs = null;
+    convErr = '';
+    drawList();
+    try {
+      const out = await deps.api.get('/projects/conversations?path=' + encodeURIComponent(p.path));
+      if (convFor !== p.path) return;
+      convs = out.conversations || [];
+    } catch (err) {
+      if (convFor !== p.path) return;
+      convErr = err.message;
+    }
+    drawList();
+    const menu = listSlot.querySelector('.conv-menu');
+    if (!menu) return;
+    menu.scrollIntoView({ block: 'nearest' });
+    const first = menu.querySelector('[role="menuitem"]');
+    if (first) first.focus();
+  }
+
+  // closeResume closes the Resume list; from the keyboard, focus goes back
+  // to what opened it.
+  function closeResume(focusTrigger) {
+    const path = convFor;
+    convFor = '';
+    drawList();
+    if (focusTrigger) refocus({ path, key: 'resume' }) || refocus({ path, key: 'more' });
+  }
+
+  // resumeList is the folder's conversations, newest first. One a running
+  // session is in opens that session; another resumes in a new terminal;
+  // the last item opens Claude Code's own picker, which has them all.
+  function resumeList(p, now) {
+    const choose = (fn) => () => { convFor = ''; fn(); drawList(); };
+    let items;
+    if (convErr) items = h('p', { class: 'conv-note', role: 'none' }, "Couldn't list the conversations: " + convErr);
+    else if (convs === null) items = h('p', { class: 'conv-note', role: 'none' }, 'Loading conversations…');
+    else if (!convs.length) items = h('p', { class: 'conv-note', role: 'none' }, 'No conversations to resume here yet.');
+    else {
+      items = convs.map((c) => {
+        const it = conversationItem(c, st.sessions, now);
+        return h('button', {
+          type: 'button', class: 'menu-item conv-item', role: 'menuitem', 'data-focus': 'conv:' + c.id, title: it.text,
+          onclick: choose(() => (it.open ? deps.openSession(it.open) : deps.launch(p, profileFor(p), 'resume', c.id))),
+        }, h('span', { class: it.none ? 'conv-text none' : 'conv-text' }, it.text), h('span', { class: it.open ? 'conv-meta open' : 'conv-meta' }, it.meta));
+      });
+    }
+    const menu = h('div', { class: 'menu conv-menu', role: 'menu', 'aria-label': 'Conversations in ' + p.name },
+      h('div', { class: 'conv-head', role: 'none' }, 'Resume in ' + (termName() || 'your terminal')),
+      items,
+      h('div', { class: 'menu-sep', role: 'separator' }),
+      h('button', {
+        type: 'button', class: 'menu-item', role: 'menuitem', 'data-focus': 'conv-more', title: 'Pick from every conversation here in Claude Code',
+        onclick: choose(() => deps.launch(p, profileFor(p), 'resume')),
+      }, icon('terminal'), 'More in Claude Code…'));
+    menu.addEventListener('keydown', (e) => {
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+      e.preventDefault();
+      const opts = Array.from(menu.querySelectorAll('[role="menuitem"]'));
+      const i = opts.indexOf(document.activeElement);
+      const j = e.key === 'ArrowDown' ? Math.min(opts.length - 1, i + 1) : e.key === 'ArrowUp' ? Math.max(0, i - 1) : e.key === 'Home' ? 0 : opts.length - 1;
+      if (opts[j]) opts[j].focus();
+    });
+    return menu;
+  }
+
   function noteEl(kind, role, text, acts) {
     return h('div', { class: 'note-strip', 'data-kind': kind || null, role: role || null },
       icon(kind ? 'alert-triangle' : 'info'), h('span', { class: 'note-text' }, text),
-      acts.length ? h('span', { class: 'note-acts' }, acts.map(([label, fn]) => h('button', { type: 'button', class: 'btn btn-xs', onclick: fn }, label))) : null);
+      acts.length ? h('span', { class: 'note-acts' }, acts.map(([label, fn]) => h('button', { type: 'button', class: 'btn btn-xs', 'data-focus': 'note:' + label, onclick: fn }, label))) : null);
   }
 
   return {

@@ -233,6 +233,10 @@ Without a management subcommand, `ccwrap` launches Claude Code directly. In laun
 
 `ccwrap ui` is one local web app per user: look at sessions, manage profiles, and start sessions by project there. A launch starts it in the background (`CCWRAP_NO_UI=1` turns that off; it also stays off when stderr is not a terminal), and it exits on its own after 10 minutes with no page open and no session running. `ccwrap open` starts it when needed and opens the session you are in, or the Projects page when no session is running.
 
+On the Projects page each folder offers Continue (the latest conversation there), Resume… (pick one from the folder's conversations) and New (a new conversation). While a session runs in the folder, Resume… is in the row's ⋯ menu; the list marks the conversation that is open and opens its session instead of a second Claude Code on the same conversation. More in Claude Code… at the bottom opens Claude Code's own list. Once a session has ended, Continue on its page resumes that session's own conversation.
+
+![image-20261030111515843](assets/image-20261030111515843.png)
+
 Over SSH or without a graphical session, `ccwrap open` opens no browser: it prints the link and an `ssh -L <port>:127.0.0.1:<port> <this host>` command to run on your own machine. To keep that command valid, pin the port with `CCWRAP_UI_PORT`. Starting a session in a terminal from the Projects page works on macOS only for now (Terminal, iTerm, Ghostty).
 
 ## Launch flags

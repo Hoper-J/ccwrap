@@ -233,6 +233,10 @@ ccwrap profile    {ls | status | switch <name> | test [name] | test-egress [name
 
 `ccwrap ui` 是每个用户一个的本地网页，看会话、管理 profile、按项目启动会话都在这里。启动会话时它会在后台自动拉起（`CCWRAP_NO_UI=1` 关闭；stderr 不是终端时也不拉起）；没有页面开着、也没有会话在跑时，10 分钟后自己退出。`ccwrap open` 会在需要时启动它，然后在浏览器里打开当前所在的会话，没有会话时打开 Projects 页。
 
+Projects 页里，每个文件夹可以 Continue（接着这里最近的一次对话）、Resume…（从这个文件夹的对话列表里挑一段恢复）或 New（开始新对话）。文件夹里已经有会话在运行时，Resume… 在行末的 ⋯ 菜单里；列表会标出正开着的对话，点它会打开那个会话，不会再开一个 Claude Code 写同一段对话。列表底部的 More in Claude Code… 进入 Claude Code 自己的列表。会话结束后，它页面上的 Continue 会恢复这个会话自己的那段对话。
+
+![image-20261030111515843](assets/image-20261030111515843.png)
+
 在 SSH 里或者没有图形界面时，`ccwrap open` 不开浏览器，而是打印链接和一条 `ssh -L <端口>:127.0.0.1:<端口> <这台机器>` 转发命令，在自己的电脑上执行后就能打开；想让这条命令一直有效，用 `CCWRAP_UI_PORT` 固定端口。Projects 页里在终端中启动会话目前只支持 macOS（Terminal、iTerm、Ghostty）。
 
 ## 启动 flags

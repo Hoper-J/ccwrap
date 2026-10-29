@@ -10,7 +10,7 @@ import { renderHeader, renderConfig, metaLine, endedText } from './header.js';
 
 // mountSession shows session id in main. deps: {api, id, summary() (its
 // sidebar entry, if any), deny: Set, toast, go(hash), profiles(),
-// continueIn(path, profile)}. It returns {event(type, payload), unmount()}.
+// continueIn(path, profile, conversation)}. It returns {event(type, payload), unmount()}.
 export function mountSession(main, deps) {
   const base = '/sessions/' + encodeURIComponent(deps.id);
   let sess = null;
@@ -43,7 +43,7 @@ export function mountSession(main, deps) {
   function render() {
     renderHeader(headerEl, {
       sess, path: summaryPath(), toast: deps.toast,
-      onContinue: () => deps.continueIn(sess.project_dir, sess.active_profile_name || ''),
+      onContinue: () => deps.continueIn(sess.project_dir, sess.active_profile_name || '', sess.claude_session_id || ''),
     });
     renderIssues(issuesEl, { issues: sess.issues, ended: sess.state === 'ended', pending, onFix: fix });
     ribbon.render(sess);
@@ -90,7 +90,7 @@ export function mountSession(main, deps) {
       show(headerEl, h('section', { class: 'placeholder' },
         h('h1', { class: 'page-title' }, s ? s.display.title : 'Session not found'),
         h('p', { class: 'lede' }, ended ? 'This session has ended, and its details went with it.' : err.status === 404 ? 'No running session has this id.' : "Couldn't load this session: " + err.message),
-        ended && s.project_dir ? h('button', { type: 'button', class: 'btn', onclick: () => deps.continueIn(s.project_dir, s.profile || '') }, 'Continue in ' + s.display.title) : null));
+        ended && s.project_dir ? h('button', { type: 'button', class: 'btn', onclick: () => deps.continueIn(s.project_dir, s.profile || '', s.claude_session_id || '') }, 'Continue in ' + s.display.title) : null));
       show(issuesEl);
       show(ribbonEl);
       show(activityEl);

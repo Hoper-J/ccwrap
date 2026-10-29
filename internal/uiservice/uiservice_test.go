@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -368,6 +369,14 @@ func TestProjectsAndLaunch(t *testing.T) {
 		t.Fatalf("profiles: %d %v", status, prof)
 	}
 
+	// A conversation Claude Code keeps for the folder, and one it does not.
+	conv, gone := "0b6c2a4e-5f1d-4c3b-9a8e-7d6f5e4c3b2a", "0b6c2a4e-5f1d-4c3b-9a8e-000000000000"
+	if err := os.MkdirAll(projects.ConversationDir(claudeDir, proj), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projects.ConversationDir(claudeDir, proj), conv+".jsonl"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		body   string
 		status int
@@ -376,6 +385,9 @@ func TestProjectsAndLaunch(t *testing.T) {
 		{`{"path":"` + proj + `","mode":"later"}`, 400, "usage"},
 		{`{"path":"/somewhere/else","mode":"new"}`, 404, "unknown_project"},
 		{`{"path":"` + proj + `","profile":"nope","mode":"new"}`, 422, "unknown_profile"},
+		{`{"path":"` + proj + `","mode":"new","session":"` + conv + `"}`, 400, "usage"},
+		{`{"path":"` + proj + `","mode":"resume","session":"not-a-session"}`, 400, "usage"},
+		{`{"path":"` + proj + `","mode":"resume","session":"` + gone + `"}`, 404, "unknown_conversation"},
 	} {
 		if status, out := r.write(t, "POST", "/api/v1/projects/launch", tc.body); status != tc.status || code(out) != tc.code {
 			t.Errorf("%s: %d %v", tc.body, status, out)
@@ -394,12 +406,136 @@ func TestProjectsAndLaunch(t *testing.T) {
 	if status, out := r.write(t, "POST", "/api/v1/projects/launch", `{"path":"`+proj+`","mode":"new"}`); status != 429 || code(out) != "too_fast" {
 		t.Fatalf("second launch within a second: %d %v", status, out)
 	}
+	// A second later, resuming a kept conversation passes its ID on.
+	time.Sleep(1100 * time.Millisecond)
+	status, out = r.write(t, "POST", "/api/v1/projects/launch", `{"path":"`+proj+`","profile":"gw","mode":"resume","session":"`+conv+`"}`)
+	if status != 200 || out["mode"] != "resume" || len(launched) != 2 || strings.Join(launched[1].Args, " ") != "--profile gw -- --resume "+conv {
+		t.Fatalf("resume: %d %v %+v", status, out, launched)
+	}
 
 	if status, out := r.write(t, "PUT", "/api/v1/settings/terminal", `{"terminal":"terminal"}`); status != 200 || out["current"] != "terminal" || out["claude_choice"] != "iterm" {
 		t.Fatalf("set terminal: %d %v", status, out)
 	}
 	if status, out := r.write(t, "PUT", "/api/v1/settings/terminal", `{"terminal":"ghostty"}`); status != 422 || code(out) != "unknown_terminal" {
 		t.Fatalf("uninstalled terminal: %d %v", status, out)
+	}
+}
+
+// fakeSession registers a running session whose control socket answers
+// what the service asks: its status, the session (in projectDir, in Claude
+// Code conversation claudeSession) and a quiet event stream.
+func fakeSession(t *testing.T, paths app.Paths, id, projectDir, claudeSession string) {
+	t.Helper()
+	sp := paths.SessionPaths(id)
+	if err := os.MkdirAll(sp.RuntimeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("unix", sp.SocketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/status", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(model.StatusResponse{SessionID: id, SocketPath: sp.SocketPath})
+	})
+	mux.HandleFunc("GET /api/v1/session", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(model.Session{ID: id, State: model.StateActive, ProjectDir: projectDir, ClaudeSessionID: claudeSession, CreatedAt: now})
+	})
+	mux.HandleFunc("GET /api/v1/events", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	})
+	srv := &http.Server{Handler: mux}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+	token, err := procmeta.CurrentStartToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.Write(manifest.Path(sp.RuntimeDir), model.SessionManifest{
+		SessionID: id, CreatedAt: now, State: model.StateActive, SupervisorPID: os.Getpid(), SupervisorStartToken: token,
+		ControlSocket: sp.SocketPath, ProjectDir: projectDir,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The Resume list holds a folder's conversations and marks the ones a
+// running session is in; a launch never resumes one of those, which would
+// put a second Claude Code on its transcript.
+func TestProjectConversations(t *testing.T) {
+	paths := testutil.ShortAppPaths(t, "ui.sock")
+	claudeDir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", claudeDir)
+	proj := projects.Canonical(t.TempDir())
+	cfg, _ := json.Marshal(map[string]any{"projects": map[string]any{proj: map[string]any{"hasTrustDialogAccepted": true}}})
+	if err := os.WriteFile(filepath.Join(claudeDir, ".claude.json"), cfg, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	open, idle := "aaaaaaaa-0000-4000-8000-000000000001", "bbbbbbbb-0000-4000-8000-000000000002"
+	conv := projects.ConversationDir(claudeDir, proj)
+	if err := os.MkdirAll(conv, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for id, line := range map[string]string{
+		open: `{"type":"user","cwd":"` + proj + `","timestamp":"2026-10-30T09:05:00Z"}` + "\n" + `{"type":"ai-title","aiTitle":"Open work"}`,
+		idle: `{"type":"user","cwd":"` + proj + `","timestamp":"2026-10-30T09:01:00Z"}` + "\n" + `{"type":"ai-title","aiTitle":"Earlier work"}`,
+	} {
+		if err := os.WriteFile(filepath.Join(conv, id+".jsonl"), []byte(line+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(paths.StateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fakeSession(t, paths, "cccc000000000003", proj, open)
+	apps := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(apps, "Terminal.app"), 0o755)
+	installedTerminals = func() []termlaunch.Installation { return termlaunch.InstalledIn([]string{apps}) }
+	var launched []termlaunch.Request
+	launchTerminal = func(in termlaunch.Installation, req termlaunch.Request, scriptDir string) error {
+		launched = append(launched, req)
+		return nil
+	}
+	t.Cleanup(func() { installedTerminals, launchTerminal = termlaunch.Installed, termlaunch.Launch })
+	r := startUI(t, paths, nil, time.Hour)
+
+	status, out := r.http(t, "GET", "/api/v1/projects/conversations?path="+url.QueryEscape(proj), "", nil)
+	list, _ := out["conversations"].([]any)
+	if status != 200 || len(list) != 2 {
+		t.Fatalf("conversations: %d %v", status, out)
+	}
+	first, second := list[0].(map[string]any), list[1].(map[string]any)
+	if first["id"] != open || first["title"] != "Open work" || mustJSON(first["open_in"]) != `["cccc000000000003"]` {
+		t.Errorf("open conversation = %v", first)
+	}
+	if second["id"] != idle || second["open_in"] != nil {
+		t.Errorf("idle conversation = %v", second)
+	}
+	for _, tc := range []struct {
+		query  string
+		status int
+		code   string
+	}{
+		{"", 400, "usage"},
+		{"?path=" + url.QueryEscape("/somewhere/else"), 404, "unknown_project"},
+	} {
+		if status, out := r.http(t, "GET", "/api/v1/projects/conversations"+tc.query, "", nil); status != tc.status || code(out) != tc.code {
+			t.Errorf("%q: %d %v", tc.query, status, out)
+		}
+	}
+
+	if status, out := r.write(t, "POST", "/api/v1/projects/launch", `{"path":"`+proj+`","mode":"resume","session":"`+open+`"}`); status != 409 || code(out) != "conversation_open" {
+		t.Fatalf("resuming the open conversation: %d %v", status, out)
+	}
+	if len(launched) != 0 {
+		t.Fatal("a refused launch ran something")
+	}
+	if status, out := r.write(t, "POST", "/api/v1/projects/launch", `{"path":"`+proj+`","mode":"resume","session":"`+idle+`"}`); status != 200 || len(launched) != 1 || strings.Join(launched[0].Args, " ") != "-- --resume "+idle {
+		t.Fatalf("resuming another conversation: %d %v %+v", status, out, launched)
 	}
 }
 

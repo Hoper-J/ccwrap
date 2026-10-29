@@ -1124,6 +1124,9 @@ func (s *Supervisor) recordRequest(id string, record model.RequestRecord) {
 	store := sess.bodies
 	sess.requests = appendCapped(sess.requests, record, maxSessionRequests)
 	sess.public.RecentRequestCount = len(sess.requests)
+	if conversation := record.RequestHeaders.Get(ui.ClaudeSessionHeader); conversation != "" {
+		sess.public.ClaudeSessionID = conversation
+	}
 	if failed {
 		sess.failedRequests++
 	}

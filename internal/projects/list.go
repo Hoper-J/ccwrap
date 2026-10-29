@@ -67,6 +67,9 @@ type summary struct {
 	prompt string
 	branch string
 	at     time.Time
+	// bookkeeping marks a file read whole that holds no message: Claude
+	// Code writes some before the first prompt, and does not resume them.
+	bookkeeping bool
 }
 
 // maxPromptRunes is how much of a last prompt Project.LastPrompt keeps.
@@ -235,23 +238,29 @@ func (l *Lister) latest(dir string) (summary, bool) {
 	if newestInfo == nil {
 		return summary{}, false
 	}
+	return l.summary(newest, newestInfo), true
+}
+
+// summary summarizes one conversation file, from the cache while the file
+// is unchanged. A file without timestamps is as old as its last write.
+func (l *Lister) summary(file string, info os.FileInfo) summary {
 	l.mu.Lock()
-	if c, ok := l.cache[newest]; ok && c.modTime.Equal(newestInfo.ModTime()) && c.size == newestInfo.Size() {
+	if c, ok := l.cache[file]; ok && c.modTime.Equal(info.ModTime()) && c.size == info.Size() {
 		l.mu.Unlock()
-		return c.summary, true
+		return c.summary
 	}
 	l.mu.Unlock()
-	s := summarize(newest, filepath.Base(dir))
+	s := summarize(file, filepath.Base(filepath.Dir(file)))
 	if s.at.IsZero() {
-		s.at = newestInfo.ModTime()
+		s.at = info.ModTime()
 	}
 	l.mu.Lock()
 	if l.cache == nil {
 		l.cache = map[string]cachedSummary{}
 	}
-	l.cache[newest] = cachedSummary{modTime: newestInfo.ModTime(), size: newestInfo.Size(), summary: s}
+	l.cache[file] = cachedSummary{modTime: info.ModTime(), size: info.Size(), summary: s}
 	l.mu.Unlock()
-	return s, true
+	return s
 }
 
 type entry struct {
@@ -281,10 +290,15 @@ func summarize(file, dirName string) summary {
 		tail := make([]byte, info.Size()-start)
 		if _, err := f.ReadAt(tail, start); err == nil || err == io.EOF {
 			lines := bytes.Split(tail, []byte("\n"))
+			content := false
 			for i := len(lines) - 1; i >= 0; i-- {
 				var e entry
 				if json.Unmarshal(lines[i], &e) != nil {
 					continue
+				}
+				switch e.Type {
+				case "user", "assistant", "ai-title", "last-prompt":
+					content = true
 				}
 				if s.title == "" && e.Type == "ai-title" && e.AITitle != "" {
 					s.title = e.AITitle
@@ -302,6 +316,8 @@ func summarize(file, dirName string) summary {
 					s.cwd = e.Cwd
 				}
 			}
+			// Only a file read whole is known to hold no message.
+			s.bookkeeping = start == 0 && !content
 		}
 	}
 	if s.cwd == "" {

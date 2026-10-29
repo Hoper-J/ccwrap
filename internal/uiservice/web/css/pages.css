@@ -45,14 +45,15 @@
 /* ---- Project list ----------------------------------------------------------
    Wide (content ≥ 960): project · last conversation · profile · actions.
    Narrower: the conversation line moves under the path; under 700 the
-   profile and the actions go under the project too. */
+   profile and the actions go under the project too. The design gives the
+   actions 160px, for Continue and New; with Resume… they need 240. */
 .proj-list { border: 1px solid var(--border); border-radius: var(--r-xl); }
-.proj-head, .proj-grid { display: grid; grid-template-columns: minmax(0, 1fr) 128px 160px; gap: 10px 16px; align-items: center; }
+.proj-head, .proj-grid { display: grid; grid-template-columns: minmax(0, 1fr) 128px 240px; gap: 10px 16px; align-items: center; }
 .proj-head { gap: 16px; padding: 9px 16px; background: var(--surface-2); border-radius: var(--r-xl) var(--r-xl) 0 0; border-bottom: 1px solid var(--line); color: var(--text-muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; font-weight: 700; }
 .proj-wide { display: none; }
 .proj-conv-narrow { display: flex; align-items: center; gap: 6px; min-width: 0; margin-top: 4px; font-size: 12px; color: var(--text-muted); }
 @container content (min-width: 960px) {
-  .proj-head, .proj-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr) 140px 160px; }
+  .proj-head, .proj-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr) 140px 240px; }
   .proj-wide { display: block; }
   .proj-conv-narrow { display: none; }
 }
@@ -95,11 +96,21 @@
 .proj-select { appearance: none; width: 100%; height: 30px; padding: 0 24px 0 9px; border: 0; background: transparent; font-family: var(--font-mono); font-size: 12px; outline: none; cursor: pointer; }
 .proj-select:disabled { opacity: .5; cursor: default; }
 .proj-select option { background: var(--surface); color: var(--text); }
-.proj-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.proj-actions { position: relative; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .row-menu-wrap { position: relative; }
 .row-menu-wrap .menu { top: calc(100% + 6px); min-width: 230px; }
 .row-menu-wrap .menu-item { white-space: nowrap; }
 .row-menu-wrap .menu-item .dot { width: 7px; height: 7px; flex: none; }
+/* The Resume list hangs under the row's actions, as wide as fits. */
+.conv-menu { top: calc(100% + 6px); width: min(400px, 100cqw); max-height: 360px; overflow-y: auto; }
+.conv-head { padding: 4px 8px 6px; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.conv-note { margin: 0; padding: 6px 10px 8px; font-size: 12px; color: var(--text-muted); }
+.conv-item { flex-direction: column; align-items: stretch; gap: 2px; }
+.conv-text { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.conv-text.none { color: var(--text-muted); font-style: italic; }
+.conv-meta { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.conv-meta.open { color: var(--accent); }
+.menu-sep { flex: none; height: 1px; margin: 4px 6px; background: var(--line); }
 .note-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; margin-top: 10px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); font-size: 12px; color: var(--text-secondary); }
 .note-strip > .icon { width: 14px; height: 14px; color: var(--text-muted); }
 .note-strip[data-kind="warn"] { border-color: var(--fill-warn-border); background: var(--note-warn-bg); color: var(--warn); }

@@ -10,7 +10,7 @@ import { renderBanner } from './shell/banner.js';
 import { createToasts } from './shell/toast.js';
 import { renderEmpty, launchProfile } from './views/empty.js';
 import { mountSession } from './session/view.js';
-import { mountProjects, settleLaunches, LAUNCH_TIMEOUT_MS } from './projects.js';
+import { mountProjects, settleLaunches, continueLaunch, LAUNCH_TIMEOUT_MS } from './projects.js';
 import { mountProfiles } from './profiles/list.js';
 import { mountProfileForm } from './profiles/form.js';
 
@@ -173,7 +173,10 @@ function renderMain(st) {
         api, id, deny, toast, go,
         summary: () => store.get().sessions.find((x) => x.id === id),
         profiles: async () => (await api.get('/profiles')).profiles || [],
-        continueIn: (path, profile) => launch({ path, name: path.split('/').pop() }, profile, 'continue'),
+        continueIn: (path, profile, conversation) => {
+          const c = continueLaunch(conversation);
+          launch({ path, name: path.split('/').pop() }, profile, c.mode, c.session);
+        },
       }));
       return;
     }
@@ -223,12 +226,12 @@ function dismiss(path) { setLaunch(path, null); }
 // launch opens the user's terminal in a project and runs ccwrap there
 // (mode new or continue). The row shows opening until a session from that
 // folder appears; after LAUNCH_TIMEOUT_MS it says none did.
-async function launch(p, profile, mode) {
+async function launch(p, profile, mode, session) {
   const since = Date.now();
-  setLaunch(p.path, { state: 'opening', since, mode, terminal: '' });
+  setLaunch(p.path, { state: 'opening', since, mode, session, terminal: '' });
   const onProjects = store.get().route.view === 'projects';
   try {
-    const out = await api.post('/projects/launch', { path: p.path, profile, mode });
+    const out = await api.post('/projects/launch', session ? { path: p.path, profile, mode, session } : { path: p.path, profile, mode });
     const cur = store.get().launches[p.path];
     if (cur && cur.since === since && cur.state === 'opening') setLaunch(p.path, { ...cur, terminal: out.terminal });
     setTimeout(() => {
@@ -240,7 +243,7 @@ async function launch(p, profile, mode) {
     }, LAUNCH_TIMEOUT_MS);
   } catch (err) {
     const message = 'Not opened: ' + err.message;
-    if (onProjects) setLaunch(p.path, { state: 'rejected', since, mode, message });
+    if (onProjects) setLaunch(p.path, { state: 'rejected', since, mode, session, message });
     else { setLaunch(p.path, null); toast(message, 'error'); }
   }
 }

@@ -237,10 +237,14 @@ type Session struct {
 	ID   string `json:"id"`
 	Name string `json:"name,omitempty"`
 	// ProjectDir is the working directory Claude Code was launched in.
-	ProjectDir string     `json:"project_dir,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
-	EndedAt    *time.Time `json:"ended_at,omitempty"`
+	ProjectDir string `json:"project_dir,omitempty"`
+	// ClaudeSessionID is the Claude Code conversation the session's latest
+	// model request belonged to (its X-Claude-Code-Session-Id); `claude
+	// --resume` takes it.
+	ClaudeSessionID string     `json:"claude_session_id,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+	EndedAt         *time.Time `json:"ended_at,omitempty"`
 	// LastActivityAt is the newest request, error or trace entry's time.
 	LastActivityAt                     *time.Time        `json:"last_activity_at,omitempty"`
 	State                              SessionState      `json:"state"`

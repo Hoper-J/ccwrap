@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Hoper-J/ccwrap/internal/model"
 	"github.com/Hoper-J/ccwrap/internal/profiles"
 	"github.com/Hoper-J/ccwrap/internal/projects"
 	"github.com/Hoper-J/ccwrap/internal/settings"
@@ -22,6 +23,7 @@ func (s *Server) apiMux() http.Handler {
 	mux.HandleFunc("/api/v1/sessions/{id}/{rest...}", s.handleSessionAPI)
 	mux.HandleFunc("GET /api/v1/events", s.handleEvents)
 	mux.HandleFunc("GET /api/v1/projects", s.handleProjects)
+	mux.HandleFunc("GET /api/v1/projects/conversations", s.handleConversations)
 	mux.HandleFunc("POST /api/v1/projects/launch", s.handleLaunch)
 	mux.HandleFunc("GET /api/v1/settings/terminal", s.handleGetTerminal)
 	mux.HandleFunc("PUT /api/v1/settings/terminal", s.handlePutTerminal)
@@ -38,7 +40,8 @@ func (s *Server) apiMux() http.Handler {
 	// apart itself.
 	known := map[string]string{
 		"/api/v1/meta": "GET", "/api/v1/sessions": "GET", "/api/v1/events": "GET", "/api/v1/projects": "GET",
-		"/api/v1/projects/launch": "POST", "/api/v1/settings/terminal": "GET, PUT", "/api/v1/profiles": "GET, POST",
+		"/api/v1/projects/conversations": "GET", "/api/v1/projects/launch": "POST",
+		"/api/v1/settings/terminal": "GET, PUT", "/api/v1/profiles": "GET, POST",
 		"/api/v1/egress-test": "POST",
 	}
 	mux.HandleFunc("/api/v1/", func(w http.ResponseWriter, r *http.Request) {
@@ -61,7 +64,7 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 		"api":          "v1",
 		"version":      s.info.Version,
 		"instance_id":  s.info.InstanceID,
-		"capabilities": []string{"sessions", "events", "projects", "launch", "terminal-settings", "profiles", "profile-tests"},
+		"capabilities": []string{"sessions", "events", "projects", "conversations", "launch", "terminal-settings", "profiles", "profile-tests"},
 	})
 }
 
@@ -97,6 +100,58 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"projects": out})
 }
 
+// knownProject reports whether path is a folder the Projects list shows.
+func (s *Server) knownProject(path string) bool {
+	for _, p := range s.lister.List(s.projectSources()) {
+		if p.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+// conversationLimit is how many conversations the Resume list offers;
+// Claude Code's own picker has the rest.
+const conversationLimit = 30
+
+// conversationView is a conversation with the running sessions it is open
+// in, where it continues rather than in a second Claude Code.
+type conversationView struct {
+	projects.Conversation
+	OpenIn []string `json:"open_in,omitempty"`
+}
+
+func (s *Server) handleConversations(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		writeAPIError(w, http.StatusBadRequest, "usage", "path is required")
+		return
+	}
+	if !s.knownProject(path) {
+		writeAPIError(w, http.StatusNotFound, "unknown_project", "not a known project folder: "+path)
+		return
+	}
+	open := openConversations(s.hub.refresh(r.Context()))
+	list := s.lister.Conversations(s.projectSources().ClaudeHome, path, conversationLimit)
+	out := make([]conversationView, len(list))
+	for i, c := range list {
+		out[i] = conversationView{Conversation: c, OpenIn: open[c.ID]}
+	}
+	writeJSON(w, map[string]any{"path": path, "conversations": out})
+}
+
+// openConversations maps each Claude Code conversation that a running
+// session is in to that session's ID.
+func openConversations(sessions []SessionSummary) map[string][]string {
+	open := map[string][]string{}
+	for _, sum := range sessions {
+		if sum.ClaudeSessionID != "" && sum.State != string(model.StateEnded) {
+			open[sum.ClaudeSessionID] = append(open[sum.ClaudeSessionID], sum.ID)
+		}
+	}
+	return open
+}
+
 // claudeDeepLinkTerminal is the terminal Claude Code opens for its own deep
 // links, from its global config.
 func claudeDeepLinkTerminal() string {
@@ -119,11 +174,16 @@ type launchRequest struct {
 	Path    string `json:"path"`
 	Profile string `json:"profile"`
 	Mode    string `json:"mode"`
+	// Session is the Claude Code conversation to resume (mode "resume");
+	// without it Claude Code shows its own picker.
+	Session string `json:"session,omitempty"`
 }
 
 // handleLaunch opens the user's terminal in a known project folder running
 // this ccwrap with a known profile. Nothing else can be run: the command is
-// fixed and its only arguments are --profile and --continue.
+// fixed and its only arguments are --profile, --continue, and --resume with
+// a conversation Claude Code keeps for the folder and no running session
+// is in.
 func (s *Server) handleLaunch(w http.ResponseWriter, r *http.Request) {
 	var req launchRequest
 	body := http.MaxBytesReader(w, r.Body, 64<<10)
@@ -131,24 +191,36 @@ func (s *Server) handleLaunch(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "usage", "invalid request body: "+err.Error())
 		return
 	}
-	if req.Mode != "new" && req.Mode != "continue" {
-		writeAPIError(w, http.StatusBadRequest, "usage", `mode must be "new" or "continue"`)
+	switch {
+	case req.Mode != "new" && req.Mode != "continue" && req.Mode != "resume":
+		writeAPIError(w, http.StatusBadRequest, "usage", `mode must be "new", "continue" or "resume"`)
+		return
+	case req.Session != "" && req.Mode != "resume":
+		writeAPIError(w, http.StatusBadRequest, "usage", `session goes only with mode "resume"`)
+		return
+	case req.Session != "" && !projects.IsConversationID(req.Session):
+		writeAPIError(w, http.StatusBadRequest, "usage", "session must be a Claude Code session ID")
 		return
 	}
-	known := false
-	for _, p := range s.lister.List(s.projectSources()) {
-		if p.Path == req.Path {
-			known = true
-			break
-		}
-	}
-	if !known {
+	if !s.knownProject(req.Path) {
 		writeAPIError(w, http.StatusNotFound, "unknown_project", "not a known project folder: "+req.Path)
 		return
 	}
 	if err := termlaunch.ValidateDir(req.Path); err != nil {
 		writeAPIError(w, http.StatusUnprocessableEntity, "invalid_folder", err.Error())
 		return
+	}
+	if req.Session != "" && !projects.HasConversation(s.projectSources().ClaudeHome, req.Path, req.Session) {
+		writeAPIError(w, http.StatusNotFound, "unknown_conversation", "Claude Code keeps no conversation "+req.Session+" for "+req.Path)
+		return
+	}
+	// Claude Code resumes a conversation open in another terminal as it is,
+	// and the two would write one transcript.
+	if req.Session != "" {
+		if ids := openConversations(s.hub.refresh(r.Context()))[req.Session]; len(ids) > 0 {
+			writeAPIError(w, http.StatusConflict, "conversation_open", "the conversation is open in session "+ui.ShortID(ids[0]))
+			return
+		}
 	}
 	if req.Profile != "" {
 		f, err := profiles.Load(profiles.DefaultPath(s.opts.Paths.StateDir))
@@ -175,18 +247,31 @@ func (s *Server) handleLaunch(w http.ResponseWriter, r *http.Request) {
 	s.lastLaunch = time.Now()
 	s.launchMu.Unlock()
 
-	var args []string
-	if req.Profile != "" {
-		args = append(args, "--profile", req.Profile)
-	}
-	if req.Mode == "continue" {
-		args = append(args, "--", "--continue")
-	}
+	args := launchArgs(req.Profile, req.Mode, req.Session)
 	if err := launchTerminal(term, termlaunch.Request{Dir: req.Path, Exe: s.opts.Exe, Args: args}, filepath.Join(s.dir, "launch")); err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "launch_failed", err.Error())
 		return
 	}
-	writeJSON(w, map[string]string{"terminal": term.Name, "path": req.Path, "profile": req.Profile, "mode": req.Mode})
+	writeJSON(w, map[string]string{"terminal": term.Name, "path": req.Path, "profile": req.Profile, "mode": req.Mode, "session": req.Session})
+}
+
+// launchArgs is the launched ccwrap's arguments; what follows "--" goes to
+// Claude Code.
+func launchArgs(profile, mode, session string) []string {
+	var args []string
+	if profile != "" {
+		args = append(args, "--profile", profile)
+	}
+	switch mode {
+	case "continue":
+		args = append(args, "--", "--continue")
+	case "resume":
+		args = append(args, "--", "--resume")
+		if session != "" {
+			args = append(args, session)
+		}
+	}
+	return args
 }
 
 func (s *Server) handleGetTerminal(w http.ResponseWriter, r *http.Request) {

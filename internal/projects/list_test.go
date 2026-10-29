@@ -188,6 +188,105 @@ func TestEncodeDir(t *testing.T) {
 	}
 }
 
+// A conversation can be resumed only by its ID, and only among those
+// Claude Code keeps for the folder.
+func TestHasConversation(t *testing.T) {
+	home := t.TempDir()
+	dir := Canonical(t.TempDir())
+	id := "0b6c2a4e-5f1d-4c3b-9a8e-7d6f5e4c3b2a"
+	conv := ConversationDir(home, dir)
+	if err := os.MkdirAll(conv, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(conv, id+".jsonl"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !IsConversationID(id) || !HasConversation(home, dir, id) {
+		t.Fatal("a kept conversation was not found")
+	}
+	for _, bad := range []string{"", "0b6c2a4e-5f1d-4c3b-9a8e-000000000000", "../" + id, id + ".jsonl", "0B6C2A4E-5F1D-4C3B-9A8E-7D6F5E4C3B2A"} {
+		if HasConversation(home, dir, bad) {
+			t.Errorf("HasConversation(%q) = true", bad)
+		}
+	}
+	if HasConversation(home, Canonical(t.TempDir()), id) {
+		t.Error("found a conversation under another folder")
+	}
+}
+
+// The Resume list holds the conversations `claude --resume` in the folder
+// can open, newest first: files named like Claude Code's session IDs, under
+// the folder's own conversation directory, that hold more than bookkeeping.
+func TestConversations(t *testing.T) {
+	f := newFixture(t)
+	dir, other := f.project("dir"), f.project("other")
+	at := func(min int) time.Time { return time.Date(2026, 10, 30, 9, min, 0, 0, time.UTC) }
+	write := func(dir, file string, mtime time.Time, lines ...map[string]any) string {
+		path := f.conversation(dir, file, lines...)
+		if err := os.Chtimes(path, mtime, mtime); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	older, newer, untitled, big := "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222",
+		"33333333-3333-4333-8333-333333333333", "66666666-6666-4666-8666-666666666666"
+	write(dir, older+".jsonl", at(1),
+		map[string]any{"type": "user", "cwd": dir, "gitBranch": "main", "timestamp": at(1)},
+		map[string]any{"type": "ai-title", "aiTitle": "Older work"})
+	write(dir, newer+".jsonl", at(6),
+		map[string]any{"type": "user", "cwd": dir, "gitBranch": "feature/x", "timestamp": at(5)},
+		map[string]any{"type": "assistant", "cwd": dir, "timestamp": at(6)},
+		map[string]any{"type": "ai-title", "aiTitle": "Newer work"})
+	write(dir, untitled+".jsonl", at(3),
+		map[string]any{"type": "user", "cwd": dir, "timestamp": at(3)},
+		map[string]any{"type": "last-prompt", "lastPrompt": "why\n does it fail"})
+	// Too long to read whole, its tail one unparsable line: still a
+	// conversation, untitled, as old as the file.
+	path := write(dir, big+".jsonl", at(0), map[string]any{"type": "user", "cwd": dir, "timestamp": at(0)})
+	long, _ := os.ReadFile(path)
+	long = append(long, []byte(`{"type":"assistant","message":"`+strings.Repeat("x", tailBytes)+`"}`+"\n")...)
+	if err := os.WriteFile(path, long, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, at(0), at(0)); err != nil {
+		t.Fatal(err)
+	}
+	// Not ones to resume: bookkeeping only, a sidechain, a stray file, a
+	// directory, and another folder's conversation.
+	write(dir, "44444444-4444-4444-8444-444444444444.jsonl", at(9), map[string]any{"type": "file-history-snapshot", "messageId": "m"})
+	write(dir, "agent-1234.jsonl", at(9), map[string]any{"type": "user", "cwd": dir, "timestamp": at(9)})
+	write(dir, "notes.txt", at(9), map[string]any{"type": "user"})
+	if err := os.MkdirAll(filepath.Join(ConversationDir(f.claudeHome, dir), "55555555-5555-4555-8555-555555555555.jsonl"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	write(other, "77777777-7777-4777-8777-777777777777.jsonl", at(9), map[string]any{"type": "user", "cwd": other, "timestamp": at(9)})
+
+	var l Lister
+	got := l.Conversations(f.claudeHome, dir, 10)
+	var ids []string
+	for _, c := range got {
+		ids = append(ids, c.ID)
+	}
+	if strings.Join(ids, " ") != strings.Join([]string{newer, untitled, older, big}, " ") {
+		t.Fatalf("ids = %v", ids)
+	}
+	if c := got[0]; c.Title != "Newer work" || c.GitBranch != "feature/x" || !c.LastActiveAt.Equal(at(6)) {
+		t.Errorf("newer = %+v", c)
+	}
+	if c := got[1]; c.Title != "" || c.LastPrompt != "why does it fail" {
+		t.Errorf("untitled = %+v", c)
+	}
+	if c := got[3]; c.Title != "" || c.LastPrompt != "" || !c.LastActiveAt.Equal(at(0)) {
+		t.Errorf("long = %+v", c)
+	}
+	if got := l.Conversations(f.claudeHome, dir, 2); len(got) != 2 || got[0].ID != newer || got[1].ID != untitled {
+		t.Errorf("limit 2 = %+v", got)
+	}
+	if got := l.Conversations(f.claudeHome, f.project("empty"), 10); len(got) != 0 {
+		t.Errorf("a folder without conversations = %+v", got)
+	}
+}
+
 // A conversation counts even without an AI title, which Claude Code skips
 // when title generation is off or fails: the folder can be continued, and
 // its last prompt names the conversation.
