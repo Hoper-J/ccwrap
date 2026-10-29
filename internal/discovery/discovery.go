@@ -25,6 +25,11 @@ import (
 const scanProbeConcurrency = 16
 
 func Scan(paths app.Paths) ([]model.DiscoveredSession, error) {
+	// Manifests name the control sockets ccwrap then talks to; none are
+	// trusted from a runtime dir another user could have written them into.
+	if err := app.CheckPrivateDir(paths.RuntimeDir); err != nil {
+		return nil, err
+	}
 	root := paths.SessionsDir()
 	entries, err := os.ReadDir(root)
 	if err != nil {

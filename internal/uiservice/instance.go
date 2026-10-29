@@ -59,6 +59,10 @@ func lock(dir string) (*os.File, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
+	// Checked after MkdirAll, so a runtime dir someone else made first is seen.
+	if err := app.CheckPrivateDir(filepath.Dir(dir)); err != nil {
+		return nil, err
+	}
 	f, err := os.OpenFile(filepath.Join(dir, lockFile), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
@@ -76,6 +80,11 @@ func lock(dir string) (*os.File, error) {
 // Running returns the running service's info, checked by asking it over its
 // socket; ok is false when none answers.
 func Running(ctx context.Context, paths app.Paths) (Info, bool) {
+	// Another user who can write to the runtime dir could plant a ui.json
+	// and a socket that answers for it.
+	if app.CheckPrivateDir(paths.RuntimeDir) != nil {
+		return Info{}, false
+	}
 	var info Info
 	statefile.Read(Dir(paths), infoFile, &info)
 	if info.Socket == "" {
@@ -144,6 +153,9 @@ func Ensure(ctx context.Context, paths app.Paths, exe, version string, wait time
 	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = resolved
 	}
+	if err := app.CheckPrivateDir(paths.RuntimeDir); err != nil {
+		return Info{}, err
+	}
 	if info, ok := Running(ctx, paths); ok {
 		if info.Version == version && info.Exe == exe {
 			return info, nil
@@ -174,6 +186,9 @@ const maxUILogBytes = 1 << 20
 func start(paths app.Paths, exe string) error {
 	dir := Dir(paths)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := app.CheckPrivateDir(paths.RuntimeDir); err != nil {
 		return err
 	}
 	logPath := filepath.Join(dir, logFile)

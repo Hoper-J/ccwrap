@@ -1,12 +1,15 @@
 package app
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 )
 
 type Paths struct {
@@ -58,12 +61,57 @@ func EnsurePaths(p Paths) error {
 			return fmt.Errorf("create %s: %w", dir, err)
 		}
 	}
+	// Checked after MkdirAll, so a directory someone else created first is
+	// seen, and before chmod, which follows a symlink to its target.
+	if err := checkDir(p.RuntimeDir, false); err != nil {
+		return err
+	}
 	for _, dir := range []string{p.RuntimeDir, p.StateDir, filepath.Dir(p.CACertPath), filepath.Dir(p.CALockPath)} {
 		if dir != "" {
 			_ = os.Chmod(dir, 0o700)
 		}
 	}
-	return nil
+	return CheckPrivateDir(p.RuntimeDir)
+}
+
+// getuid is os.Getuid; a seam for tests.
+var getuid = os.Getuid
+
+// CheckPrivateDir refuses a runtime directory that another user created or
+// can write to. ccwrap trusts the manifests, sockets and ui.json it finds
+// there, and the default location on Linux without XDG_RUNTIME_DIR is under
+// the shared /tmp. The directory must be a real directory (not a symlink),
+// owned by the current user, with no group or other write permission. A
+// directory that does not exist passes: there is nothing in it to trust.
+func CheckPrivateDir(dir string) error {
+	return checkDir(dir, true)
+}
+
+func checkDir(dir string, perm bool) error {
+	fi, err := os.Lstat(dir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	var problem string
+	switch {
+	case fi.Mode()&fs.ModeSymlink != 0:
+		problem = "it is a symlink"
+	case !fi.IsDir():
+		problem = "it is not a directory"
+	default:
+		if st, ok := fi.Sys().(*syscall.Stat_t); ok && int(st.Uid) != getuid() {
+			problem = fmt.Sprintf("it is owned by uid %d", st.Uid)
+		} else if perm && fi.Mode().Perm()&0o022 != 0 {
+			problem = fmt.Sprintf("others can write to it (mode %04o)", fi.Mode().Perm())
+		}
+	}
+	if problem == "" {
+		return nil
+	}
+	return fmt.Errorf("refusing runtime directory %s: %s; set CCWRAP_RUNTIME_DIR to a directory only you can write to", dir, problem)
 }
 
 func (p Paths) SessionsDir() string {

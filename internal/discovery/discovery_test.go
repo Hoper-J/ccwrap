@@ -185,3 +185,19 @@ func TestScanMarksManifestSessionIDMismatchAsStale(t *testing.T) {
 		t.Fatalf("stale error = %q, want directory mismatch", sessions[0].Error)
 	}
 }
+
+// Another user who can write to the runtime dir could plant manifests that
+// point ccwrap at their own sockets; Scan refuses the dir instead.
+func TestScanRefusesRuntimeDirOthersCanWrite(t *testing.T) {
+	tmp := t.TempDir()
+	paths := app.Paths{RuntimeDir: filepath.Join(tmp, "run"), StateDir: filepath.Join(tmp, "state")}
+	if err := os.MkdirAll(paths.SessionsDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(paths.RuntimeDir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Scan(paths); err == nil || !strings.Contains(err.Error(), "refusing runtime directory") {
+		t.Fatalf("Scan() error = %v, want a refusal", err)
+	}
+}

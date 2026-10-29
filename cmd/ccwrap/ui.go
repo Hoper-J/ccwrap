@@ -38,6 +38,11 @@ func uiCommand(paths app.Paths, args []string) error {
 		})
 		return srv.Serve(ctx)
 	case "status", "":
+		// Running ignores a runtime dir it can't trust; say why instead of
+		// "not running".
+		if err := app.CheckPrivateDir(paths.RuntimeDir); err != nil {
+			return err
+		}
 		info, ok := uiservice.Running(context.Background(), paths)
 		if !ok {
 			fmt.Println("ccwrap ui is not running; `ccwrap open` starts it")
