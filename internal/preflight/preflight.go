@@ -225,14 +225,14 @@ func claudeVisibleModelOverrides(inspect *settings.InspectionResult) []settings.
 
 func validateHiddenModeModels(childArgs []string, modelEnv map[string]string) error {
 	if hits := modelalias.ProviderSpecificModelArgs(childArgs); len(hits) > 0 {
-		return fmt.Errorf("provider-specific model passed via --model in third-party hidden mode; use a Claude logical model and configure CCWRAP modelAliases")
+		return fmt.Errorf("provider-specific model passed via --model in third-party hidden mode; use a Claude logical model and configure ccwrap modelAliases")
 	}
 	for key, value := range modelEnv {
 		if !envpolicy.IsModelPreferenceKey(key) || strings.TrimSpace(value) == "" {
 			continue
 		}
 		if modelalias.LooksProviderSpecific(value) {
-			return fmt.Errorf("provider-specific model in %s conflicts with third-party hidden mode; use a Claude logical model and configure CCWRAP modelAliases", key)
+			return fmt.Errorf("provider-specific model in %s conflicts with third-party hidden mode; use a Claude logical model and configure ccwrap modelAliases", key)
 		}
 	}
 	return nil
@@ -603,7 +603,7 @@ func rewrittenChildArgs(parsed *settings.ParsedFlagSettings, original []string) 
 }
 
 func policyNetworkEnvError(conflicts []settings.EnvConflict) error {
-	return fmt.Errorf("detectable local/cache policy-managed network/trust env are unsupported with stock Claude Code when running under CCWRAP; CCWRAP only inspects local/cache policy sources pre-launch, and remote managed settings, MDM, and HKCU may still exist and remain unsupported; move proxy settings to --egress-proxy, launcher shell env, or non-policy user/global Claude settings, install enterprise CA trust in the host OS trust store, and remove these keys from managed policy settings: %s", formatSettingConflicts(conflicts))
+	return fmt.Errorf("detectable local/cache policy-managed network/trust env are unsupported with stock Claude Code when running under ccwrap; ccwrap only inspects local/cache policy sources pre-launch, and remote managed settings, MDM, and HKCU may still exist and remain unsupported; move proxy settings to --egress-proxy, launcher shell env, or non-policy user/global Claude settings, install enterprise CA trust in the host OS trust store, and remove these keys from managed policy settings: %s", formatSettingConflicts(conflicts))
 }
 
 func formatSettingConflicts(conflicts []settings.EnvConflict) string {

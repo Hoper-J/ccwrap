@@ -413,7 +413,7 @@ func TestDoctorAppliesDefaultProfile(t *testing.T) {
 	// "CCWRAP-owned" summary only appears on the third-party-hidden + owned-auth
 	// branch — i.e. route IS third-party AND auth IS owned by the profile. The
 	// old env-only doctor would have read first-party (or passthrough → fail).
-	if !strings.Contains(checks["hidden_auth_contract"].Summary, "CCWRAP-owned") {
+	if !strings.Contains(checks["hidden_auth_contract"].Summary, "ccwrap-owned") {
 		t.Fatalf("expected third-party-hidden + profile-owned-auth contract, got %#v", checks["hidden_auth_contract"])
 	}
 	if checks["hidden_auth_contract"].Status != "pass" {

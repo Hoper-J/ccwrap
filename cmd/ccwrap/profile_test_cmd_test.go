@@ -187,7 +187,7 @@ func TestRenderTable_AllStatusKinds(t *testing.T) {
 		{Profile: "anthropic", Status: profiletest.StatusOK, Latency: 245 * time.Millisecond, ModelSent: "claude-haiku-4-5-20251001", ModelEchoed: "claude-haiku-4-5-20251001", HTTPStatus: 200},
 		{Profile: "glm", Status: profiletest.StatusOK, Latency: 720 * time.Millisecond, ModelSent: "glm-4-flash", ModelSentRewroteFrom: "haiku", ModelEchoed: "glm-4-flash"},
 		{Profile: "kimi", Status: profiletest.StatusAuthFail, Latency: 45 * time.Millisecond, ModelSent: "claude-haiku-4-5-20251001", Err: "401 Unauthorized", HTTPStatus: 401},
-		{Profile: "oauth", Status: profiletest.StatusSkipped, SkippedReason: "passthrough: CCWRAP does not own credential"},
+		{Profile: "oauth", Status: profiletest.StatusSkipped, SkippedReason: "passthrough: ccwrap does not own credential"},
 		{Profile: "local", Status: profiletest.StatusTimeout, ModelSent: "claude-haiku-4-5-20251001", Err: "timeout: ..."},
 	}
 	var buf bytes.Buffer

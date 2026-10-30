@@ -113,7 +113,7 @@ func authMissingMessage(profileName, missingAuthEnv string) (msg, envVar string)
 	}
 	envVar = missingAuthEnv
 	if envVar != "" {
-		msg = fmt.Sprintf("profile %q requires CCWRAP-owned auth but env $%s is not set. Restore the env, switch profile via inspect, or restart with `ccwrap --profile inherit-env`.", profile, envVar)
+		msg = fmt.Sprintf("profile %q requires ccwrap-owned auth but env $%s is not set. Restore the env, switch profile via inspect, or restart with `ccwrap --profile inherit-env`.", profile, envVar)
 		return msg, envVar
 	}
 	msg = fmt.Sprintf("profile %q has no auth source configured (no auth.key, no auth.key_env, and no env candidate). Edit the profile to add auth.key_env, switch profile via inspect, or restart with `ccwrap --profile inherit-env`.", profile)

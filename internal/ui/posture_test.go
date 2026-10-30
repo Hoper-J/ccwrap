@@ -20,17 +20,17 @@ func TestSessionPosture(t *testing.T) {
 		{
 			name: "first-party override auth",
 			sess: &model.Session{RouteClass: model.RouteClassFirstParty, ExactUpstreamHost: "api.anthropic.com", AuthPolicy: model.AuthPolicyCCWRAPOverrideFailClosed},
-			want: "Routing Claude Code through api.anthropic.com with CCWRAP-owned auth.",
+			want: "Routing Claude Code through api.anthropic.com with ccwrap-owned auth.",
 		},
 		{
 			name: "third-party hidden no alias",
 			sess: &model.Session{RouteClass: model.RouteClassThirdPartyHidden, ExactUpstreamHost: "50.18.84.244:3000", AuthPolicy: model.AuthPolicyCCWRAPOverrideFailClosed, ModelAliasCount: 0},
-			want: "Routing Claude Code through 50.18.84.244:3000. CCWRAP holds your gateway credentials and applies 0 model aliases; Claude Code only sees logical names.",
+			want: "Routing Claude Code through 50.18.84.244:3000; ccwrap holds your gateway credentials and applies 0 model aliases, so Claude Code only sees logical names.",
 		},
 		{
 			name: "third-party hidden one alias",
 			sess: &model.Session{RouteClass: model.RouteClassThirdPartyHidden, ExactUpstreamHost: "50.18.84.244:3000", AuthPolicy: model.AuthPolicyCCWRAPOverrideFailClosed, ModelAliasCount: 1},
-			want: "Routing Claude Code through 50.18.84.244:3000. CCWRAP holds your gateway credentials and applies 1 model alias; Claude Code only sees logical names.",
+			want: "Routing Claude Code through 50.18.84.244:3000; ccwrap holds your gateway credentials and applies 1 model alias, so Claude Code only sees logical names.",
 		},
 		{
 			// Only the count: the issues carry the details.
@@ -55,7 +55,7 @@ func TestSessionPosture(t *testing.T) {
 			// LOCKS that inferred-but-intentional behavior.
 			name: "third-party compatible shares gateway sentence",
 			sess: &model.Session{RouteClass: model.RouteClassThirdPartyCompatible, ExactUpstreamHost: "50.18.84.244:3000", AuthPolicy: model.AuthPolicyCCWRAPOverrideFailClosed, ModelAliasCount: 2},
-			want: "Routing Claude Code through 50.18.84.244:3000. CCWRAP holds your gateway credentials and applies 2 model aliases; Claude Code only sees logical names.",
+			want: "Routing Claude Code through 50.18.84.244:3000; ccwrap holds your gateway credentials and applies 2 model aliases, so Claude Code only sees logical names.",
 		},
 		{
 			name: "ended (reasonless — accepted deviation)",

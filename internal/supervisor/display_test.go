@@ -29,7 +29,7 @@ func TestDisplayCells(t *testing.T) {
 	if c := byKey["route"]; c.Value != "Gateway" || c.Detail != "from environment" {
 		t.Errorf("route = %+v", c)
 	}
-	if c := byKey["auth"]; c.Value != "CCWRAP-owned · fail-closed" || c.Detail != "placeholder injected" || c.State != "" {
+	if c := byKey["auth"]; c.Value != "ccwrap-owned · fail-closed" || c.Detail != "placeholder injected" || c.State != "" {
 		t.Errorf("auth = %+v", c)
 	}
 	// Traffic counts requests; its detail counts failed model requests and

@@ -104,7 +104,7 @@ func TestFrameHeaderHeroAndPollStrip(t *testing.T) {
 		mustContainLines(t, j,
 			"ccwrap · 1 active · 0 stale",
 			"74c5fcaf", "active",
-			"CCWRAP holds your gateway credentials", // hero from SessionPosture, every view
+			"ccwrap holds your gateway credentials", // hero from SessionPosture, every view
 			"poll 700ms",                            // poll vocabulary
 			"route", "Gateway", "auth",              // summary fields in every view
 		)

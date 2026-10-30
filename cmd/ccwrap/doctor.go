@@ -110,11 +110,11 @@ func (d *doctorChecks) runtimeChecks(paths app.Paths) {
 				reason = "system CA bundle not discoverable on this host"
 			}
 			fields["system_ca_warning"] = reason
-			warnDetail := reason + "; child tools (curl, git, python) will trust only the CCWRAP root. Install OS trust-store roots or set CCWRAP_SYSTEM_CA_BUNDLE to restore public-host TLS."
+			warnDetail := reason + "; child tools (curl, git, python) will trust only the ccwrap root. Install OS trust-store roots or set CCWRAP_SYSTEM_CA_BUNDLE to restore public-host TLS."
 			if d.verbose {
 				warnDetail = detail + " ; " + warnDetail
 			}
-			d.addWithFields("ca", "warn", "local CA bundle ready but falling back to CCWRAP-only (no system roots)", warnDetail, fields)
+			d.addWithFields("ca", "warn", "local CA bundle ready but falling back to ccwrap-only (no system roots)", warnDetail, fields)
 		} else {
 			d.addWithFields("ca", "pass", "local composite CA bundle is ready", maybeDetail(d.verbose, detail), fields)
 		}
@@ -265,9 +265,9 @@ func (d *doctorChecks) routeChecks(parentEnv []string, envMap map[string]string,
 		d.add("upstream_inputs", "pass", "no CCWRAP_UPSTREAM / ANTHROPIC_BASE_URL conflict", "")
 	}
 	if routeClass == model.RouteClassThirdPartyHidden && authMode == model.AuthModePassthrough {
-		d.add("hidden_auth_contract", "fail", "third-party hidden mode requires CCWRAP-owned upstream auth", "Refusing to forward Claude-side authentication to third-party upstream. Provide ANTHROPIC_API_KEY/ANTHROPIC_AUTH_TOKEN as compatibility input or CCWRAP_UPSTREAM_* when available.")
+		d.add("hidden_auth_contract", "fail", "third-party hidden mode requires ccwrap-owned upstream auth", "Refusing to forward Claude-side authentication to third-party upstream. Provide ANTHROPIC_API_KEY/ANTHROPIC_AUTH_TOKEN as compatibility input or CCWRAP_UPSTREAM_* when available.")
 	} else if routeClass == model.RouteClassThirdPartyHidden {
-		d.add("hidden_auth_contract", "pass", "third-party hidden auth will be CCWRAP-owned and fail-closed", maybeDetail(d.verbose, fmt.Sprintf("auth_mode=%s bootstrap=placeholder", authMode)))
+		d.add("hidden_auth_contract", "pass", "third-party hidden auth will be ccwrap-owned and fail-closed", maybeDetail(d.verbose, fmt.Sprintf("auth_mode=%s bootstrap=placeholder", authMode)))
 	} else {
 		d.add("hidden_auth_contract", "pass", "first-party route does not require hidden auth fail-closed", "")
 	}
@@ -287,18 +287,18 @@ func (d *doctorChecks) settingsChecks(envMap map[string]string, routeClass model
 		d.add("settings_malformed_env", "pass", "no malformed env objects in active Claude settings", "")
 	}
 	if len(inspect.OverriddenNetworkEnv) > 0 {
-		d.add("settings_overridden_network_env", "pass", "CCWRAP will override network/trust env from non-policy Claude settings", formatEnvConflicts(inspect.OverriddenNetworkEnv))
+		d.add("settings_overridden_network_env", "pass", "ccwrap will override network/trust env from non-policy Claude settings", formatEnvConflicts(inspect.OverriddenNetworkEnv))
 	} else {
 		d.add("settings_overridden_network_env", "pass", "no overridden network/trust env in non-policy Claude settings", "")
 	}
 	if len(inspect.PolicyNetworkEnv) > 0 {
-		detail := formatEnvConflicts(inspect.PolicyNetworkEnv) + "; detectable local/cache policy-managed network/trust env are unsupported with stock Claude Code under CCWRAP; CCWRAP only inspects local/cache policy sources pre-launch, and remote managed settings, MDM, and HKCU may still exist and remain unsupported; move proxy settings to --egress-proxy, launcher shell env, or non-policy user/global Claude settings, install enterprise CA trust in the host OS trust store, and remove these keys from managed policy settings"
-		d.add("settings_policy_network_env", "fail", "detectable local/cache policy-managed network/trust env are unsupported with stock Claude Code under CCWRAP", detail)
+		detail := formatEnvConflicts(inspect.PolicyNetworkEnv) + "; detectable local/cache policy-managed network/trust env are unsupported with stock Claude Code under ccwrap; ccwrap only inspects local/cache policy sources pre-launch, and remote managed settings, MDM, and HKCU may still exist and remain unsupported; move proxy settings to --egress-proxy, launcher shell env, or non-policy user/global Claude settings, install enterprise CA trust in the host OS trust store, and remove these keys from managed policy settings"
+		d.add("settings_policy_network_env", "fail", "detectable local/cache policy-managed network/trust env are unsupported with stock Claude Code under ccwrap", detail)
 	} else {
 		d.add("settings_policy_network_env", "pass", "no detectable local/cache policy-managed network/trust env in active Claude settings", maybeDetail(d.verbose, "Best-effort local/cache inspection only; remote managed settings, MDM, and HKCU may still exist and remain unsupported."))
 	}
 	if len(inspect.APIKeyHelperHits) > 0 {
-		detail := "apiKeyHelper is a Claude-side auth path. It is blocked for third-party hidden mode; future CCWRAP-side upstreamAuthHelper must be owned and executed by CCWRAP only."
+		detail := "apiKeyHelper is a Claude-side auth path. It is blocked for third-party hidden mode; future ccwrap-side upstreamAuthHelper must be owned and executed by ccwrap only."
 		if d.verbose {
 			detail += " sources=" + strings.Join(inspect.APIKeyHelperHits, ", ")
 		}
@@ -337,7 +337,7 @@ func (d *doctorChecks) settingsChecks(envMap map[string]string, routeClass model
 		customHeaderHits = append(customHeaderHits, inherited...)
 	}
 	if len(customHeaderHits) > 0 {
-		detail := "ANTHROPIC_CUSTOM_HEADERS contains auth-like header names; values are not shown. These headers are blocked for third-party hidden mode; use CCWRAP-owned upstream headers when available."
+		detail := "ANTHROPIC_CUSTOM_HEADERS contains auth-like header names; values are not shown. These headers are blocked for third-party hidden mode; use ccwrap-owned upstream headers when available."
 		if d.verbose {
 			detail += " sources=" + formatEnvConflicts(customHeaderHits)
 		}
@@ -354,7 +354,7 @@ func (d *doctorChecks) settingsChecks(envMap map[string]string, routeClass model
 		if inspect.ParsedFlagSettings.Inline {
 			summary = "inline JSON"
 		}
-		d.add("flag_settings", "pass", "Claude --settings flag will be merged into a CCWRAP session settings file", maybeDetail(d.verbose, summary))
+		d.add("flag_settings", "pass", "Claude --settings flag will be merged into a ccwrap session settings file", maybeDetail(d.verbose, summary))
 	} else {
 		d.add("flag_settings", "pass", "no user-provided Claude --settings flag detected", "")
 	}
@@ -366,13 +366,13 @@ func (d *doctorChecks) launchChecks(launchOpts preflight.Options, profileErr err
 	if profileErr != nil {
 		d.add("launch_contract", "fail", "current launch would be rejected: could not resolve the launch profile", profileErr.Error())
 	} else if pre, err := preflight.RunWithInspection(launchOpts, inspect); err != nil {
-		d.add("launch_contract", "fail", "current launch would be rejected by CCWRAP preflight", err.Error())
+		d.add("launch_contract", "fail", "current launch would be rejected by ccwrap preflight", err.Error())
 	} else {
 		launchPre = pre
 		if err := preflight.LaunchBypass(pre, launchOpts, inspect); err != nil {
 			d.add("launch_contract", "fail", "current launch would be rejected: Claude Code's own config would take its requests past ccwrap", err.Error())
 		} else {
-			d.add("launch_contract", "pass", "current launch satisfies CCWRAP MITM preflight checks", "")
+			d.add("launch_contract", "pass", "current launch satisfies ccwrap MITM preflight checks", "")
 		}
 	}
 	// A third-party base URL that can't work: an OpenAI-compatible endpoint,

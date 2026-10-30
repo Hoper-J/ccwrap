@@ -353,7 +353,7 @@ func ResolveProfile(opts Options, inspect *settings.InspectionResult) (*Result, 
 	strictModelAlias := thirdPartyRoute && !opts.AllowProviderModelPassthrough
 	if strictModelAlias {
 		if visible := claudeVisibleModelOverrides(inspect); len(visible) > 0 {
-			return nil, fmt.Errorf("Claude-visible model alias/modelOverrides conflict with third-party hidden mode; move mappings to CCWRAP-only flag/env modelAliases: %s", formatSettingConflicts(visible))
+			return nil, fmt.Errorf("Claude-visible model alias/modelOverrides conflict with third-party hidden mode; move mappings to ccwrap-only flag/env modelAliases: %s", formatSettingConflicts(visible))
 		}
 	}
 	aliasCfg, _, err := modelalias.Resolve(modelalias.ResolveOptions{
@@ -407,11 +407,11 @@ func ResolveProfile(opts Options, inspect *settings.InspectionResult) (*Result, 
 		var unresolvedArgs []string
 		rewrittenArgs, normalizedArgModels, unresolvedArgs = modelalias.NormalizeClaudeModelArgs(rewrittenArgs, aliasCfg)
 		if len(unresolvedArgs) > 0 {
-			return nil, fmt.Errorf("provider-specific model passed via --model in third-party hidden mode without a matching CCWRAP reverse alias: %s; configure --model-alias LOGICAL=PROVIDER or pass --allow-provider-model-passthrough", strings.Join(unresolvedArgs, ", "))
+			return nil, fmt.Errorf("provider-specific model passed via --model in third-party hidden mode without a matching ccwrap reverse alias: %s; configure --model-alias LOGICAL=PROVIDER or pass --allow-provider-model-passthrough", strings.Join(unresolvedArgs, ", "))
 		}
 		normalizedModelEnv, envNormalizations, unresolvedEnv := modelalias.NormalizeModelEnv(modelEnv.Env, aliasCfg, envpolicy.IsModelPreferenceKey)
 		if len(unresolvedEnv) > 0 {
-			return nil, fmt.Errorf("provider-specific model env conflicts with third-party hidden mode without a matching CCWRAP reverse alias: %s; configure CCWRAP modelAliases or pass --allow-provider-model-passthrough", formatStringMapKeys(unresolvedEnv))
+			return nil, fmt.Errorf("provider-specific model env conflicts with third-party hidden mode without a matching ccwrap reverse alias: %s; configure ccwrap modelAliases or pass --allow-provider-model-passthrough", formatStringMapKeys(unresolvedEnv))
 		}
 		modelEnv.Env = normalizedModelEnv
 		normalizedEnvModels = envNormalizations
@@ -457,7 +457,7 @@ func ResolveProfile(opts Options, inspect *settings.InspectionResult) (*Result, 
 			return nil, fmt.Errorf("shell-exec settings are blocked in third-party hidden mode (they run at request time and could leak credentials or inject auth-like headers): %s", formatSettingConflicts(inspect.DangerousShellSettings))
 		}
 		if len(customAuthHeaderEnv) > 0 {
-			return nil, fmt.Errorf("auth-like ANTHROPIC_CUSTOM_HEADERS are blocked in third-party hidden mode; move gateway headers to CCWRAP-owned upstream header config: %s", formatSettingConflicts(customAuthHeaderEnv))
+			return nil, fmt.Errorf("auth-like ANTHROPIC_CUSTOM_HEADERS are blocked in third-party hidden mode; move gateway headers to ccwrap-owned upstream header config: %s", formatSettingConflicts(customAuthHeaderEnv))
 		}
 	}
 	egressCfg, notes, err := ResolveEgressFromInspection(egressProxy, parentEnv, inspect)
@@ -471,19 +471,19 @@ func ResolveProfile(opts Options, inspect *settings.InspectionResult) (*Result, 
 		notes = append(notes, "Ignored project/local Claude settings provider/auth env before trust: "+formatSettingConflicts(provider.IgnoredProjectScopedProviderEnv))
 	}
 	if len(modelEnv.ContributingSources) > 0 {
-		notes = append(notes, "Claude settings model env sources preserved by CCWRAP: "+strings.Join(modelEnv.ContributingSources, ", "))
+		notes = append(notes, "Claude settings model env sources preserved by ccwrap: "+strings.Join(modelEnv.ContributingSources, ", "))
 	}
 	if len(modelEnv.IgnoredProjectScopedModelEnv) > 0 {
 		notes = append(notes, "Ignored project/local Claude settings model env before trust: "+formatSettingConflicts(modelEnv.IgnoredProjectScopedModelEnv))
 	}
 	if aliasCfg.Enabled() {
-		notes = append(notes, fmt.Sprintf("CCWRAP model aliases enabled: count=%d source=%s fingerprint=%s", aliasCfg.Count(), aliasCfg.Source, aliasCfg.Fingerprint))
+		notes = append(notes, fmt.Sprintf("ccwrap model aliases enabled: count=%d source=%s fingerprint=%s", aliasCfg.Count(), aliasCfg.Source, aliasCfg.Fingerprint))
 	}
 	if len(upstreamHeaderCfg.Headers) > 0 {
-		notes = append(notes, fmt.Sprintf("CCWRAP upstream headers enabled: count=%d source=%s fingerprint=%s", len(upstreamHeaderCfg.Headers), upstreamHeaderCfg.Source, upstreamHeaderCfg.Fingerprint))
+		notes = append(notes, fmt.Sprintf("ccwrap upstream headers enabled: count=%d source=%s fingerprint=%s", len(upstreamHeaderCfg.Headers), upstreamHeaderCfg.Source, upstreamHeaderCfg.Fingerprint))
 	}
 	if len(normalizedArgModels) > 0 || len(normalizedEnvModels) > 0 {
-		notes = append(notes, fmt.Sprintf("Normalized provider-specific Claude-facing model IDs through reverse CCWRAP aliases: args=%d env=%d", len(normalizedArgModels), len(normalizedEnvModels)))
+		notes = append(notes, fmt.Sprintf("Normalized provider-specific Claude-facing model IDs through reverse ccwrap aliases: args=%d env=%d", len(normalizedArgModels), len(normalizedEnvModels)))
 	}
 	if aliasCfg.ProviderModelPassthrough && routeClass == model.RouteClassThirdPartyCompatible {
 		notes = append(notes, "Provider model passthrough is enabled; route_class=third_party_compatible and Claude may see provider-specific model IDs.")

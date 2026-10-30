@@ -183,7 +183,7 @@ func Probe(profile profiles.Profile, opts ProbeOptions) ProbeResult {
 
 	if profile.Auth == nil || strings.EqualFold(strings.TrimSpace(profile.Auth.Mode), "passthrough") {
 		res.Status = StatusSkipped
-		res.SkippedReason = "passthrough: CCWRAP does not own credential"
+		res.SkippedReason = "passthrough: ccwrap does not own credential"
 		return res
 	}
 

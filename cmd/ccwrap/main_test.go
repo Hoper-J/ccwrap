@@ -670,10 +670,10 @@ func TestPrintLaunchSummaryStructure(t *testing.T) {
 	})
 	mustContainAll(t, out,
 		"ccwrap", "ready",
-		"CCWRAP holds your gateway",       // posture sentence (wrap-tolerant — "credentials" may land on next line)
+		"ccwrap holds your gateway",       // posture sentence (wrap-tolerant — "credentials" may land on next line)
 		"session", "74c5fcaf", "pid 7374", // 8-char id + merged pid
 		"upstream", "Gateway", // HumanRouteClass
-		"auth", "CCWRAP-owned · fail-closed", "placeholder injected",
+		"auth", "ccwrap-owned · fail-closed", "placeholder injected",
 		"\n  inspect   "+appLink+"  ·  ccwrap ui\n",
 	)
 	// The full id appears only inside the app link.
@@ -746,7 +746,7 @@ func TestPrintLaunchSummaryStructure(t *testing.T) {
 			authMode: model.AuthModeOverrideBearer, authSrc: model.AuthSourceAnthropicToken,
 			authPol: model.AuthPolicyCCWRAPOverrideFailClosed, boot: model.AuthBootstrapPlaceholderActive, bootKind: model.AuthBootstrapKindBearer,
 			url:         "http://127.0.0.1:58001",
-			wantAuthRow: "  auth      CCWRAP-owned · fail-closed · placeholder injected", wantModelsRow: "  models    0 aliases",
+			wantAuthRow: "  auth      ccwrap-owned · fail-closed · placeholder injected", wantModelsRow: "  models    0 aliases",
 		},
 		{
 			name: "first-party-passthrough", routeSrc: model.RouteSourceFallback, routeClass: model.RouteClassFirstParty,
@@ -760,7 +760,7 @@ func TestPrintLaunchSummaryStructure(t *testing.T) {
 			authMode: model.AuthModeOverrideBearer, authSrc: model.AuthSourceAnthropicToken,
 			authPol: model.AuthPolicyCCWRAPOverride, boot: model.AuthBootstrapNotNeeded, bootKind: model.AuthBootstrapKindNone,
 			url:         "http://127.0.0.1:58003",
-			wantAuthRow: "  auth      CCWRAP-owned", wantModelsRow: "  models    0 aliases",
+			wantAuthRow: "  auth      ccwrap-owned", wantModelsRow: "  models    0 aliases",
 		},
 	}
 	for _, c := range cases {
@@ -815,10 +815,10 @@ func TestPrintStatusStructure(t *testing.T) {
 		)
 	})
 	mustContainAll(t, out,
-		"CCWRAP Status", "1 active", "0 stale",
+		"ccwrap status", "1 active", "0 stale",
 		"74c5fcaf", "active",
-		"CCWRAP holds your gateway credentials", // posture
-		"proxy", "route", "Gateway", "auth", "CCWRAP-owned · fail-closed",
+		"ccwrap holds your gateway credentials", // posture
+		"proxy", "route", "Gateway", "auth", "ccwrap-owned · fail-closed",
 		"models", "1 alias", // count-only for status
 		"traffic", "9 req", "0 failed",
 	)

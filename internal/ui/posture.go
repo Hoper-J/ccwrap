@@ -38,11 +38,11 @@ func SessionPostureParts(sess *model.Session) (base, note string) {
 			aliases = "alias"
 		}
 		base = fmt.Sprintf(
-			"Routing Claude Code through %s. CCWRAP holds your gateway credentials and applies %d model %s; Claude Code only sees logical names.",
+			"Routing Claude Code through %s; ccwrap holds your gateway credentials and applies %d model %s, so Claude Code only sees logical names.",
 			host, sess.ModelAliasCount, aliases)
 	default: // first_party / unset
 		if sess.AuthPolicy == model.AuthPolicyCCWRAPOverride || sess.AuthPolicy == model.AuthPolicyCCWRAPOverrideFailClosed {
-			base = fmt.Sprintf("Routing Claude Code through %s with CCWRAP-owned auth.", host)
+			base = fmt.Sprintf("Routing Claude Code through %s with ccwrap-owned auth.", host)
 		} else {
 			base = fmt.Sprintf("Routing Claude Code through %s with your local credentials.", host)
 		}

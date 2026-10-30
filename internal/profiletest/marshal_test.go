@@ -81,7 +81,7 @@ func TestMarshalResult_Skipped(t *testing.T) {
 		Profile:       "oauth",
 		Status:        StatusSkipped,
 		BaseURLHost:   "api.anthropic.com",
-		SkippedReason: "passthrough: CCWRAP does not own credential",
+		SkippedReason: "passthrough: ccwrap does not own credential",
 	}
 	data, _ := MarshalResult(r)
 	var got map[string]any

@@ -157,7 +157,7 @@ Launch flags:
   --profile NAME                            (or env CCWRAP_PROFILE; from profiles.json)
   --model-alias LOGICAL=PROVIDER            (repeatable; '*=PROVIDER' maps every other Claude model, '*=*' keeps their names)
   --model-alias-file PATH                   (or env CCWRAP_MODEL_ALIASES_FILE / _JSON)
-  --upstream-header NAME=VALUE              (repeatable; CCWRAP-owned, never Claude-visible)
+  --upstream-header NAME=VALUE              (repeatable; ccwrap-owned, never Claude-visible)
   --upstream-headers-file PATH              (or env CCWRAP_UPSTREAM_HEADERS_FILE / _JSON)
   --capture-bodies                          (or env CCWRAP_CAPTURE_BODIES=1; default off) capture request + response bodies (alias: --capture-request-bodies)
   --capture-telemetry                       (or env CCWRAP_CAPTURE_TELEMETRY=1; default off) MITM+capture allowlisted telemetry bodies

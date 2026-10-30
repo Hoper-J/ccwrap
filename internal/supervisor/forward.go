@@ -108,7 +108,7 @@ func (sp *sessionProxy) forwardToUpstream(w http.ResponseWriter, r *http.Request
 				ErrorClass:      "model_alias_rewrite_failed",
 				Summary:         err.Error(),
 				UpstreamHost:    t.logicalHost,
-				SuggestedAction: "use Claude logical model IDs and configure CCWRAP modelAliases for provider-specific upstream IDs",
+				SuggestedAction: "use Claude logical model IDs and configure ccwrap modelAliases for provider-specific upstream IDs",
 			})
 			// Anchor the spilled inbound body to a partial RequestRecord so
 			// the inspect drawer surfaces what was attempted. Without this,

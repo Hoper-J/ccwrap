@@ -31,7 +31,7 @@ export function renderEmpty(main, m) {
     h('section', { class: 'empty', 'aria-labelledby': 'empty-title' },
       h('div', { class: 'kicker' }, 'Sessions'),
       h('h1', { class: 'page-title', id: 'empty-title' }, 'No running sessions.'),
-      h('p', { class: 'lede' }, 'Start one from Projects. CCWRAP opens your terminal in the folder and runs Claude Code there; the session appears here as soon as it connects.'),
+      h('p', { class: 'lede' }, 'Start one from Projects: ccwrap opens your terminal in the folder and runs Claude Code there. The session appears here as soon as it connects.'),
       h('div', { class: 'empty-actions' }, h('button', { type: 'button', class: 'btn btn-primary', onclick: m.onProjects }, icon('folder'), 'Open Projects')),
       recent.length ? [
         h('div', { class: 'section-label' }, 'Recent projects'),

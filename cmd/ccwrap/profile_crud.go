@@ -138,7 +138,7 @@ func parseCRUDFlags(prog, name string, args []string, requireAddSemantics bool) 
 	var aliasPairs repeatedFlag
 	fs.Var(&aliasPairs, "model-alias", "Model alias logical=provider (repeatable; '*=provider' maps every other Claude model, '*=*' keeps their names)")
 	var headerPairs repeatedFlag
-	fs.Var(&headerPairs, "upstream-header", "Upstream header Name=Value (repeatable; CCWRAP-owned, never Claude-visible)")
+	fs.Var(&headerPairs, "upstream-header", "Upstream header Name=Value (repeatable; ccwrap-owned, never Claude-visible)")
 
 	if err := fs.Parse(args); err != nil {
 		return crudOpts{}, err

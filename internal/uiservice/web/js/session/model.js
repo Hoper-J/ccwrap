@@ -220,7 +220,7 @@ export function activityRow(rec, cls, opts) {
       row.headers = headerGroups(rh, opts.deny, opts.unmask, route, rec.upstream_headers);
       row.headersCompared = !!rec.upstream_headers;
     }
-    else if (rec.synthetic) row.note = 'CCWRAP-generated, not Claude Code traffic';
+    else if (rec.synthetic) row.note = 'ccwrap-generated, not Claude Code traffic';
     else if ((rec.method || '') === 'CONNECT') row.note = 'encrypted tunnel — not intercepted; no headers visible';
     else row.note = 'no headers recorded';
     row.bodyId = (rec.body_ref && rec.body_ref.id) || '';

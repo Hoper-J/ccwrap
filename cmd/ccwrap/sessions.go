@@ -318,7 +318,7 @@ func printStatus(discovered []model.DiscoveredSession, sessions []*model.Session
 			active++
 		}
 	}
-	fmt.Printf("%s — %d active · %d stale\n\n", pal.Bold("CCWRAP Status"), active, stale)
+	fmt.Printf("%s — %d active · %d stale\n\n", pal.Bold("ccwrap status"), active, stale)
 	if len(sessions) == 0 {
 		fmt.Println("No sessions")
 		return

@@ -340,9 +340,9 @@ console.log(JSON.stringify({
 func TestSessionPostureEmphasis(t *testing.T) {
 	out := runModule(t, `
 import { emphasisParts } from '$JS/session/header.js';
-console.log(JSON.stringify(emphasisParts('Routing Claude Code through api.deepseek.com. CCWRAP holds your gateway credentials and applies 2 model aliases; Claude Code only sees logical names.', ['api.deepseek.com', ''])));
+console.log(JSON.stringify(emphasisParts('Routing Claude Code through api.deepseek.com; ccwrap holds your gateway credentials and applies 2 model aliases, so Claude Code only sees logical names.', ['api.deepseek.com', ''])));
 `)
-	want := `[{"text":"Routing Claude Code through ","bold":false},{"text":"api.deepseek.com","bold":true},{"text":". CCWRAP holds your gateway credentials and applies ","bold":false},{"text":"2 model aliases","bold":true},{"text":"; Claude Code only sees logical names.","bold":false}]`
+	want := `[{"text":"Routing Claude Code through ","bold":false},{"text":"api.deepseek.com","bold":true},{"text":"; ccwrap holds your gateway credentials and applies ","bold":false},{"text":"2 model aliases","bold":true},{"text":", so Claude Code only sees logical names.","bold":false}]`
 	if strings.TrimSpace(out) != want {
 		t.Fatalf("got  %s\nwant %s", strings.TrimSpace(out), want)
 	}

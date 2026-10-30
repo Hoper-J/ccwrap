@@ -116,8 +116,8 @@ func TestHumanRouteClass(t *testing.T) {
 
 func TestHumanAuthPolicy(t *testing.T) {
 	cases := map[model.AuthPolicy]string{
-		model.AuthPolicyCCWRAPOverrideFailClosed: "CCWRAP-owned · fail-closed",
-		model.AuthPolicyCCWRAPOverride:           "CCWRAP-owned",
+		model.AuthPolicyCCWRAPOverrideFailClosed: "ccwrap-owned · fail-closed",
+		model.AuthPolicyCCWRAPOverride:           "ccwrap-owned",
 		model.AuthPolicyFirstPartyPassthrough:    "Passthrough",
 		model.AuthPolicyUnsafePassthrough:        "Unsafe passthrough",
 		model.AuthPolicy(""):                     "Passthrough",

@@ -772,7 +772,7 @@ func rewriteRequestObjectModel(obj map[string]json.RawMessage, cfg Config) (chan
 		return true, modelID, provider, nil
 	}
 	if cfg.Strict && LooksProviderSpecific(modelID) {
-		return false, "", "", fmt.Errorf("provider-specific model %q reached Claude request path; use a Claude logical model plus CCWRAP modelAliases", modelID)
+		return false, "", "", fmt.Errorf("provider-specific model %q reached Claude request path; use a Claude logical model plus ccwrap modelAliases", modelID)
 	}
 	// Unchanged: report the model as both views.
 	return false, modelID, modelID, nil

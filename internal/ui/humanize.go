@@ -176,9 +176,9 @@ func HumanRouteClass(rc model.RouteClass) string {
 func HumanAuthPolicy(p model.AuthPolicy) string {
 	switch p {
 	case model.AuthPolicyCCWRAPOverrideFailClosed:
-		return "CCWRAP-owned · fail-closed"
+		return "ccwrap-owned · fail-closed"
 	case model.AuthPolicyCCWRAPOverride:
-		return "CCWRAP-owned"
+		return "ccwrap-owned"
 	case model.AuthPolicyFirstPartyPassthrough, "":
 		return "Passthrough"
 	case model.AuthPolicyUnsafePassthrough:
