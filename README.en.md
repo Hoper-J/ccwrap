@@ -73,7 +73,7 @@ ccwrap profile add deepseek \
   --base-url https://api.deepseek.com/anthropic \
   --auth-mode ccwrap_bearer \
   --auth-key sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx \
-  --model-alias claude-opus-4-8=deepseek-v4-flash
+  --model-alias claude-opus-5-5=deepseek-flash
 ccwrap --profile deepseek
 ```
 
@@ -107,7 +107,7 @@ Run `ccwrap open` to open ccwrap ui (or Ctrl+click the link after `inspect` in t
 
    ![image-20260618143526134](assets/image-20260618143526134.png)
 
-   Locally, Claude Code only ever sees Claude model IDs (`claude-sonnet-4-6`, `claude-opus-4-8`, etc.); the actual request is rewritten to the mapped model. Source precedence:
+   Locally, Claude Code only ever sees Claude model IDs (`claude-sonnet-5-5`, `claude-opus-5-5`, etc.); the actual request is rewritten to the mapped model. Source precedence:
 
    1. The active profile's `model_aliases`
    2. `--model-alias-file PATH` or `CCWRAP_MODEL_ALIASES_FILE`
@@ -136,19 +136,13 @@ Run `ccwrap open` to open ccwrap ui (or Ctrl+click the link after `inspect` in t
 
    **Bonus: study a model's request shape**
 
-   With a model name that hasn't "shipped" yet, you can see how Claude Code organizes a request for it, then use an alias to route the actual call to a model that can answer:
+   Claude Code shapes each request for the model it's using. Send the actual call to another model with an alias, and you can see the requests Claude Code makes for a model, even one your upstream doesn't serve:
 
    ```bash
-   ccwrap --model-alias claude-fable-5=claude-opus-4-8 --model claude-fable-5 --capture-bodies
+   ccwrap --model-alias claude-fable-5-1=claude-opus-5-5 --model claude-fable-5-1 --capture-bodies
    ```
 
-   `--model claude-fable-5` makes Claude Code assemble the request as `fable-5`, which opens up request shapes it wouldn't otherwise send (model-related betas, system / harness blocks). The alias rewrites the upstream call to `claude-opus-4-8` so the request can actually return (`claude-fable-5` is currently retired). Together with `--capture-bodies`, you can see the request body Claude Code actually emits, for study.
-
-   Note that newer clients (>2.1.176) hard-intercept the fable-5 model, so you need to downgrade to 2.1.176:
-
-   | 2.1.176 | >2.1.176 |
-   | --- | --- |
-   | ![image-20260618145054775](assets/image-20260618145054775.png) | ![image-20260618144849100](assets/image-20260618144849100.png) |
+   `--model claude-fable-5-1` makes Claude Code assemble requests for Fable 5.1, including the parts specific to that model (model-related betas, system / harness blocks); the alias rewrites the upstream call to `claude-opus-5-5`. Together with `--capture-bodies`, you can see the request body Claude Code actually emits, for study.
 
 3. **Fix third-party caching**
 
@@ -200,7 +194,7 @@ Run `ccwrap open` to open ccwrap ui (or Ctrl+click the link after `inspect` in t
 
    ![image-20260620115343451](assets/image-20260620115343451.png)
 
-   You can see why a request failed even without body capture: every request shows its model mapping (`claude-opus-4-8 → gpt-5.5`, or `(no alias)` when unmapped), and a failed one keeps the error the upstream returned plus ccwrap's suggested fix — expand the row to read them. The line under the Traffic cell counts failed model requests, and when Claude Code retries, the same error folds into one Errors entry with a repeat count. `ccwrap dashboard` in the terminal shows the same.
+   You can see why a request failed even without body capture: every request shows its model mapping (`claude-opus-5-5 → gpt-5.5`, or `(no alias)` when unmapped), and a failed one keeps the error the upstream returned plus ccwrap's suggested fix — expand the row to read them. The line under the Traffic cell counts failed model requests, and when Claude Code retries, the same error folds into one Errors entry with a repeat count. `ccwrap dashboard` in the terminal shows the same.
 
 Note: using this tool may trigger some first-party features (e.g. sending `cache_control: { scope: "global" }`, or adding `eager_input_streaming: true` to tool schemas to avoid hangs on large tool inputs), but if the upstream server doesn't handle those requests, unexpected behavior may occur.
 
@@ -281,7 +275,7 @@ A profile is a named bundle of config: base URL, auth, model aliases, upstream h
       "provider": "openrouter",
       "base_url": "https://gateway.example",
       "auth": {"mode": "ccwrap_bearer", "key": "sk-..."},
-      "model_aliases": {"claude-opus-4-8": "gpt-5.5"},
+      "model_aliases": {"claude-opus-5-5": "gpt-5.5"},
       "upstream_headers": {"X-Gateway-Tenant": "team-a"},
       "egress": {"mode": "inherit"}
     }
@@ -320,7 +314,7 @@ ccwrap profile status                      # the profile the active session is u
 ccwrap profile add gateway \
   --base-url https://gateway.example \
   --auth-mode ccwrap_bearer --auth-key "$KEY" \
-  --model-alias claude-opus-4-8=gpt-5.5 \
+  --model-alias claude-opus-5-5=gpt-5.5 \
   --upstream-header X-Gateway-Tenant=team-a
 ccwrap profile edit gateway --auth-key-env GATEWAY_KEY
 ccwrap profile switch gateway              # live hot-swap (no Claude relaunch)
@@ -385,7 +379,7 @@ Other non-gateway `api.anthropic.com` paths receive a silent `204 No Content`: r
 <details>
 <summary>why strip · what gets stripped</summary>
 
-When the alias-rewritten model is **not** `claude-*` (typical with gateway routing like `claude-opus-4-8 → gpt-5.5`, `deepseek`, etc.), ccwrap additionally drops two Claude Code-specific system blocks from the request body:
+When the alias-rewritten model is **not** `claude-*` (typical with gateway routing like `claude-opus-5-5 → gpt-5.5`, `deepseek`, etc.), ccwrap additionally drops two Claude Code-specific system blocks from the request body:
 
 1. `x-anthropic-billing-header: cc_version=...; cc_entrypoint=cli; cch=...` — Anthropic's billing/attestation pixel; non-Anthropic upstreams treat it as a literal system instruction.
 2. `You are Claude Code, Anthropic's official CLI for Claude.` (and the two Agent-SDK variants) — Claude Code's identity preamble; for a non-Claude model it amounts to telling it to impersonate Claude Code.
@@ -477,7 +471,7 @@ ccwrap only performs best-effort local / cache policy inspection before launch: 
 `ccwrap capture` is the headless counterpart of the request inspector: it launches a one-shot Claude session through the proxy, waits for the first matching `/v1/messages` exchange, and prints a single JSON object (request body; optionally response, headers, TLS fingerprint) to stdout. Built for diffing what different Claude Code versions put on the wire — system prompt, tool schemas, beta flags.
 
 ```bash
-ccwrap capture --full -- -p "hi" > v2.1.30.json   # body + response + headers + TLS
+ccwrap capture --full -- -p "hi" > v2.1.296.json   # body + response + headers + TLS
 ccwrap capture --tls-only                         # JA3 / JA4 / peetprint only
 ccwrap capture --main-inference -- -p "hi"        # skip quota/title/Warmup calls; grab the real agent inference
 ccwrap capture --print-diff-filter                # canonical jq filter that strips per-run noise for diffing

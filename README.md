@@ -73,7 +73,7 @@ ccwrap profile add deepseek \
   --base-url https://api.deepseek.com/anthropic \
   --auth-mode ccwrap_bearer \
   --auth-key sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx \
-  --model-alias claude-opus-4-8=deepseek-v4-flash
+  --model-alias claude-opus-5-5=deepseek-flash
 ccwrap --profile deepseek
 ```
 
@@ -107,7 +107,7 @@ ccwrap --profile deepseek
 
    ![image-20260618143526134](assets/image-20260618143526134.png)
 
-   本地的 Claude Code 只会看到 Claude model id（`claude-sonnet-4-6`、`claude-opus-4-8` 等)，实际请求的时候会被替换为映射的模型。来源优先级：
+   本地的 Claude Code 只会看到 Claude model id（`claude-sonnet-5-5`、`claude-opus-5-5` 等)，实际请求的时候会被替换为映射的模型。来源优先级：
 
    1. 活动 profile 的 `model_aliases`
    2. `--model-alias-file PATH` 或 `CCWRAP_MODEL_ALIASES_FILE`
@@ -136,19 +136,13 @@ ccwrap --profile deepseek
 
    **拓展：研究某个模型的请求形态**
 
-   用一个还没“开放”的模型名，可以看到 Claude Code 会怎么为它组织请求，接着用 alias 把实际调用路由到一个能应答的模型上：
+   Claude Code 会按所选的模型组织请求。用 alias 把实际调用交给另一个模型，就能看到它为某个模型发出的请求，即使上游没有这个模型：
 
    ```bash
-   ccwrap --model-alias claude-fable-5=claude-opus-4-8 --model claude-fable-5 --capture-bodies
+   ccwrap --model-alias claude-fable-5-1=claude-opus-5-5 --model claude-fable-5-1 --capture-bodies
    ```
 
-   `--model claude-fable-5` 让 Claude Code 按 `fable-5` 来组装请求，会因此打开一些原本不会发的请求形态（model 相关的 beta、system / harness 块）。alias 会实际把上游调用改写成 `claude-opus-4-8`，这样请求才能返回（因为 `claude-fable-5` 目前已经停用）。配合 `--capture-bodies`，能看到 Claude Code 实际发出的请求体，供参考学习。
-
-   不过需要注意，新版本的客户端（>2.1.176）会硬拦截 fable-5 模型，所以你需要降到 2.1.176：
-
-   | 2.1.176                                                      | >2.1.176                                                     |
-   | ------------------------------------------------------------ | ------------------------------------------------------------ |
-   | ![image-20260618145054775](assets/image-20260618145054775.png) | ![image-20260618144849100](assets/image-20260618144849100.png) |
+   `--model claude-fable-5-1` 让 Claude Code 按 Fable 5.1 来组装请求，带上这个模型特有的部分（model 相关的 beta、system / harness 块）；alias 把实际的上游调用改写成 `claude-opus-5-5`。配合 `--capture-bodies`，能看到 Claude Code 实际发出的请求体，供参考学习。
 
 3. **修复第三方缓存**
 
@@ -200,7 +194,7 @@ ccwrap --profile deepseek
 
    ![image-20260620115343451](assets/image-20260620115343451.png)
 
-   不开 body 抓取也能看出请求为什么失败：每条请求都会显示模型映射（`claude-opus-4-8 → gpt-5.5`，没映射的标 `(no alias)`），失败的请求会记下上游返回的错误内容和 ccwrap 给的修复建议，展开那一行就能看到。Traffic 格子下面那行是失败的模型请求数；Claude Code 自动重试时，同样的错误会在 Errors 里合并成一条，带上重复次数。终端里的 `ccwrap dashboard` 也一样。
+   不开 body 抓取也能看出请求为什么失败：每条请求都会显示模型映射（`claude-opus-5-5 → gpt-5.5`，没映射的标 `(no alias)`），失败的请求会记下上游返回的错误内容和 ccwrap 给的修复建议，展开那一行就能看到。Traffic 格子下面那行是失败的模型请求数；Claude Code 自动重试时，同样的错误会在 Errors 里合并成一条，带上重复次数。终端里的 `ccwrap dashboard` 也一样。
 
 注意：使用当前工具有可能会触发一些官方特性（比如发送 `cache_control: { scope: "global" }`，tool schema 里加 `eager_input_streaming: true`，避免大 tool input 卡死），但如果上游服务器并没有处理这方面的请求，可能会出现预期外的情况。
 
@@ -281,7 +275,7 @@ profile 是预定义的配置：base URL、auth、model alias、上游 header、
       "provider": "openrouter",
       "base_url": "https://gateway.example",
       "auth": {"mode": "ccwrap_bearer", "key": "sk-..."},
-      "model_aliases": {"claude-opus-4-8": "gpt-5.5"},
+      "model_aliases": {"claude-opus-5-5": "gpt-5.5"},
       "upstream_headers": {"X-Gateway-Tenant": "team-a"},
       "egress": {"mode": "inherit"}
     }
@@ -320,7 +314,7 @@ ccwrap profile status                      # 当前会话用的 profile
 ccwrap profile add gateway \
   --base-url https://gateway.example \
   --auth-mode ccwrap_bearer --auth-key "$KEY" \
-  --model-alias claude-opus-4-8=gpt-5.5 \
+  --model-alias claude-opus-5-5=gpt-5.5 \
   --upstream-header X-Gateway-Tenant=team-a
 ccwrap profile edit gateway --auth-key-env GATEWAY_KEY
 ccwrap profile switch gateway              # 实时热切换（不需重启 Claude）
@@ -385,7 +379,7 @@ ccwrap 不会把每个 `api.anthropic.com` 请求都改写到网关。只有实�
 <details>
 <summary>为什么裁剪 · 裁剪什么</summary>
 
-当 alias 改写后的 model 不是 `claude-*` 开头时（如 `claude-opus-4-8 → gpt-5.5`、`deepseek` 等），ccwrap 还会从请求 body 里额外裁掉两类 Claude Code 特有的 system block：
+当 alias 改写后的 model 不是 `claude-*` 开头时（如 `claude-opus-5-5 → gpt-5.5`、`deepseek` 等），ccwrap 还会从请求 body 里额外裁掉两类 Claude Code 特有的 system block：
 
 1. `x-anthropic-billing-header: cc_version=...; cc_entrypoint=cli; cch=...` — Anthropic 用的计费/签名 pixel。非 Anthropic 上游会当作字面 system 指令理解
 2. `You are Claude Code, Anthropic's official CLI for Claude.`（以及两个 Agent SDK 变体）— Claude Code 的身份前缀。因为对非 Claude 模型而言，这是在让它扮演 Claude Code
@@ -477,7 +471,7 @@ ccwrap 只做尽力而为的本地 / 缓存 policy 检查：基于文件的 mana
 `ccwrap capture` 是请求检查器的无头版：它通过代理拉起一个一次性 Claude 会话，等到第一个匹配的 `/v1/messages` 交换后，把单个 JSON 对象（请求 body；可选响应、header、TLS 指纹）打到 stdout。用途是 diff 不同 Claude Code 版本实际发出的内容：system prompt、tool schema、beta flag。
 
 ```bash
-ccwrap capture --full -- -p "hi" > v2.1.30.json   # body + 响应 + header + TLS
+ccwrap capture --full -- -p "hi" > v2.1.296.json   # body + 响应 + header + TLS
 ccwrap capture --tls-only                         # 只要 JA3 / JA4 / peetprint
 ccwrap capture --main-inference -- -p "hi"        # 跳过 quota/title/Warmup 调用，抓真正的 agent 推理
 ccwrap capture --print-diff-filter                # 输出剥离逐次噪声的标准 jq diff 过滤器
