@@ -2,14 +2,12 @@ package discovery
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/Hoper-J/ccwrap/internal/app"
@@ -211,16 +209,8 @@ func staleState(m model.SessionManifest) (bool, string) {
 		}
 		return false, ""
 	}
-	if !pidExists(m.SupervisorPID) {
+	if !procmeta.Exists(m.SupervisorPID) {
 		return true, "supervisor not running"
 	}
 	return false, ""
-}
-
-func pidExists(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
 }

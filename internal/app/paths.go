@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 )
 
 type Paths struct {
@@ -62,20 +61,17 @@ func EnsurePaths(p Paths) error {
 		}
 	}
 	// Checked after MkdirAll, so a directory someone else created first is
-	// seen, and before chmod, which follows a symlink to its target.
+	// seen, and before makePrivate, which follows a symlink to its target.
 	if err := checkDir(p.RuntimeDir, false); err != nil {
 		return err
 	}
 	for _, dir := range []string{p.RuntimeDir, p.StateDir, filepath.Dir(p.CACertPath), filepath.Dir(p.CALockPath)} {
 		if dir != "" {
-			_ = os.Chmod(dir, 0o700)
+			_ = makePrivate(dir)
 		}
 	}
 	return CheckPrivateDir(p.RuntimeDir)
 }
-
-// getuid is os.Getuid; a seam for tests.
-var getuid = os.Getuid
 
 // CheckPrivateDir refuses a runtime directory that another user created or
 // can write to. ccwrap trusts the manifests, sockets and ui.json it finds
@@ -102,10 +98,10 @@ func checkDir(dir string, perm bool) error {
 	case !fi.IsDir():
 		problem = "it is not a directory"
 	default:
-		if st, ok := fi.Sys().(*syscall.Stat_t); ok && int(st.Uid) != getuid() {
-			problem = fmt.Sprintf("it is owned by uid %d", st.Uid)
-		} else if perm && fi.Mode().Perm()&0o022 != 0 {
-			problem = fmt.Sprintf("others can write to it (mode %04o)", fi.Mode().Perm())
+		if owner, foreign := ForeignOwner(dir, fi); foreign {
+			problem = "it is owned by " + owner
+		} else if perm {
+			problem = othersCanWrite(dir, fi)
 		}
 	}
 	if problem == "" {

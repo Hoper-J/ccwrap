@@ -2,13 +2,14 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/Hoper-J/ccwrap/internal/testutil"
 )
 
 func testSessionSettingsDoc() map[string]any {
@@ -56,7 +57,7 @@ func TestSessionSettingsArgWithUserFileWritesUnderClaudeTempRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	root := filepath.Join(tmp, fmt.Sprintf("claude-%d", os.Getuid()))
+	root := filepath.Join(tmp, claudeTempDirName())
 	if filepath.Dir(arg) != root {
 		t.Fatalf("settings file %q not under Claude Code temp root %q", arg, root)
 	}
@@ -70,14 +71,14 @@ func TestSessionSettingsArgWithUserFileWritesUnderClaudeTempRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fi.Mode().Perm() != 0o600 {
+	if testutil.HasUnixPermissions() && fi.Mode().Perm() != 0o600 {
 		t.Fatalf("settings file mode = %v, want 0600", fi.Mode().Perm())
 	}
 	di, err := os.Stat(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if di.Mode().Perm() != 0o700 {
+	if testutil.HasUnixPermissions() && di.Mode().Perm() != 0o700 {
 		t.Fatalf("temp root mode = %v, want 0700", di.Mode().Perm())
 	}
 	data, err := os.ReadFile(arg)
@@ -107,7 +108,7 @@ func TestClaudeTempRootCreatesMissingBase(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cleanup()
-	if want := filepath.Join(base, fmt.Sprintf("claude-%d", os.Getuid())); filepath.Dir(arg) != want {
+	if want := filepath.Join(base, claudeTempDirName()); filepath.Dir(arg) != want {
 		t.Fatalf("settings file %q not under %q", arg, want)
 	}
 }
@@ -118,9 +119,7 @@ func TestClaudeTempRootRefusesSymlink(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("CLAUDE_CODE_TMPDIR", tmp)
 	elsewhere := t.TempDir()
-	if err := os.Symlink(elsewhere, filepath.Join(tmp, fmt.Sprintf("claude-%d", os.Getuid()))); err != nil {
-		t.Fatal(err)
-	}
+	testutil.Symlink(t, elsewhere, filepath.Join(tmp, claudeTempDirName()))
 	if _, _, err := sessionSettingsArg(testSessionSettingsDoc(), true); err == nil {
 		t.Fatal("expected a symlinked Claude Code temp root to be refused")
 	}

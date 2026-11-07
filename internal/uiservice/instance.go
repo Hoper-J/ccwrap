@@ -17,11 +17,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/Hoper-J/ccwrap/internal/app"
 	"github.com/Hoper-J/ccwrap/internal/control"
+	"github.com/Hoper-J/ccwrap/internal/filelock"
 	"github.com/Hoper-J/ccwrap/internal/statefile"
 )
 
@@ -67,9 +67,9 @@ func lock(dir string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := filelock.TryLock(f); err != nil {
 		_ = f.Close()
-		if errors.Is(err, syscall.EWOULDBLOCK) {
+		if errors.Is(err, filelock.ErrLocked) {
 			return nil, ErrRunning
 		}
 		return nil, err
@@ -202,7 +202,7 @@ func start(paths app.Paths, exe string) error {
 	defer logf.Close()
 	cmd := exec.Command(exe, "ui", "serve")
 	cmd.Stdout, cmd.Stderr = logf, logf
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.SysProcAttr = detachedProcAttr()
 	if err := cmd.Start(); err != nil {
 		return err
 	}

@@ -19,7 +19,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/Hoper-J/ccwrap/internal/app"
@@ -382,13 +381,17 @@ func (s *Supervisor) handleShutdown(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !canStopSelf {
+		http.Error(w, "stopping a session is not supported on "+runtime.GOOS+" yet", http.StatusNotImplemented)
+		return
+	}
 	writeJSON(w, map[string]string{"schema_version": model.ControlAPIVersion, "status": "terminating"})
 	if flusher, ok := w.(http.Flusher); ok {
 		flusher.Flush()
 	}
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+		_ = stopSelf()
 	}()
 }
 
@@ -1445,10 +1448,10 @@ func (s *Supervisor) updateSessionLifecycle() {
 			switch {
 			case err == nil:
 				gone = !exists || !match
-			case !processExists(public.ClaudePID):
+			case !procmeta.Exists(public.ClaudePID):
 				gone = true
 			}
-		} else if !processExists(public.ClaudePID) {
+		} else if !procmeta.Exists(public.ClaudePID) {
 			gone = true
 		}
 		if gone {
@@ -1534,14 +1537,6 @@ func appendCapped[T any](in []T, item T, limit int) []T {
 	over := len(in) - limit
 	copy(in, in[over:])
 	return in[:limit]
-}
-
-func processExists(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	return err == nil || err == syscall.EPERM
 }
 
 func writeJSON(w http.ResponseWriter, value interface{}) {

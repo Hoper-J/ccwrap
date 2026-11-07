@@ -14,9 +14,7 @@ func TestCheckPrivateDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	link := filepath.Join(root, "link")
-	if err := os.Symlink(own, link); err != nil {
-		t.Fatal(err)
-	}
+	symlink(t, own, link)
 	file := filepath.Join(root, "file")
 	if err := os.WriteFile(file, nil, 0o600); err != nil {
 		t.Fatal(err)
@@ -25,16 +23,12 @@ func TestCheckPrivateDir(t *testing.T) {
 	if err := os.Mkdir(open, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(open, 0o777); err != nil {
-		t.Fatal(err)
-	}
+	makeWritableByOthers(t, open)
 	readable := filepath.Join(root, "readable")
 	if err := os.Mkdir(readable, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(readable, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	makeReadableByOthers(t, readable)
 
 	for _, tc := range []struct {
 		name, dir, want string
@@ -44,7 +38,7 @@ func TestCheckPrivateDir(t *testing.T) {
 		{"readable by others", readable, ""},
 		{"symlink", link, "it is a symlink"},
 		{"not a directory", file, "it is not a directory"},
-		{"writable by others", open, "others can write to it (mode 0777)"},
+		{"writable by others", open, wantWritableByOthers},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := CheckPrivateDir(tc.dir)
@@ -63,12 +57,10 @@ func TestCheckPrivateDir(t *testing.T) {
 
 func TestCheckPrivateDirRefusesSomeoneElsesDir(t *testing.T) {
 	dir := t.TempDir()
-	prev := getuid
-	getuid = func() int { return os.Getuid() + 1 }
-	t.Cleanup(func() { getuid = prev })
+	pretendOwnedBySomeoneElse(t, dir)
 
 	err := CheckPrivateDir(dir)
-	if err == nil || !strings.Contains(err.Error(), "it is owned by uid") {
+	if err == nil || !strings.Contains(err.Error(), wantOwnedBy) {
 		t.Fatalf("CheckPrivateDir = %v, want an owned-by error", err)
 	}
 }
@@ -89,45 +81,30 @@ func TestEnsurePathsTightensItsOwnRuntimeDir(t *testing.T) {
 	if err := os.MkdirAll(p.RuntimeDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(p.RuntimeDir, 0o777); err != nil {
-		t.Fatal(err)
-	}
+	makeWritableByOthers(t, p.RuntimeDir)
 	if err := EnsurePaths(p); err != nil {
 		t.Fatalf("EnsurePaths = %v", err)
 	}
-	fi, err := os.Stat(p.RuntimeDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := fi.Mode().Perm(); got != 0o700 {
-		t.Fatalf("runtime dir mode = %04o, want 0700", got)
-	}
+	assertOwnerOnly(t, p.RuntimeDir)
 }
 
-// A runtime dir someone else made is refused before chmod runs: chmod would
-// fail on it anyway, and through a symlink it would change the target.
+// A runtime dir someone else made is refused before makePrivate runs: it
+// would fail on it anyway, and through a symlink it would change the target.
 func TestEnsurePathsRefusesSomeoneElsesRuntimeDirUntouched(t *testing.T) {
 	p := testPaths(t.TempDir())
 	if err := os.MkdirAll(p.RuntimeDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(p.RuntimeDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	prev := getuid
-	getuid = func() int { return os.Getuid() + 1 }
-	t.Cleanup(func() { getuid = prev })
+	makeReadableByOthers(t, p.RuntimeDir)
+	pretendOwnedBySomeoneElse(t, p.RuntimeDir)
+	before := permSnapshot(t, p.RuntimeDir)
 
 	err := EnsurePaths(p)
-	if err == nil || !strings.Contains(err.Error(), "it is owned by uid") {
+	if err == nil || !strings.Contains(err.Error(), wantOwnedBy) {
 		t.Fatalf("EnsurePaths = %v, want an owned-by error", err)
 	}
-	fi, statErr := os.Stat(p.RuntimeDir)
-	if statErr != nil {
-		t.Fatal(statErr)
-	}
-	if got := fi.Mode().Perm(); got != 0o755 {
-		t.Fatalf("runtime dir mode = %04o after refusal, want it untouched (0755)", got)
+	if got := permSnapshot(t, p.RuntimeDir); got != before {
+		t.Fatalf("runtime dir permissions = %s after refusal, want them untouched (%s)", got, before)
 	}
 }
 
@@ -138,22 +115,15 @@ func TestEnsurePathsRefusesSymlinkedRuntimeDirUntouched(t *testing.T) {
 	if err := os.Mkdir(target, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(target, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(target, p.RuntimeDir); err != nil {
-		t.Fatal(err)
-	}
+	makeReadableByOthers(t, target)
+	before := permSnapshot(t, target)
+	symlink(t, target, p.RuntimeDir)
 
 	err := EnsurePaths(p)
 	if err == nil || !strings.Contains(err.Error(), "it is a symlink") {
 		t.Fatalf("EnsurePaths = %v, want a symlink error", err)
 	}
-	fi, statErr := os.Stat(target)
-	if statErr != nil {
-		t.Fatal(statErr)
-	}
-	if got := fi.Mode().Perm(); got != 0o755 {
-		t.Fatalf("symlink target mode = %04o after refusal, want it untouched (0755)", got)
+	if got := permSnapshot(t, target); got != before {
+		t.Fatalf("symlink target permissions = %s after refusal, want them untouched (%s)", got, before)
 	}
 }
