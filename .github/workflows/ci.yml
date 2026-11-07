@@ -31,6 +31,9 @@ jobs:
           fi
       - name: go vet
         run: go vet ./...
+      - name: go vet (windows)
+        # Not a release target yet; this keeps it compiling, tests included.
+        run: GOOS=windows go vet ./...
 
   test:
     strategy:
