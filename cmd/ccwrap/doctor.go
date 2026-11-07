@@ -115,6 +115,9 @@ func (d *doctorChecks) runtimeChecks(paths app.Paths) {
 				warnDetail = detail + " ; " + warnDetail
 			}
 			d.addWithFields("ca", "warn", "local CA bundle ready but falling back to ccwrap-only (no system roots)", warnDetail, fields)
+		} else if status.StaleWarning != "" {
+			fields["stale_warning"] = status.StaleWarning
+			d.addWithFields("ca", "warn", "local CA bundle kept from an earlier launch (a program had it open)", status.StaleWarning, fields)
 		} else {
 			d.addWithFields("ca", "pass", "local composite CA bundle is ready", maybeDetail(d.verbose, detail), fields)
 		}

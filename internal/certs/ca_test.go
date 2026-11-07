@@ -1,13 +1,84 @@
 package certs
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Hoper-J/ccwrap/internal/app"
+	"github.com/Hoper-J/ccwrap/internal/testutil"
 )
+
+// testCAPaths lays out a CA in dir whose system roots are the file it
+// returns, holding systemPEM.
+func testCAPaths(t *testing.T, dir, systemPEM string) (app.Paths, string) {
+	t.Helper()
+	system := filepath.Join(dir, "system-roots.pem")
+	if err := os.WriteFile(system, []byte(systemPEM), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CCWRAP_SYSTEM_CA_BUNDLE", system)
+	return app.Paths{
+		RuntimeDir:   filepath.Join(dir, "runtime"),
+		StateDir:     filepath.Join(dir, "state"),
+		CACertPath:   filepath.Join(dir, "state", "certs", "ca-cert.pem"),
+		CAKeyPath:    filepath.Join(dir, "state", "certs", "ca-key.pem"),
+		CABundlePath: filepath.Join(dir, "state", "certs", "ca-bundle.pem"),
+		CALockPath:   filepath.Join(dir, "state", "locks", "ca.lock"),
+	}, system
+}
+
+// An unchanged bundle is left alone: replacing it fails on Windows while a
+// program has it open, and every launch would try.
+func TestEnsureCALeavesAnUnchangedBundleAlone(t *testing.T) {
+	paths, _ := testCAPaths(t, t.TempDir(), "-----BEGIN CERTIFICATE-----\nSYSTEMROOT\n-----END CERTIFICATE-----\n")
+	if err := NewManager(paths).EnsureCA(); err != nil {
+		t.Fatal(err)
+	}
+	past := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(paths.CABundlePath, past, past); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewManager(paths).EnsureCA(); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(paths.CABundlePath); err != nil || info.ModTime().After(past.Add(time.Minute)) {
+		t.Fatalf("an unchanged bundle was rewritten: %v", err)
+	}
+}
+
+// A bundle that cannot be replaced stays when it already trusts ccwrap's
+// root; without that root the failure stands.
+func TestWriteBundleKeepsAUsableBundleItCannotReplace(t *testing.T) {
+	testutil.SkipWithoutUnixPermissions(t) // a read-only folder still takes new files on Windows
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ca-bundle.pem")
+	root := []byte("-----BEGIN CERTIFICATE-----\nCCWRAPROOT\n-----END CERTIFICATE-----\n")
+	old := append([]byte("OLD SYSTEM ROOTS\n"), root...)
+	if err := os.WriteFile(path, old, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	stale, err := writeBundle(path, append([]byte("NEW SYSTEM ROOTS\n"), root...), root)
+	if err != nil || !strings.Contains(stale, "kept the previous one") {
+		t.Fatalf("writeBundle = %q, %v; want the old bundle kept", stale, err)
+	}
+	if got, _ := os.ReadFile(path); !bytes.Equal(got, old) {
+		t.Fatal("the kept bundle changed")
+	}
+	if _, err := writeBundle(path, []byte("NEW"), []byte("ANOTHER ROOT")); err == nil {
+		t.Fatal("kept a bundle that does not trust ccwrap's root")
+	}
+}
 
 func TestEnsureCAWritesCompositeBundleAndSelfHeals(t *testing.T) {
 	tmp := t.TempDir()
