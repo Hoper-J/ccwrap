@@ -11,6 +11,9 @@ import (
 // appear in inspect web /recent) by construction rather than at
 // runtime.
 func TestNoSupervisorImport(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("needs the go command")
+	}
 	out, err := exec.Command("go", "list", "-deps", "github.com/Hoper-J/ccwrap/internal/profiletest").CombinedOutput()
 	if err != nil {
 		t.Fatalf("go list -deps failed: %v\n%s", err, out)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -382,12 +384,12 @@ func TestProjectsAndLaunch(t *testing.T) {
 		status int
 		code   string
 	}{
-		{`{"path":"` + proj + `","mode":"later"}`, 400, "usage"},
+		{`{"path":` + jsonString(proj) + `,"mode":"later"}`, 400, "usage"},
 		{`{"path":"/somewhere/else","mode":"new"}`, 404, "unknown_project"},
-		{`{"path":"` + proj + `","profile":"nope","mode":"new"}`, 422, "unknown_profile"},
-		{`{"path":"` + proj + `","mode":"new","session":"` + conv + `"}`, 400, "usage"},
-		{`{"path":"` + proj + `","mode":"resume","session":"not-a-session"}`, 400, "usage"},
-		{`{"path":"` + proj + `","mode":"resume","session":"` + gone + `"}`, 404, "unknown_conversation"},
+		{`{"path":` + jsonString(proj) + `,"profile":"nope","mode":"new"}`, 422, "unknown_profile"},
+		{`{"path":` + jsonString(proj) + `,"mode":"new","session":"` + conv + `"}`, 400, "usage"},
+		{`{"path":` + jsonString(proj) + `,"mode":"resume","session":"not-a-session"}`, 400, "usage"},
+		{`{"path":` + jsonString(proj) + `,"mode":"resume","session":"` + gone + `"}`, 404, "unknown_conversation"},
 	} {
 		if status, out := r.write(t, "POST", "/api/v1/projects/launch", tc.body); status != tc.status || code(out) != tc.code {
 			t.Errorf("%s: %d %v", tc.body, status, out)
@@ -396,19 +398,19 @@ func TestProjectsAndLaunch(t *testing.T) {
 	if len(launched) != 0 {
 		t.Fatal("refused launches must not run anything")
 	}
-	status, out = r.write(t, "POST", "/api/v1/projects/launch", `{"path":"`+proj+`","profile":"gw","mode":"continue"}`)
+	status, out = r.write(t, "POST", "/api/v1/projects/launch", `{"path":`+jsonString(proj)+`,"profile":"gw","mode":"continue"}`)
 	if status != 200 || out["terminal"] != "iTerm" {
 		t.Fatalf("launch: %d %v", status, out)
 	}
 	if len(launched) != 1 || usedTerminal != "iterm" || launched[0].Dir != proj || launched[0].Exe != "/usr/local/bin/ccwrap" || strings.Join(launched[0].Args, " ") != "--profile gw -- --continue" {
 		t.Fatalf("launched %+v in %s", launched, usedTerminal)
 	}
-	if status, out := r.write(t, "POST", "/api/v1/projects/launch", `{"path":"`+proj+`","mode":"new"}`); status != 429 || code(out) != "too_fast" {
+	if status, out := r.write(t, "POST", "/api/v1/projects/launch", `{"path":`+jsonString(proj)+`,"mode":"new"}`); status != 429 || code(out) != "too_fast" {
 		t.Fatalf("second launch within a second: %d %v", status, out)
 	}
 	// A second later, resuming a kept conversation passes its ID on.
 	time.Sleep(1100 * time.Millisecond)
-	status, out = r.write(t, "POST", "/api/v1/projects/launch", `{"path":"`+proj+`","profile":"gw","mode":"resume","session":"`+conv+`"}`)
+	status, out = r.write(t, "POST", "/api/v1/projects/launch", `{"path":`+jsonString(proj)+`,"profile":"gw","mode":"resume","session":"`+conv+`"}`)
 	if status != 200 || out["mode"] != "resume" || len(launched) != 2 || strings.Join(launched[1].Args, " ") != "--profile gw -- --resume "+conv {
 		t.Fatalf("resume: %d %v %+v", status, out, launched)
 	}
@@ -481,8 +483,8 @@ func TestProjectConversations(t *testing.T) {
 		t.Fatal(err)
 	}
 	for id, line := range map[string]string{
-		open: `{"type":"user","cwd":"` + proj + `","timestamp":"2026-10-30T09:05:00Z"}` + "\n" + `{"type":"ai-title","aiTitle":"Open work"}`,
-		idle: `{"type":"user","cwd":"` + proj + `","timestamp":"2026-10-30T09:01:00Z"}` + "\n" + `{"type":"ai-title","aiTitle":"Earlier work"}`,
+		open: `{"type":"user","cwd":` + jsonString(proj) + `,"timestamp":"2026-10-30T09:05:00Z"}` + "\n" + `{"type":"ai-title","aiTitle":"Open work"}`,
+		idle: `{"type":"user","cwd":` + jsonString(proj) + `,"timestamp":"2026-10-30T09:01:00Z"}` + "\n" + `{"type":"ai-title","aiTitle":"Earlier work"}`,
 	} {
 		if err := os.WriteFile(filepath.Join(conv, id+".jsonl"), []byte(line+"\n"), 0o600); err != nil {
 			t.Fatal(err)
@@ -528,13 +530,13 @@ func TestProjectConversations(t *testing.T) {
 		}
 	}
 
-	if status, out := r.write(t, "POST", "/api/v1/projects/launch", `{"path":"`+proj+`","mode":"resume","session":"`+open+`"}`); status != 409 || code(out) != "conversation_open" {
+	if status, out := r.write(t, "POST", "/api/v1/projects/launch", `{"path":`+jsonString(proj)+`,"mode":"resume","session":"`+open+`"}`); status != 409 || code(out) != "conversation_open" {
 		t.Fatalf("resuming the open conversation: %d %v", status, out)
 	}
 	if len(launched) != 0 {
 		t.Fatal("a refused launch ran something")
 	}
-	if status, out := r.write(t, "POST", "/api/v1/projects/launch", `{"path":"`+proj+`","mode":"resume","session":"`+idle+`"}`); status != 200 || len(launched) != 1 || strings.Join(launched[0].Args, " ") != "-- --resume "+idle {
+	if status, out := r.write(t, "POST", "/api/v1/projects/launch", `{"path":`+jsonString(proj)+`,"mode":"resume","session":"`+idle+`"}`); status != 200 || len(launched) != 1 || strings.Join(launched[0].Args, " ") != "-- --resume "+idle {
 		t.Fatalf("resuming another conversation: %d %v %+v", status, out, launched)
 	}
 }
@@ -560,11 +562,11 @@ func TestIdleExit(t *testing.T) {
 // race), the starter reaps it instead of keeping a zombie until the
 // session ends.
 func TestStartReapsTheService(t *testing.T) {
-	paths := testutil.ShortAppPaths(t, "ui.sock")
-	exe := filepath.Join(t.TempDir(), "exits-at-once")
-	if err := os.WriteFile(exe, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
+	if runtime.GOOS == "windows" {
+		t.Skip("zombies are Unix's: Windows frees an exited child once its handle closes")
 	}
+	paths := testutil.ShortAppPaths(t, "ui.sock")
+	exe := exitingProgram(t, "exits-at-once", 0)
 	if err := start(paths, exe); err != nil {
 		t.Fatal(err)
 	}
@@ -576,6 +578,28 @@ func TestStartReapsTheService(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+// jsonString is s as a JSON string; Windows paths carry backslashes.
+func jsonString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
+// exitingProgram writes a program that exits with code at once: a shell
+// script, or on Windows a batch file.
+func exitingProgram(t *testing.T, name string, code int) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	body := fmt.Sprintf("#!/bin/sh\nexit %d\n", code)
+	if runtime.GOOS == "windows" {
+		path += ".bat"
+		body = fmt.Sprintf("@exit /b %d\r\n", code)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 // zombieChildren counts this process's children that exited unreaped.
@@ -607,10 +631,7 @@ func TestStartRotatesALargeLog(t *testing.T) {
 	if err := os.WriteFile(logPath, big, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	exe := filepath.Join(t.TempDir(), "exits-at-once")
-	if err := os.WriteFile(exe, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	exe := exitingProgram(t, "exits-at-once", 0)
 	if err := start(paths, exe); err != nil {
 		t.Fatal(err)
 	}

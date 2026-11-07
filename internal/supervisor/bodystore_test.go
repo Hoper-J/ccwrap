@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Hoper-J/ccwrap/internal/model"
+	"github.com/Hoper-J/ccwrap/internal/testutil"
 )
 
 func TestBodyStoreWriteLoadDelete(t *testing.T) {
@@ -35,7 +36,7 @@ func TestBodyStoreWriteLoadDelete(t *testing.T) {
 	if err != nil || string(got) != string(payload) {
 		t.Fatalf("load: %v %q", err, got)
 	}
-	if fi, _ := os.Stat(path); fi != nil && fi.Mode().Perm() != 0o600 {
+	if fi, _ := os.Stat(path); fi != nil && testutil.HasUnixPermissions() && fi.Mode().Perm() != 0o600 {
 		t.Fatalf("file must be 0600, got %v", fi.Mode())
 	}
 	st.delete("req-1")

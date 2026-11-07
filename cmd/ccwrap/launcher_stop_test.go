@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -22,6 +23,9 @@ import (
 // "$READY" once its traps are set is waited for, so no signal arrives first.
 func startChild(t *testing.T, script string, args ...string) *exec.Cmd {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("passing stop signals on to Claude Code is Unix-only so far")
+	}
 	ready := filepath.Join(t.TempDir(), "ready")
 	cmd := exec.Command("sh", append([]string{"-c", script}, args...)...)
 	cmd.Env = append(os.Environ(), "READY="+ready)

@@ -12,6 +12,7 @@ import (
 
 	"github.com/Hoper-J/ccwrap/internal/app"
 	"github.com/Hoper-J/ccwrap/internal/profiles"
+	"github.com/Hoper-J/ccwrap/internal/testutil"
 )
 
 func TestReadStdinAuthKey_StripsTrailingLF(t *testing.T) {
@@ -1122,7 +1123,7 @@ func TestProfileRm_LastProfile_LeavesEmptyFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("file should exist; stat err=%v", err)
 	}
-	if got := st.Mode().Perm(); got != 0o600 {
+	if got := st.Mode().Perm(); got != 0o600 && testutil.HasUnixPermissions() {
 		t.Fatalf("expected 0o600; got %o", got)
 	}
 	file, _ := profiles.Load(path)

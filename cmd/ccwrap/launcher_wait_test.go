@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"errors"
 	"net/http"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +18,7 @@ import (
 // its code and never consults supervisorErr (left buffered for the
 // rollback drain).
 func TestWait_ChildExitsFirst(t *testing.T) {
-	cmd := exec.Command("sh", "-c", "exit 7")
+	cmd := helperCommand("exit", "7")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -49,7 +48,7 @@ func TestWait_ChildExitsFirst(t *testing.T) {
 // forever while Claude fails every request against a dead proxy.
 func TestWait_SupervisorDiesFirst(t *testing.T) {
 	// A long-lived child that would otherwise outlive the test.
-	cmd := exec.Command("sleep", "60")
+	cmd := helperCommand("sleep", "60s")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -98,7 +97,7 @@ func TestWait_SupervisorDiesFirst(t *testing.T) {
 // that still arrives before Claude: the proxy is gone regardless of error,
 // so the child is killed and a non-nil cause is surfaced.
 func TestWait_SupervisorDiesNilError(t *testing.T) {
-	cmd := exec.Command("sleep", "60")
+	cmd := helperCommand("sleep", "60s")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start: %v", err)
 	}

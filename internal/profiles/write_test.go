@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Hoper-J/ccwrap/internal/testutil"
 )
 
 func TestOverwriteFile_CreatesFileWhenMissing(t *testing.T) {
@@ -114,6 +116,7 @@ func TestOverwriteFile_SourceLabel_PropagatesToParseErrors(t *testing.T) {
 }
 
 func TestOverwriteFile_FileMode0600_OnCreate(t *testing.T) {
+	testutil.SkipWithoutUnixPermissions(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "profiles.json")
 	f := &File{Default: "a", Profiles: map[string]Profile{"a": {Name: "a", BaseURL: "https://a.example.com", Auth: nil}}}
@@ -130,6 +133,7 @@ func TestOverwriteFile_FileMode0600_OnCreate(t *testing.T) {
 }
 
 func TestOverwriteFile_FileMode0600_NormalizesExisting0644(t *testing.T) {
+	testutil.SkipWithoutUnixPermissions(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "profiles.json")
 	// Pre-seed at 0o644.
@@ -150,6 +154,7 @@ func TestOverwriteFile_FileMode0600_NormalizesExisting0644(t *testing.T) {
 }
 
 func TestOverwriteFile_ParentDir0700_OnCreate(t *testing.T) {
+	testutil.SkipWithoutUnixPermissions(t)
 	dir := t.TempDir()
 	subdir := filepath.Join(dir, "newstate")
 	path := filepath.Join(subdir, "profiles.json")

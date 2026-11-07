@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/Hoper-J/ccwrap/internal/testutil"
 )
 
 func TestRecordAndModelsPerProfile(t *testing.T) {
@@ -29,7 +31,7 @@ func TestRecordAndModelsPerProfile(t *testing.T) {
 		t.Fatalf("other = %v", got)
 	}
 	info, err := os.Stat(filepath.Join(dir, fileName))
-	if err != nil || info.Mode().Perm() != 0o600 {
+	if err != nil || (testutil.HasUnixPermissions() && info.Mode().Perm() != 0o600) {
 		t.Fatalf("file mode: %v %v", info, err)
 	}
 	// Nothing to record without a profile or a model.

@@ -16,6 +16,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/Hoper-J/ccwrap/internal/testutil"
 )
 
 // makeArchive builds a tar.gz containing the single file "ccwrap" and
@@ -73,7 +75,7 @@ func TestApplyReplacesBinary(t *testing.T) {
 		t.Fatalf("binary not replaced: %q err=%v", got, err)
 	}
 	info, _ := os.Stat(exe)
-	if info.Mode().Perm()&0o111 == 0 {
+	if testutil.HasUnixPermissions() && info.Mode().Perm()&0o111 == 0 {
 		t.Fatal("replaced binary must be executable")
 	}
 	// Failure paths leave no temp files; the success path must not
@@ -141,6 +143,8 @@ func TestApplyMissingAsset(t *testing.T) {
 }
 
 func TestApplyUnwritableDir(t *testing.T) {
+	// A read-only attribute does not stop new files in a Windows directory.
+	testutil.SkipWithoutUnixPermissions(t)
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory permissions")
 	}

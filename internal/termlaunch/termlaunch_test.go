@@ -4,14 +4,20 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Hoper-J/ccwrap/internal/testutil"
 )
 
 // The script runs the command in the folder with every argument intact,
 // whatever quotes, spaces or shell syntax they contain, and removes itself.
 func TestScriptRunsArgumentsVerbatim(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("launch scripts are POSIX shell, for macOS terminals")
+	}
 	root := t.TempDir()
 	dir := filepath.Join(root, `dir with space 'q' "dq" $(touch PWNED) ; echo`)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -93,6 +99,9 @@ func TestInstalledFallsBackToSpotlight(t *testing.T) {
 // Spotlight's answer is used only for a real app bundle that is not in the
 // Trash or nested inside another app.
 func TestFirstApp(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Spotlight paths are macOS paths")
+	}
 	root := t.TempDir()
 	mk := func(p string) string { _ = os.MkdirAll(filepath.Join(root, p), 0o755); return filepath.Join(root, p) }
 	trashed := mk(".Trash/Ghostty.app")
@@ -143,6 +152,9 @@ func TestChoose(t *testing.T) {
 // open -a, iTerm by typing it into a new window's shell (AppleScript),
 // Ghostty with -e.
 func TestLaunchCommands(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the terminals are macOS apps")
+	}
 	dir := t.TempDir()
 	scripts := t.TempDir()
 	for _, tc := range []struct {
@@ -172,7 +184,7 @@ func TestLaunchCommands(t *testing.T) {
 			t.Fatal("no script written")
 		}
 		script := matches[len(matches)-1]
-		if info, _ := os.Stat(script); info.Mode().Perm() != 0o700 {
+		if info, _ := os.Stat(script); testutil.HasUnixPermissions() && info.Mode().Perm() != 0o700 {
 			t.Fatalf("script mode %v", info.Mode())
 		}
 		if got != strings.ReplaceAll(tc.want, "SCRIPT", script) {

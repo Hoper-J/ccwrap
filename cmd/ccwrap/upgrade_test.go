@@ -137,7 +137,7 @@ func TestUpgradePMExitPropagates(t *testing.T) {
 		}
 		upgradeLookPath = func(string) (string, error) { return "/usr/bin/npm", nil }
 		upgradeRun = func(name string, args ...string) error {
-			return exec.Command("sh", "-c", "exit 7").Run() // a real *exec.ExitError
+			return helperCommand("exit", "7").Run() // a real *exec.ExitError
 		}
 		err := upgradeCommand(app.Paths{StateDir: os.Getenv("CCWRAP_TEST_STATE_DIR")}, nil)
 		// Must not reach this point: a non-zero exit has to propagate

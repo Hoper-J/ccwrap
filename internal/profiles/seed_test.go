@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Hoper-J/ccwrap/internal/testutil"
 )
 
 // T-seed-default-name — verifies File.Default == seeded Profile.Name so the
@@ -340,7 +342,7 @@ func TestWriteFile_SecretWrittenInline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	if perm := st.Mode().Perm(); perm != 0o600 {
+	if perm := st.Mode().Perm(); perm != 0o600 && testutil.HasUnixPermissions() {
 		t.Errorf("file perm = %o; want 0600 (owner-only credential file)", perm)
 	}
 	var got File
@@ -552,7 +554,7 @@ func TestWriteFile_AtomicNoTempLeak(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat written file: %v", err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	if info.Mode().Perm() != 0o600 && testutil.HasUnixPermissions() {
 		t.Errorf("perm = %v, want 0600", info.Mode().Perm())
 	}
 	if _, err := Load(path); err != nil {

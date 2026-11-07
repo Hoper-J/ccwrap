@@ -10,6 +10,7 @@ import (
 	"github.com/Hoper-J/ccwrap/internal/app"
 	"github.com/Hoper-J/ccwrap/internal/manifest"
 	"github.com/Hoper-J/ccwrap/internal/model"
+	"github.com/Hoper-J/ccwrap/internal/testutil"
 )
 
 func TestScanMarksPIDReuseAsStale(t *testing.T) {
@@ -194,9 +195,7 @@ func TestScanRefusesRuntimeDirOthersCanWrite(t *testing.T) {
 	if err := os.MkdirAll(paths.SessionsDir(), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(paths.RuntimeDir, 0o777); err != nil {
-		t.Fatal(err)
-	}
+	testutil.MakeWritableByOthers(t, paths.RuntimeDir)
 	if _, err := Scan(paths); err == nil || !strings.Contains(err.Error(), "refusing runtime directory") {
 		t.Fatalf("Scan() error = %v, want a refusal", err)
 	}

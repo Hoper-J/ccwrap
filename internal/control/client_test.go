@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -321,7 +322,11 @@ func TestUnixTransportLeavesNoConnectionOpen(t *testing.T) {
 
 func shortTempDir(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "cc-")
+	base := "/tmp"
+	if runtime.GOOS == "windows" {
+		base = os.TempDir()
+	}
+	dir, err := os.MkdirTemp(base, "cc-")
 	if err != nil {
 		t.Fatal(err)
 	}
