@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -160,27 +159,14 @@ func TestDoctorFailsOnPolicyNetworkEnv(t *testing.T) {
 
 func runDoctorJSON(t *testing.T, paths app.Paths, args []string) model.DoctorReport {
 	t.Helper()
-	oldStdout := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout = w
-	defer func() { os.Stdout = oldStdout }()
-
-	err = doctorCommand(paths, args)
-	_ = w.Close()
-	data, readErr := io.ReadAll(r)
-	_ = r.Close()
-	if readErr != nil {
-		t.Fatal(readErr)
-	}
+	var err error
+	data := captureStdout(t, func() { err = doctorCommand(paths, args) })
 	if err != nil {
 		t.Fatalf("doctorCommand returned error: %v", err)
 	}
 	var report model.DoctorReport
-	if err := json.Unmarshal(data, &report); err != nil {
-		t.Fatalf("parse doctor JSON: %v\noutput:\n%s", err, string(data))
+	if err := json.Unmarshal([]byte(data), &report); err != nil {
+		t.Fatalf("parse doctor JSON: %v\noutput:\n%s", err, data)
 	}
 	return report
 }

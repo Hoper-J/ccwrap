@@ -582,43 +582,46 @@ func TestNativeTLSDisabledWarning(t *testing.T) {
 
 // captureStderr runs fn with os.Stderr redirected to a pipe and
 // returns everything written. Mirrors doctor_test.go's stdout pattern.
-func captureStderr(t *testing.T, fn func()) string {
+// capture points *f at a pipe while fn runs and returns what fn wrote to it.
+// The pipe is drained as fn writes: Windows pipes buffer only a few KiB, so
+// reading after fn returns would deadlock on longer output.
+func capture(t *testing.T, f **os.File, fn func()) string {
 	t.Helper()
-	old := os.Stderr
+	old := *f
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	os.Stderr = w
-	defer func() { os.Stderr = old }()
+	*f = w
+	defer func() { *f = old }()
+	type result struct {
+		data []byte
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		data, err := io.ReadAll(r)
+		_ = r.Close()
+		done <- result{data, err}
+	}()
 	fn()
 	_ = w.Close()
-	data, readErr := io.ReadAll(r)
-	_ = r.Close()
-	if readErr != nil {
-		t.Fatal(readErr)
+	res := <-done
+	if res.err != nil {
+		t.Fatal(res.err)
 	}
-	return string(data)
+	return string(res.data)
+}
+
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	return capture(t, &os.Stderr, fn)
 }
 
 // captureStdout is the stdout twin (printStatus / doctorCommand write stdout).
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
-	old := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout = w
-	defer func() { os.Stdout = old }()
-	fn()
-	_ = w.Close()
-	data, readErr := io.ReadAll(r)
-	_ = r.Close()
-	if readErr != nil {
-		t.Fatal(readErr)
-	}
-	return string(data)
+	return capture(t, &os.Stdout, fn)
 }
 
 func mustContainAll(t *testing.T, s string, subs ...string) {
@@ -1804,24 +1807,11 @@ func TestMaybeMigrateFromEnv_StatErrorSkip(t *testing.T) {
 }
 
 func TestPrintUsage_ListsAllProfileSubcommands(t *testing.T) {
-	r, w, _ := os.Pipe()
 	// printUsage may write to os.Stdout or os.Stderr; capture both.
-	origStdout := os.Stdout
-	origStderr := os.Stderr
-	os.Stdout = w
-	os.Stderr = w
-	t.Cleanup(func() {
-		os.Stdout = origStdout
-		os.Stderr = origStderr
-	})
+	var stderr string
+	stdout := captureStdout(t, func() { stderr = captureStderr(t, printUsage) })
 
-	printUsage()
-	w.Close()
-	captured, _ := io.ReadAll(r)
-	os.Stdout = origStdout
-	os.Stderr = origStderr
-
-	got := string(captured)
+	got := stdout + stderr
 	for _, verb := range []string{"ls", "status", "switch", "test", "add", "edit", "rm", "set-default"} {
 		if !strings.Contains(got, verb) {
 			t.Fatalf("printUsage missing verb %q; got %q", verb, got)
