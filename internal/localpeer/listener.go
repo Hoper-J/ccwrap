@@ -158,13 +158,13 @@ func (l *listener) admit(c net.Conn, uid uint32, err error) bool {
 	case err == nil && (uid == l.self || uid == 0):
 		return true
 	case err == nil:
-		l.logOnce(fmt.Sprintf("uid %d", uid), "local peer check: refused connection from uid %d (%v); the %s accepts only uid %d and root (%s=0 disables this check)", uid, c.RemoteAddr(), l.policy.what, l.self, DisableEnv)
+		l.logOnce(fmt.Sprintf("uid %d", uid), "local peer check: refused connection from %s (%v); the %s accepts only %s and %s (%s=0 disables this check)", ownerName(uid, l.self), c.RemoteAddr(), l.policy.what, ownerName(l.self, l.self), RootName, DisableEnv)
 		return false
 	case errors.Is(err, ErrOrphaned):
 		l.logOnce("orphaned", "local peer check: refused connection from %v: %v", c.RemoteAddr(), err)
 		return false
 	case l.policy.strict:
-		l.logOnce("lookup "+failureKind(err), "local peer check: could not identify the owner of %v (%v); refusing it, since the %s accepts only uid %d and root (%s=0 disables this check) — further failures of this kind are not logged", c.RemoteAddr(), err, l.policy.what, l.self, DisableEnv)
+		l.logOnce("lookup "+failureKind(err), "local peer check: could not identify the owner of %v (%v); refusing it, since the %s accepts only %s and %s (%s=0 disables this check) — further failures of this kind are not logged", c.RemoteAddr(), err, l.policy.what, ownerName(l.self, l.self), RootName, DisableEnv)
 		return false
 	default:
 		l.logOnce("lookup "+failureKind(err), "local peer check: could not identify the owner of %v (%v); allowing it — further failures of this kind are not logged", c.RemoteAddr(), err)

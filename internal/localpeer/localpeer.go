@@ -12,7 +12,9 @@
 // end is our local address.
 //
 // Trust boundary: the ccwrap process's own uid and root. Same-uid processes
-// can already read profiles.json; root can read anything.
+// can already read profiles.json; root can read anything. Windows lists
+// sockets by process rather than user, so there the boundary is the user
+// that process runs as, and SYSTEM (lookup_windows.go).
 package localpeer
 
 import (
@@ -48,6 +50,9 @@ var (
 	// the lookup reports unavailable instead of guessing.
 	errLayout = errors.New("unexpected kernel socket table layout")
 )
+
+// OwnerName is how messages name a uid this package reported.
+func OwnerName(uid uint32) string { return ownerName(uid, uint32(os.Geteuid())) }
 
 // sockKey is one TCP socket as the kernel lists it: its own address and the
 // address it is connected to. Addresses are unmapped (::ffff:a.b.c.d → a.b.c.d)

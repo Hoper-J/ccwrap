@@ -23,7 +23,7 @@ func TestAddLocalAccessCheck(t *testing.T) {
 		summaryHave []string
 		selfTestRun bool
 	}{
-		{"pass", noEnv, self, nil, "pass", []string{fmt.Sprintf("only your own processes (uid %d) and root", self)}, true},
+		{"pass", noEnv, self, nil, "pass", []string{fmt.Sprintf("only your own processes (%s) and %s", localpeer.OwnerName(self), localpeer.RootName)}, true},
 		{"unavailable", noEnv, 0, localpeer.ErrUnsupported, "warn", []string{"unavailable", localpeer.ErrUnsupported.Error(), localAccessExposure}, true},
 		{"misidentified", noEnv, self + 1, nil, "fail", []string{fmt.Sprintf("uid %d (expected %d)", self+1, self)}, true},
 		{"disabled", func(k string) string {
