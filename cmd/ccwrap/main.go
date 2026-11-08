@@ -27,6 +27,10 @@ func main() {
 	// A Windows console takes ccwrap's colors and cursor movement only with
 	// virtual terminal processing on; its mode is put back on the way out.
 	restoreConsole := ui.EnableVT(os.Stdout, os.Stderr)
+	// What a Windows upgrade moved aside while it ran goes once it is free.
+	if exe, err := os.Executable(); err == nil {
+		update.RemoveReplaced(exe)
+	}
 	code, msg := exitFor(realMain())
 	if msg != "" {
 		fmt.Fprintf(os.Stderr, "ccwrap: %s\n", msg)

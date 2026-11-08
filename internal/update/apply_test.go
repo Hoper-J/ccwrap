@@ -2,6 +2,7 @@ package update
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -20,11 +21,33 @@ import (
 	"github.com/Hoper-J/ccwrap/internal/testutil"
 )
 
-// makeArchive builds a tar.gz containing the single file "ccwrap" and
-// returns (archive, sha256hex).
+// makeArchive builds this platform's release archive holding content as
+// its program, and returns (archive, sha256hex).
 func makeArchive(t *testing.T, content []byte) ([]byte, string) {
 	t.Helper()
+	return makeArchiveFor(t, runtime.GOOS, content)
+}
+
+// makeArchiveFor builds goos's release archive: a zip holding ccwrap.exe
+// on Windows, else a tar.gz holding ccwrap.
+func makeArchiveFor(t *testing.T, goos string, content []byte) ([]byte, string) {
+	t.Helper()
 	var buf bytes.Buffer
+	if goos == "windows" {
+		zw := zip.NewWriter(&buf)
+		w, err := zw.Create("ccwrap.exe")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write(content); err != nil {
+			t.Fatal(err)
+		}
+		if err := zw.Close(); err != nil {
+			t.Fatal(err)
+		}
+		sum := sha256.Sum256(buf.Bytes())
+		return buf.Bytes(), fmt.Sprintf("%x", sum)
+	}
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
 	if err := tw.WriteHeader(&tar.Header{Name: "ccwrap", Mode: 0o755, Size: int64(len(content))}); err != nil {
@@ -44,10 +67,10 @@ func makeArchive(t *testing.T, content []byte) ([]byte, string) {
 }
 
 // releaseServer mimics the GitHub releases download path layout
-// (…/v<ver>/ccwrap_<ver>_<os>_<arch>.tar.gz and …/v<ver>/checksums.txt).
+// (…/v<ver>/<this platform's archive> and …/v<ver>/checksums.txt).
 func releaseServer(t *testing.T, version string, archive []byte, checksums string) *httptest.Server {
 	t.Helper()
-	name := fmt.Sprintf("ccwrap_%s_%s_%s.tar.gz", version, runtime.GOOS, runtime.GOARCH)
+	name := releaseArchive(version, runtime.GOOS, runtime.GOARCH)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v"+version+"/"+name, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(archive) })
 	mux.HandleFunc("/v"+version+"/checksums.txt", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, checksums) })
@@ -57,7 +80,7 @@ func releaseServer(t *testing.T, version string, archive []byte, checksums strin
 func TestApplyReplacesBinary(t *testing.T) {
 	newBin := []byte("NEW BINARY BYTES")
 	archive, sum := makeArchive(t, newBin)
-	name := fmt.Sprintf("ccwrap_0.3.1_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+	name := releaseArchive("0.3.1", runtime.GOOS, runtime.GOARCH)
 	srv := releaseServer(t, "0.3.1", archive, fmt.Sprintf("%s  %s\n", sum, name))
 	defer srv.Close()
 
@@ -91,7 +114,7 @@ func TestApplyReplacesBinary(t *testing.T) {
 
 func TestApplyChecksumMismatch(t *testing.T) {
 	archive, _ := makeArchive(t, []byte("NEW"))
-	name := fmt.Sprintf("ccwrap_0.3.1_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+	name := releaseArchive("0.3.1", runtime.GOOS, runtime.GOARCH)
 	srv := releaseServer(t, "0.3.1", archive, fmt.Sprintf("%064d  %s\n", 0, name))
 	defer srv.Close()
 	dir := t.TempDir()
@@ -150,7 +173,7 @@ func TestApplyUnwritableDir(t *testing.T) {
 	}
 	newBin := []byte("NEW")
 	archive, sum := makeArchive(t, newBin)
-	name := fmt.Sprintf("ccwrap_0.3.1_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+	name := releaseArchive("0.3.1", runtime.GOOS, runtime.GOARCH)
 	srv := releaseServer(t, "0.3.1", archive, fmt.Sprintf("%s  %s\n", sum, name))
 	defer srv.Close()
 	dir := t.TempDir()
@@ -165,5 +188,21 @@ func TestApplyUnwritableDir(t *testing.T) {
 	err := Apply(context.Background(), srv.Client(), srv.URL, "0.3.1", runtime.GOOS, runtime.GOARCH, exe, io.Discard)
 	if !errors.Is(err, os.ErrPermission) {
 		t.Fatalf("want os.ErrPermission (for the caller's sudo hint), got %v", err)
+	}
+}
+
+// Windows releases are zips holding ccwrap.exe, the others tar.gz files
+// holding ccwrap; each platform's upgrade reads its own kind.
+func TestExtractBinaryReadsEachPlatformsArchive(t *testing.T) {
+	for _, goos := range []string{"windows", "linux", "darwin"} {
+		archive, _ := makeArchiveFor(t, goos, []byte("PROGRAM "+goos))
+		name := releaseArchive("0.3.1", goos, "amd64")
+		got, err := extractBinary(name, archive)
+		if err != nil || string(got) != "PROGRAM "+goos {
+			t.Errorf("%s (%s): %q, %v", goos, name, got, err)
+		}
+	}
+	if !strings.HasSuffix(releaseArchive("0.3.1", "windows", "arm64"), "_windows_arm64.zip") {
+		t.Fatalf("windows archive = %s", releaseArchive("0.3.1", "windows", "arm64"))
 	}
 }

@@ -2,6 +2,7 @@ package update
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -11,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -27,14 +29,14 @@ const maxArchiveSize = 512 << 20
 
 // Apply downloads the release archive for version/goos/goarch, verifies
 // its sha256 against the published checksums.txt (same rigor as
-// install.sh — no checksum, no install), extracts the `ccwrap` entry,
-// and atomically renames it over exePath via a same-directory temp
-// file. On ANY failure the existing binary is left untouched and the
-// temp file is removed. A permission failure surfaces as
+// install.sh — no checksum, no install), extracts the ccwrap program,
+// and puts it in place of exePath via a same-directory temp file
+// (replaceExe). On ANY failure the existing binary is left untouched and
+// the temp file is removed. A permission failure surfaces as
 // os.ErrPermission so the caller can print an actionable sudo /
 // CCWRAP_BINDIR hint instead of a raw error.
 func Apply(ctx context.Context, client *http.Client, releaseBase, version, goos, goarch, exePath string, out io.Writer) error {
-	archiveName := fmt.Sprintf("ccwrap_%s_%s_%s.tar.gz", version, goos, goarch)
+	archiveName := releaseArchive(version, goos, goarch)
 	base := fmt.Sprintf("%s/v%s", strings.TrimRight(releaseBase, "/"), version)
 	fmt.Fprintf(out, "downloading v%s (%s/%s)…\n", version, goos, goarch)
 
@@ -54,7 +56,7 @@ func Apply(ctx context.Context, client *http.Client, releaseBase, version, goos,
 	if got != want {
 		return fmt.Errorf("checksum mismatch for %s (want %s, got %s)", archiveName, want, got)
 	}
-	bin, err := extractBinary(archive)
+	bin, err := extractBinary(archiveName, archive)
 	if err != nil {
 		return err
 	}
@@ -77,11 +79,21 @@ func Apply(ctx context.Context, client *http.Client, releaseBase, version, goos,
 		_ = os.Remove(tmp)
 		return err
 	}
-	if err := os.Rename(tmp, exePath); err != nil {
+	if err := replaceExe(tmp, exePath); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}
 	return nil
+}
+
+// releaseArchive is the release archive for a platform: a zip on Windows, a
+// tar.gz elsewhere, as .goreleaser.yaml packs them.
+func releaseArchive(version, goos, goarch string) string {
+	ext := ".tar.gz"
+	if goos == "windows" {
+		ext = ".zip"
+	}
+	return fmt.Sprintf("ccwrap_%s_%s_%s%s", version, goos, goarch, ext)
 }
 
 func fetchBytes(ctx context.Context, client *http.Client, url string, limit int64) ([]byte, error) {
@@ -114,9 +126,27 @@ func checksumFor(sums, name string) (string, bool) {
 	return "", false
 }
 
-// extractBinary pulls the top-level `ccwrap` entry out of the tar.gz —
-// the exact archive shape install.sh consumes.
-func extractBinary(archive []byte) ([]byte, error) {
+// extractBinary pulls the ccwrap program out of the release archive name:
+// ccwrap.exe from a Windows zip, which install.ps1 consumes, else the
+// top-level ccwrap of a tar.gz, the shape install.sh consumes.
+func extractBinary(name string, archive []byte) ([]byte, error) {
+	if strings.HasSuffix(name, ".zip") {
+		zr, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
+		if err != nil {
+			return nil, fmt.Errorf("open archive: %w", err)
+		}
+		for _, f := range zr.File {
+			if path.Base(f.Name) == "ccwrap.exe" && f.Mode().IsRegular() {
+				rc, err := f.Open()
+				if err != nil {
+					return nil, fmt.Errorf("read archive: %w", err)
+				}
+				defer rc.Close()
+				return io.ReadAll(io.LimitReader(rc, maxArchiveSize))
+			}
+		}
+		return nil, errors.New("archive did not contain ccwrap.exe")
+	}
 	gz, err := gzip.NewReader(bytes.NewReader(archive))
 	if err != nil {
 		return nil, fmt.Errorf("open archive: %w", err)
