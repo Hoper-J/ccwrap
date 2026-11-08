@@ -1,6 +1,8 @@
 package termlaunch
 
 import (
+	"encoding/base64"
+	"encoding/binary"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf16"
 
 	"github.com/Hoper-J/ccwrap/internal/testutil"
 )
@@ -87,7 +90,7 @@ func TestInstalledFallsBackToSpotlight(t *testing.T) {
 			return elsewhere
 		}
 		return ""
-	})
+	}, nil)
 	if len(got) != 2 || got[0].ID != "terminal" || got[1].ID != "ghostty" || got[1].AppPath != elsewhere {
 		t.Fatalf("installed = %+v", got)
 	}
@@ -228,5 +231,65 @@ func TestLaunchSweepsStaleScripts(t *testing.T) {
 		if _, err := os.Stat(p); err != nil {
 			t.Fatalf("%s was removed: %v", filepath.Base(p), err)
 		}
+	}
+}
+
+func decodePowerShell(t *testing.T, enc string) string {
+	t.Helper()
+	raw, err := base64.StdEncoding.DecodeString(enc)
+	if err != nil || len(raw)%2 != 0 {
+		t.Fatalf("not base64 UTF-16LE: %v", err)
+	}
+	units := make([]uint16, len(raw)/2)
+	for i := range units {
+		units[i] = binary.LittleEndian.Uint16(raw[2*i:])
+	}
+	return string(utf16.Decode(units))
+}
+
+// Every value is single-quoted, with the quotes PowerShell ends a string at
+// doubled.
+func TestPowerShellCommandQuotesEveryValue(t *testing.T) {
+	enc, err := PowerShellCommand(Request{
+		Dir:  `C:\it's ‘q’ $x; & y`,
+		Exe:  `C:\Program Files\ccwrap\ccwrap.exe`,
+		Args: []string{"--profile", "it's", "--", "--resume", "abc"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Set-Location -LiteralPath 'C:\\it''s ‘‘q’’ $x; & y'\n" +
+		"& 'C:\\Program Files\\ccwrap\\ccwrap.exe' '--profile' 'it''s' '--' '--resume' 'abc'\n"
+	if got := decodePowerShell(t, enc); got != want {
+		t.Fatalf("script:\n%s\nwant:\n%s", got, want)
+	}
+	for _, bad := range [][]string{{`say "hi"`}, {""}, {"line\nbreak"}, {`ends in \`}} {
+		if _, err := PowerShellCommand(Request{Dir: `C:\x`, Exe: `C:\x\y.exe`, Args: bad}); err == nil {
+			t.Errorf("PowerShellCommand(%q) accepted", bad)
+		}
+	}
+}
+
+func TestWindowsTerminalCommandLine(t *testing.T) {
+	var term Terminal
+	for _, x := range terminals {
+		if x.ID == "windows-terminal" {
+			term = x
+		}
+	}
+	dir := t.TempDir()
+	var got []string
+	err := launch(Installation{Terminal: term, AppPath: `C:\wt.exe`}, Request{Dir: dir, Exe: `C:\ccwrap.exe`, Args: []string{"--continue"}}, t.TempDir(), func(name string, args ...string) error {
+		got = append([]string{name}, args...)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 7 || strings.Join(got[:6], " ") != `C:\wt.exe -w new powershell.exe -NoLogo -EncodedCommand` {
+		t.Fatalf("ran %q", got)
+	}
+	if script := decodePowerShell(t, got[6]); !strings.Contains(script, "& 'C:\\ccwrap.exe' '--continue'") {
+		t.Fatalf("script %q", script)
 	}
 }

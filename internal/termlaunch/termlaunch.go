@@ -2,14 +2,18 @@
 // a command there, so the app can start Claude Code without embedding a
 // terminal.
 //
-// Every terminal gets the same thing to run: a one-shot script that deletes
-// itself, changes into the folder and execs the command, with every argument
-// single-quoted. Nothing user-supplied reaches a shell or AppleScript unquoted.
+// Every macOS terminal gets the same thing to run: a one-shot script that
+// deletes itself, changes into the folder and execs the command, with every
+// argument single-quoted. Windows Terminal gets the same steps as a
+// PowerShell command. Nothing user-supplied reaches a shell or AppleScript
+// unquoted.
 package termlaunch
 
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -20,6 +24,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf16"
 
 	"github.com/Hoper-J/ccwrap/internal/statefile"
 )
@@ -33,6 +38,10 @@ type Terminal struct {
 	bundle   string
 	bundleID string
 	open     func(app, script string, run runner) error
+	// exe is the program a Windows terminal is found by on PATH, and
+	// command opens it on a request directly, with no script file.
+	exe     string
+	command func(app string, req Request, run runner) error
 }
 
 type runner func(name string, args ...string) error
@@ -41,6 +50,7 @@ var terminals = []Terminal{
 	{ID: "terminal", Name: "Terminal", Verified: true, bundle: "Terminal.app", bundleID: "com.apple.Terminal", open: openWithApp("Terminal")},
 	{ID: "iterm", Name: "iTerm", Verified: true, bundle: "iTerm.app", bundleID: "com.googlecode.iterm2", open: openITerm},
 	{ID: "ghostty", Name: "Ghostty", Verified: true, bundle: "Ghostty.app", bundleID: "com.mitchellh.ghostty", open: openGhostty},
+	{ID: "windows-terminal", Name: "Windows Terminal", Verified: true, exe: "wt.exe", command: openWindowsTerminal},
 }
 
 // openWithApp hands the script to a terminal that runs executable files it
@@ -81,30 +91,50 @@ func openGhostty(appPath, script string, run runner) error {
 // Installed lists the supported terminals on this machine, in display
 // order, each with the app path it would be opened with: from the usual
 // app folders, else wherever Spotlight has seen it (Homebrew can install
-// casks into any folder).
-func Installed() []Installation { return find(DefaultAppDirs(), spotlightApp) }
+// casks into any folder); on Windows, from PATH.
+func Installed() []Installation { return find(DefaultAppDirs(), spotlightApp, windowsExe) }
 
 // InstalledIn is Installed looking in appDirs only.
-func InstalledIn(appDirs []string) []Installation { return find(appDirs, nil) }
+func InstalledIn(appDirs []string) []Installation { return find(appDirs, nil, nil) }
 
-func find(appDirs []string, locate func(bundleID string) string) []Installation {
+// find looks for each terminal: an app bundle in appDirs, else where locate
+// says, or a Windows terminal's program where lookExe says.
+func find(appDirs []string, locate, lookExe func(string) string) []Installation {
 	var out []Installation
 	for _, t := range terminals {
 		p := ""
-		for _, dir := range appDirs {
-			if isApp(filepath.Join(dir, t.bundle)) {
-				p = filepath.Join(dir, t.bundle)
-				break
+		if t.exe != "" {
+			if lookExe != nil {
+				p = lookExe(t.exe)
 			}
-		}
-		if p == "" && locate != nil {
-			p = locate(t.bundleID)
+		} else {
+			for _, dir := range appDirs {
+				if isApp(filepath.Join(dir, t.bundle)) {
+					p = filepath.Join(dir, t.bundle)
+					break
+				}
+			}
+			if p == "" && locate != nil {
+				p = locate(t.bundleID)
+			}
 		}
 		if p != "" {
 			out = append(out, Installation{Terminal: t, AppPath: p})
 		}
 	}
 	return out
+}
+
+// windowsExe is where program name is on PATH on Windows, or "".
+func windowsExe(name string) string {
+	if runtime.GOOS != "windows" {
+		return ""
+	}
+	p, err := exec.LookPath(name)
+	if err != nil {
+		return ""
+	}
+	return p
 }
 
 func isApp(p string) bool {
@@ -193,6 +223,8 @@ func idForClaudeName(name string) string {
 		return "iterm"
 	case "ghostty":
 		return "ghostty"
+	case "windows-terminal", "windows_terminal", "windowsterminal", "wt":
+		return "windows-terminal"
 	}
 	return ""
 }
@@ -295,6 +327,9 @@ func launch(in Installation, req Request, scriptDir string, run runner) error {
 	if err := ValidateDir(req.Dir); err != nil {
 		return err
 	}
+	if in.command != nil {
+		return in.command(in.AppPath, req, run)
+	}
 	text, err := Script(req)
 	if err != nil {
 		return err
@@ -315,3 +350,47 @@ func launch(in Installation, req Request, scriptDir string, run runner) error {
 	}
 	return nil
 }
+
+// openWindowsTerminal opens a new Windows Terminal window running req as a
+// PowerShell command. The command goes base64-encoded, so neither Windows
+// Terminal, which splits its command line at semicolons, nor cmd.exe parses
+// any part of it.
+func openWindowsTerminal(app string, req Request, run runner) error {
+	cmd, err := PowerShellCommand(req)
+	if err != nil {
+		return err
+	}
+	return run(app, "-w", "new", "powershell.exe", "-NoLogo", "-EncodedCommand", cmd)
+}
+
+// PowerShellCommand is req as a PowerShell -EncodedCommand value: change into
+// the folder, then run the program, with every value single-quoted. Windows
+// PowerShell drops empty arguments, garbles double quotes and lets a trailing
+// backslash escape the quotes it adds in the command lines it builds for
+// programs, so those are refused.
+func PowerShellCommand(req Request) (string, error) {
+	for i, a := range append([]string{req.Dir, req.Exe}, req.Args...) {
+		if a == "" || strings.ContainsAny(a, "\x00\r\n\"") || (i >= 2 && strings.HasSuffix(a, `\`)) {
+			return "", errors.New("arguments must not be empty, end in a backslash, or contain NUL, line breaks or double quotes")
+		}
+	}
+	var b strings.Builder
+	b.WriteString("Set-Location -LiteralPath " + psQuote(req.Dir) + "\n")
+	b.WriteString("& " + psQuote(req.Exe))
+	for _, a := range req.Args {
+		b.WriteString(" " + psQuote(a))
+	}
+	b.WriteString("\n")
+	units := utf16.Encode([]rune(b.String()))
+	raw := make([]byte, 2*len(units))
+	for i, u := range units {
+		binary.LittleEndian.PutUint16(raw[2*i:], u)
+	}
+	return base64.StdEncoding.EncodeToString(raw), nil
+}
+
+// psQuoter doubles every quote that ends a single-quoted PowerShell string:
+// the apostrophe and the typographic ‘ ’ ‚ ‛.
+var psQuoter = strings.NewReplacer("'", "''", "‘", "‘‘", "’", "’’", "‚", "‚‚", "‛", "‛‛")
+
+func psQuote(s string) string { return "'" + psQuoter.Replace(s) + "'" }
