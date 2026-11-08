@@ -103,6 +103,8 @@ type sessionLauncher struct {
 	ca            *certs.Manager
 	supervisor    *supervisor.Supervisor
 	supervisorErr chan error
+	// stopRequested reports whether ccwrap stop asked the session to end.
+	stopRequested func() bool
 	client        *control.Client
 	session       *model.Session
 	cmd           *exec.Cmd
@@ -219,6 +221,7 @@ func (l *sessionLauncher) StartSupervisor() error {
 		return err
 	}
 	l.supervisor = sv
+	l.stopRequested = sv.StopRequested
 	l.supervisorErr = make(chan error, 1)
 	go func() { l.supervisorErr <- sv.Run(l.ctx) }()
 	l.rollback.push(func() {
@@ -549,14 +552,21 @@ func (l *sessionLauncher) Wait() (int, error) {
 		if sig := syscall.Signal(l.stopSig.Load()); sig != 0 {
 			l.closeReason = "stopped by " + signalName(sig)
 		}
-		if waitErr == nil {
-			return 0, nil
-		}
+		code := 0
 		var exitErr *exec.ExitError
 		if errors.As(waitErr, &exitErr) {
-			return exitStatus(exitErr), nil
+			code = exitStatus(exitErr)
+		} else if waitErr != nil {
+			return 0, waitErr
 		}
-		return 0, waitErr
+		if l.stopRequested != nil && l.stopRequested() {
+			// ccwrap stop ends ccwrap with 143 everywhere: Claude Code exits
+			// 143 on Unix, where it gets SIGTERM, but 0 on Windows, where
+			// it gets a Ctrl+C.
+			l.closeReason = "stopped by ccwrap stop"
+			code = 128 + int(syscall.SIGTERM)
+		}
+		return code, nil
 	case svErr := <-l.supervisorErr:
 		// Supervisor died before Claude — the data-plane proxy is gone.
 		// Kill the now-useless child and reap it so cmd resources are

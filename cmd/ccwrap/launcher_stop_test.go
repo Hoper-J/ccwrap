@@ -156,6 +156,24 @@ func TestWait_SignalExitStatusAndReason(t *testing.T) {
 	}
 }
 
+// A session ended by ccwrap stop exits 143 with the stop as its end reason
+// on every platform, whatever Claude Code exits with: 143 after SIGTERM on
+// Unix, 0 after the Ctrl+C on Windows.
+func TestWait_CcwrapStopExitStatusAndReason(t *testing.T) {
+	for _, exit := range []string{"0", "143"} {
+		cmd := helperCommand("exit", exit)
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		l := &sessionLauncher{cmd: cmd, supervisorErr: make(chan error, 1), stopRequested: func() bool { return true }}
+		l.noteStopSignal(syscall.SIGINT)
+		code, err := l.Wait()
+		if err != nil || code != 128+int(syscall.SIGTERM) || l.closeReason != "stopped by ccwrap stop" {
+			t.Fatalf("exit %s: Wait = %d, %v, reason %q; want 143, nil, stopped by ccwrap stop", exit, code, err, l.closeReason)
+		}
+	}
+}
+
 // ccwrap stop and a closed terminal end the session the way an exit does:
 // the supervisor keeps serving while Claude Code exits, Wait returns Claude
 // Code's status instead of a supervisor error, and teardown announces the

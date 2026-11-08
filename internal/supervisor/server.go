@@ -199,6 +199,8 @@ type Supervisor struct {
 	// logFile is closed by Shutdown: Windows cannot remove the session dir
 	// while it is open.
 	logFile *os.File
+	// stopRequested is set once ccwrap stop asks the session to end.
+	stopRequested atomic.Bool
 
 	mu           sync.RWMutex
 	session      *sessionState
@@ -388,19 +390,19 @@ func (s *Supervisor) handleShutdown(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !canStopSelf {
-		http.Error(w, "stopping a session is not supported on "+runtime.GOOS+" yet", http.StatusNotImplemented)
-		return
-	}
+	s.stopRequested.Store(true)
 	writeJSON(w, map[string]string{"schema_version": model.ControlAPIVersion, "status": "terminating"})
 	if flusher, ok := w.(http.Flusher); ok {
 		flusher.Flush()
 	}
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		_ = stopSelf()
+		_ = s.stopSelf()
 	}()
 }
+
+// StopRequested reports whether ccwrap stop asked the session to end.
+func (s *Supervisor) StopRequested() bool { return s.stopRequested.Load() }
 
 func (s *Supervisor) handleSessions(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
