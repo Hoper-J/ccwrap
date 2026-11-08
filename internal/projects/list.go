@@ -8,9 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf16"
 )
 
 // Project is one folder on the Projects page.
@@ -143,8 +145,7 @@ func (l *Lister) List(src Sources) []Project {
 		}
 	}
 
-	// Each conversation folder is named after its starting folder with every
-	// character but letters and digits replaced by "-".
+	// Each conversation folder is named after its starting folder (encodeDir).
 	convRoot := filepath.Join(src.ClaudeHome, "projects")
 	dirs, _ := os.ReadDir(convRoot)
 	for _, d := range dirs {
@@ -205,14 +206,45 @@ func (l *Lister) List(src Sources) []Project {
 	return out
 }
 
+// maxEncodedDirLen is where Claude Code cuts a long folder name and appends
+// a hash (sanitizePath's MAX_SANITIZED_LENGTH).
+const maxEncodedDirLen = 200
+
+// encodeDir is the name of the folder Claude Code keeps path's conversations
+// in. Like its sanitizePath, it replaces every UTF-16 code unit that is not
+// an ASCII letter or digit with "-" (a character outside the BMP takes two),
+// and cuts a name longer than 200 there, followed by "-" and the base-36
+// djb2 hash of path.
 func encodeDir(path string) string {
-	b := []byte(path)
-	for i, c := range b {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
-			b[i] = '-'
+	b := make([]byte, 0, len(path))
+	for _, r := range path {
+		switch {
+		case r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9':
+			b = append(b, byte(r))
+		case r > 0xFFFF:
+			b = append(b, '-', '-')
+		default:
+			b = append(b, '-')
 		}
 	}
-	return string(b)
+	if len(b) <= maxEncodedDirLen {
+		return string(b)
+	}
+	h := int64(djb2(path))
+	if h < 0 {
+		h = -h
+	}
+	return string(b[:maxEncodedDirLen]) + "-" + strconv.FormatInt(h, 36)
+}
+
+// djb2 is Claude Code's djb2Hash: over the UTF-16 code units of s, in 32-bit
+// two's complement.
+func djb2(s string) int32 {
+	var h int32
+	for _, u := range utf16.Encode([]rune(s)) {
+		h = h<<5 - h + int32(u)
+	}
+	return h
 }
 
 // latest summarizes the newest conversation file in dir.

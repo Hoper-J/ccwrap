@@ -314,3 +314,34 @@ func TestListConversationWithoutTitle(t *testing.T) {
 		t.Errorf("idle: %+v", p)
 	}
 }
+
+// Claude Code's sanitizePath: UTF-16 code units, and a djb2 hash past 200.
+// The last case is the folder Claude Code 2.1.296 itself created.
+func TestEncodeDirMatchesClaudeCode(t *testing.T) {
+	long := strings.Repeat("很长的目录名", 14)
+	for _, tc := range []struct{ in, want string }{
+		{`C:\Users\张三\proj`, "C--Users----proj"},
+		{"/Users/me/项目/😀", "-Users-me------"},
+		{"/" + strings.Repeat("b", 199), "-" + strings.Repeat("b", 199)},
+		{"/" + strings.Repeat("b", 200), "-" + strings.Repeat("b", 199) + "-86ms41"},
+		{"/Users/me/" + strings.Repeat("很长的目录名", 40), "-Users-me-" + strings.Repeat("-", 190) + "-m3bomv"},
+		{`C:\` + strings.Repeat("d", 197) + "张", "C--" + strings.Repeat("d", 197) + "-5ls1gh"},
+		{"/Users/me/" + strings.Repeat("😀", 100), "-Users-me-" + strings.Repeat("-", 190) + "-nvsoc3"},
+		{"/private/tmp/ccwrap-cc-check/w/" + long + "/" + long + "/x", "-private-tmp-ccwrap-cc-check-w-" + strings.Repeat("-", 169) + "-ykjl18"},
+	} {
+		if got := encodeDir(tc.in); got != tc.want {
+			t.Errorf("encodeDir(%.24q…) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestDjb2MatchesClaudeCode(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want int32
+	}{{"", 0}, {"a", 97}, {"张三", 774889}, {"😀", 1772899}, {`C:\Users\张三\proj`, -387671113}} {
+		if got := djb2(tc.in); got != tc.want {
+			t.Errorf("djb2(%q) = %d, want %d", tc.in, got, tc.want)
+		}
+	}
+}
