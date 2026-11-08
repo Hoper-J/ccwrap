@@ -20,7 +20,7 @@ os=$(uname -s | tr '[:upper:]' '[:lower:]')
 case "$os" in
   darwin) os=darwin ;;
   linux)  os=linux ;;
-  *) err "unsupported OS '$os' (ccwrap supports macOS and Linux)" ;;
+  *) err "unsupported OS '$os' (ccwrap supports macOS and Linux here; on Windows use install.ps1)" ;;
 esac
 
 arch=$(uname -m)
