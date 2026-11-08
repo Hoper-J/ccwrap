@@ -47,6 +47,12 @@ try {
   process.exit(1);
 }
 
+// Ctrl+C reaches ccwrap from the terminal itself; this launcher waits for
+// ccwrap to finish instead of exiting first and handing the terminal back
+// to the shell while ccwrap still runs.
+process.on("SIGINT", () => {});
+if (process.platform === "win32") process.on("SIGBREAK", () => {});
+
 const result = spawnSync(bin, process.argv.slice(2), { stdio: "inherit" });
 if (result.error) {
   console.error(result.error.message);
