@@ -93,11 +93,21 @@ func startBackgroundUpdateCheck(ctx context.Context, cfg model.EgressConfig, sta
 		defer func() { _ = recover() }() // the update machinery must never break a session
 		cctx, cancel := context.WithTimeout(ctx, update.CheckTimeout)
 		defer cancel()
-		latest, err := update.FetchLatest(cctx, update.NewClient(cfg, update.CheckTimeout), update.CheckURL(getenv))
+		client := update.NewClient(cfg, update.CheckTimeout)
+		latest, err := update.FetchLatest(cctx, client, update.CheckURL(getenv))
 		if err != nil {
 			return
 		}
-		_ = update.SaveCache(stateDir, update.Cache{CheckedAt: now().UTC(), Latest: latest})
+		// Claude Code's latest rides along; a failed read keeps the last one.
+		claudeLatest := c.ClaudeLatest
+		if u := update.ClaudeCheckURL(getenv); u != "" {
+			cctx2, cancel2 := context.WithTimeout(ctx, update.CheckTimeout)
+			if v, err := update.FetchLatest(cctx2, client, u); err == nil {
+				claudeLatest = v
+			}
+			cancel2()
+		}
+		_ = update.SaveCache(stateDir, update.Cache{CheckedAt: now().UTC(), Latest: latest, ClaudeLatest: claudeLatest})
 		if update.Eligible(current) && update.Newer(current, latest) {
 			h.result.Store(&latest)
 		}
@@ -119,4 +129,36 @@ func printUpdateExitNotice(w io.Writer, h *updateCheckHandle, current string, is
 	}
 	pal := ui.New(isTTY)
 	fmt.Fprintln(w, updateNoticeLine(pal, current, latest))
+}
+
+// claudeUpdateLine says a newer Claude Code than the session ran is out.
+// Sessions keep Claude Code from updating itself, so the user updates it.
+func claudeUpdateLine(pal ui.Palette, current, latest string) string {
+	return fmt.Sprintf("%s Claude Code %s → %s available · run %s outside ccwrap",
+		pal.Dim("update:"), current, latest, pal.Bold("claude update"))
+}
+
+// printClaudeUpdateNotice prints claudeUpdateLine at a session's end when
+// the update-check cache knows a newer Claude Code than used, the version
+// the session ran.
+func printClaudeUpdateNotice(w io.Writer, stateDir, used string, disabled bool, getenv func(string) string, isTTY bool) {
+	if used == "" || disabled || update.InCI(getenv) || !isTTY {
+		return
+	}
+	if c, ok := update.LoadCache(stateDir); ok && update.Newer(used, c.ClaudeLatest) {
+		fmt.Fprintln(w, claudeUpdateLine(ui.New(isTTY), used, c.ClaudeLatest))
+	}
+}
+
+// addClaudeUpdateCheck is doctor's row on Claude Code updates: it does not
+// update itself in ccwrap sessions, and a warning names a newer version than
+// the latest session ran.
+func addClaudeUpdateCheck(add func(name, status, summary, detail string), stateDir string) {
+	const how = "run `claude update` outside ccwrap"
+	seen, ok := update.LoadClaudeSeen(stateDir)
+	if c, cok := update.LoadCache(stateDir); ok && cok && update.Newer(seen.Version, c.ClaudeLatest) {
+		add("claude_updates", "warn", fmt.Sprintf("Claude Code %s → %s available; it does not update itself in ccwrap sessions: %s", seen.Version, c.ClaudeLatest, how), "")
+		return
+	}
+	add("claude_updates", "pass", "Claude Code does not update itself in ccwrap sessions; "+how+" to update it", "")
 }

@@ -9,6 +9,7 @@ var doctorGroupExplicit = map[string]string{
 	"session_listener":                 "Runtime",
 	"local_access":                     "Runtime",
 	"update":                           "Runtime",
+	"claude_updates":                   "Runtime",
 	"profile":                          "Provider + Auth",
 	"effective_upstream":               "Provider + Auth",
 	"upstream_inputs":                  "Provider + Auth",

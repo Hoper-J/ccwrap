@@ -36,3 +36,20 @@ func TestSessionKeepsClaudeConversation(t *testing.T) {
 		t.Fatalf("after a later conversation: %q", got)
 	}
 }
+
+// The session keeps the Claude Code version its requests name; other
+// clients' requests leave it as it was.
+func TestSessionKeepsClaudeVersion(t *testing.T) {
+	srv, sess := newTestSessionForCreate(t)
+	id := sess.snapshot().ID
+	send := func(ua string) {
+		h := http.Header{}
+		h.Set("User-Agent", ua)
+		srv.recordRequest(id, model.RequestRecord{SessionID: id, Method: http.MethodPost, Path: "/v1/messages", RequestHeaders: h})
+	}
+	send("claude-cli/2.1.296 (external, sdk-cli)")
+	send("curl/8.7.1")
+	if got := sess.snapshot().ClaudeVersion; got != "2.1.296" {
+		t.Fatalf("ClaudeVersion = %q, want 2.1.296", got)
+	}
+}

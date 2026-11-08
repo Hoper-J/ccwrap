@@ -19,6 +19,7 @@ import (
 	"github.com/Hoper-J/ccwrap/internal/supervisor"
 	"github.com/Hoper-J/ccwrap/internal/tlsfp"
 	"github.com/Hoper-J/ccwrap/internal/ui"
+	"github.com/Hoper-J/ccwrap/internal/update"
 )
 
 func main() {
@@ -407,12 +408,17 @@ func runClaude(paths app.Paths, args []string) error {
 	l.PrintSummary()
 	updHandle := startBackgroundUpdateCheck(l.ctx, l.pre.Egress, paths.StateDir, versionString(), launch.NoUpdateCheck, os.Getenv, time.Now)
 	code, err := l.Wait()
+	claudeVersion := l.claudeVersion()
+	if claudeVersion != "" {
+		_ = update.SaveClaudeSeen(paths.StateDir, claudeVersion, time.Now())
+	}
 	l.PrintUnmappedNotice(os.Stderr)
 	// The exit notice prints after Wait and before any return/os.Exit:
 	// the banner covers "the next launch"; this line covers "this run,
 	// whose check just finished". Non-blocking read — it never delays
 	// exit.
 	printUpdateExitNotice(os.Stderr, updHandle, versionString(), ui.IsTerminal(os.Stderr))
+	printClaudeUpdateNotice(os.Stderr, paths.StateDir, claudeVersion, launch.NoUpdateCheck, os.Getenv, ui.IsTerminal(os.Stderr))
 	if err != nil {
 		return err
 	}

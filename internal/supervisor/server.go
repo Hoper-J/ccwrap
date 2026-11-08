@@ -1137,6 +1137,9 @@ func (s *Supervisor) recordRequest(id string, record model.RequestRecord) {
 	if conversation := record.RequestHeaders.Get(ui.ClaudeSessionHeader); conversation != "" {
 		sess.public.ClaudeSessionID = conversation
 	}
+	if v := ui.ClaudeVersionFromUserAgent(record.RequestHeaders.Get("User-Agent")); v != "" {
+		sess.public.ClaudeVersion = v
+	}
 	if failed {
 		sess.failedRequests++
 	}

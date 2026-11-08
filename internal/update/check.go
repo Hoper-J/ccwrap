@@ -24,6 +24,11 @@ import (
 // tag), so either source is authoritative.
 const DefaultCheckURL = "https://registry.npmjs.org/ccwrap-cli/latest"
 
+// DefaultClaudeCheckURL is the same endpoint for Claude Code, checked along
+// with ccwrap: sessions do not let Claude Code update itself, so ccwrap
+// says when a newer one is out.
+const DefaultClaudeCheckURL = "https://registry.npmjs.org/@anthropic-ai/claude-code/latest"
+
 // CheckTimeout caps one version check end-to-end — same budget as the
 // egress probe.
 const CheckTimeout = 5 * time.Second
@@ -48,6 +53,21 @@ func CheckURL(getenv func(string) string) string {
 		return v
 	}
 	return DefaultCheckURL
+}
+
+// ClaudeCheckURL is where Claude Code's latest version is read: the same
+// registry as CheckURL. A CCWRAP_UPDATE_CHECK_URL override serves Claude
+// Code's too only when it is a registry's ccwrap-cli/latest; for any other
+// endpoint the result is "" and the Claude Code check is skipped.
+func ClaudeCheckURL(getenv func(string) string) string {
+	v := strings.TrimSpace(getenv("CCWRAP_UPDATE_CHECK_URL"))
+	if v == "" {
+		return DefaultClaudeCheckURL
+	}
+	if base, ok := strings.CutSuffix(v, "/ccwrap-cli/latest"); ok {
+		return base + "/@anthropic-ai/claude-code/latest"
+	}
+	return ""
 }
 
 // NewClient builds an HTTP client that dials through the resolved

@@ -325,6 +325,21 @@ func (l *sessionLauncher) WriteSessionSettings() error {
 	return nil
 }
 
+// claudeVersion is the Claude Code version the session's requests named, or
+// "" (no request yet, or no supervisor to ask).
+func (l *sessionLauncher) claudeVersion() string {
+	if l.client == nil || l.sessionID == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	sess, err := l.client.GetSession(ctx, l.sessionID)
+	if err != nil || sess == nil {
+		return ""
+	}
+	return sess.ClaudeVersion
+}
+
 // sessionIDEnv names the ccwrap session a process runs under.
 const sessionIDEnv = "CCWRAP_SESSION_ID"
 

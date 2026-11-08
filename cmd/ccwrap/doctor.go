@@ -130,6 +130,7 @@ func (d *doctorChecks) runtimeChecks(paths app.Paths) {
 		d.add("session_listener", "pass", "session proxy port can bind", "")
 	}
 	addLocalAccessCheck(d.add, os.Getenv, localpeer.SelfTest)
+	addClaudeUpdateCheck(d.add, paths.StateDir)
 	// Update awareness: cache-only read — doctor never hits the network
 	// for this row; `ccwrap version --check` / `ccwrap upgrade` are the
 	// explicit network probes.

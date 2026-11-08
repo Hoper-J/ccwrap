@@ -310,7 +310,7 @@ func TestDoctorGroupForCheck(t *testing.T) {
 		"settings_policy_network_env", "api_key_helper", "dangerous_shell_settings",
 		"ccwrap_internal_keys_in_settings", "custom_headers_auth", "claude_settings_route", "flag_settings",
 		"settings_inspection", "launch_contract", "discovery", "session",
-		"update",
+		"update", "claude_updates",
 	}
 	for _, n := range all {
 		if _, ok := doctorGroupExplicit[n]; !ok {

@@ -28,6 +28,8 @@ type Cache struct {
 	Schema    int       `json:"schema"`
 	CheckedAt time.Time `json:"checked_at"`
 	Latest    string    `json:"latest"`
+	// ClaudeLatest is Claude Code's latest version, when it could be read.
+	ClaudeLatest string `json:"claude_latest,omitempty"`
 }
 
 func cachePath(stateDir string) string { return filepath.Join(stateDir, CacheFile) }
