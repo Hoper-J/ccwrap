@@ -14,14 +14,11 @@ type Palette struct {
 
 func New(enabled bool) Palette { return Palette{Enabled: enabled} }
 
-// IsTerminal reports whether f is a terminal (TERM set and not "dumb").
-// It asks the terminal driver: /dev/null is a character device too.
+// IsTerminal reports whether f is a terminal ccwrap can prompt on or style
+// (see terminalReady). It asks the terminal driver: /dev/null is a character
+// device too.
 func IsTerminal(f *os.File) bool {
-	if f == nil || !term.IsTerminal(int(f.Fd())) {
-		return false
-	}
-	t := strings.ToLower(strings.TrimSpace(os.Getenv("TERM")))
-	return t != "" && t != "dumb"
+	return f != nil && term.IsTerminal(int(f.Fd())) && terminalReady(f)
 }
 
 func (p Palette) wrap(code, s string) string {

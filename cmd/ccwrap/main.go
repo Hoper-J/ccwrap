@@ -23,10 +23,14 @@ import (
 )
 
 func main() {
+	// A Windows console takes ccwrap's colors and cursor movement only with
+	// virtual terminal processing on; its mode is put back on the way out.
+	restoreConsole := ui.EnableVT(os.Stdout, os.Stderr)
 	code, msg := exitFor(realMain())
 	if msg != "" {
 		fmt.Fprintf(os.Stderr, "ccwrap: %s\n", msg)
 	}
+	restoreConsole()
 	os.Exit(code)
 }
 

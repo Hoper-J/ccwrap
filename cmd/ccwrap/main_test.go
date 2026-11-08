@@ -1944,6 +1944,8 @@ func TestIsChinaTimezone(t *testing.T) {
 		{"urumqi name", "Asia/Urumqi", 21600, true}, // name wins over offset
 		{"los angeles name", "America/Los_Angeles", -28800, false},
 		{"tokyo +9 name", "Asia/Tokyo", 32400, false},
+		{"windows china id", "China Standard Time", 28800, true},
+		{"windows singapore id", "Singapore Standard Time", 28800, false}, // +8h, named, not China
 		{"offset +8 fallback (no name)", "", 28800, true},
 		{"offset +9 no name", "", 32400, false},
 		{"empty", "", 0, false},

@@ -30,18 +30,20 @@ const defaultInjectTimezone = "America/Los_Angeles"
 // on it (the sentinel is mapped to "no injection" before validation).
 const timezoneSkipSentinel = "none"
 
-// chinaZoneNames are the IANA zone names that resolve to China Standard Time.
+// chinaZoneNames are the zone names that resolve to China Standard Time: the
+// IANA names, and Windows's ID for it.
 var chinaZoneNames = map[string]bool{
-	"Asia/Shanghai":  true,
-	"Asia/Urumqi":    true,
-	"Asia/Chongqing": true,
-	"Asia/Harbin":    true,
-	"Asia/Kashgar":   true,
+	"Asia/Shanghai":       true,
+	"Asia/Urumqi":         true,
+	"Asia/Chongqing":      true,
+	"Asia/Harbin":         true,
+	"Asia/Kashgar":        true,
+	"China Standard Time": true,
 }
 
 // isChinaTimezone reports whether the local zone looks like China. It gates ONLY
-// the first-run prompt, so a loose heuristic is fine: a known China IANA name
-// (from the TZ env or the /etc/localtime symlink target) matches directly;
+// the first-run prompt, so a loose heuristic is fine: a known China zone name
+// (from the TZ env or the system, see systemZoneName) matches directly;
 // otherwise a current local UTC offset of exactly +8h (28800s) is a weak signal.
 // An empty name with a non-+8h offset is not China.
 func isChinaTimezone(zoneName string, offsetSeconds int) bool {
@@ -51,31 +53,16 @@ func isChinaTimezone(zoneName string, offsetSeconds int) bool {
 	return offsetSeconds == 28800
 }
 
-// detectLocalTimezone returns the local zone name (TZ env, else the IANA name
-// parsed from the /etc/localtime symlink target) and the current local UTC
-// offset in seconds (used only for the weak +8h fallback in isChinaTimezone).
+// detectLocalTimezone returns the local zone name (TZ env, else the system's
+// name for it, see systemZoneName) and the current local UTC offset in seconds
+// (used only for the weak +8h fallback in isChinaTimezone).
 func detectLocalTimezone(parentEnv []string) (string, int) {
 	name := strings.TrimSpace(lookupEnv(parentEnv, "TZ"))
 	if name == "" {
-		name = zoneNameFromLocaltimeLink()
+		name = systemZoneName()
 	}
 	_, offset := time.Now().Zone()
 	return name, offset
-}
-
-// zoneNameFromLocaltimeLink reads /etc/localtime and, if it is a symlink into a
-// zoneinfo tree ("/usr/share/zoneinfo/Asia/Shanghai"), returns the IANA suffix
-// ("Asia/Shanghai"). Returns "" when /etc/localtime is not a zoneinfo symlink.
-func zoneNameFromLocaltimeLink() string {
-	target, err := os.Readlink("/etc/localtime")
-	if err != nil {
-		return ""
-	}
-	const marker = "/zoneinfo/"
-	if idx := strings.LastIndex(target, marker); idx >= 0 {
-		return target[idx+len(marker):]
-	}
-	return ""
 }
 
 // timezonePersistPath is the small per-user file that records the first-run
