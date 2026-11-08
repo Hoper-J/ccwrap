@@ -235,7 +235,7 @@ func (s *Server) handleLaunch(w http.ResponseWriter, r *http.Request) {
 	}
 	term, ok := termlaunch.Choose(installedTerminals(), s.opts.Paths.StateDir, claudeDeepLinkTerminal())
 	if !ok {
-		writeAPIError(w, http.StatusConflict, "no_terminal", "no supported terminal app found (Terminal, iTerm, Ghostty on macOS)")
+		writeAPIError(w, http.StatusConflict, "no_terminal", "no supported terminal app found (macOS: Terminal, iTerm, Ghostty; Windows: Windows Terminal; Linux: a common terminal on PATH, with a graphical session)")
 		return
 	}
 	s.launchMu.Lock()

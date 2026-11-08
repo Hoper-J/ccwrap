@@ -233,7 +233,7 @@ On the Projects page each folder offers Continue (the latest conversation there)
 
 ![image-20261030111515843](assets/image-20261030111515843.png)
 
-Over SSH or without a graphical session, `ccwrap open` opens no browser: it prints the link and an `ssh -L <port>:127.0.0.1:<port> <this host>` command to run on your own machine. To keep that command valid, pin the port with `CCWRAP_UI_PORT`. Starting a session in a terminal from the Projects page works on macOS only for now (Terminal, iTerm, Ghostty).
+Over SSH or without a graphical session, `ccwrap open` opens no browser: it prints the link and an `ssh -L <port>:127.0.0.1:<port> <this host>` command to run on your own machine. To keep that command valid, pin the port with `CCWRAP_UI_PORT`. Starting a session in a terminal from the Projects page works on macOS (Terminal, iTerm, Ghostty), Windows (Windows Terminal) and Linux (the common terminals, in a graphical session).
 
 ## Launch flags
 

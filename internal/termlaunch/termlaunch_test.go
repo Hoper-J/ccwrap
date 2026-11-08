@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -170,7 +171,7 @@ func TestLaunchCommands(t *testing.T) {
 	} {
 		var term Terminal
 		for _, x := range terminals {
-			if x.ID == tc.id {
+			if x.ID == tc.id && x.bundle != "" {
 				term = x
 			}
 		}
@@ -178,7 +179,7 @@ func TestLaunchCommands(t *testing.T) {
 		err := launch(Installation{Terminal: term, AppPath: "/Apps/" + term.bundle}, Request{Dir: dir, Exe: "/bin/true"}, scripts, func(name string, args ...string) error {
 			got = name + " " + strings.Join(args, " ")
 			return nil
-		})
+		}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -197,7 +198,7 @@ func TestLaunchCommands(t *testing.T) {
 			_ = os.Remove(m)
 		}
 	}
-	if err := launch(Installation{Terminal: terminals[0]}, Request{Dir: "relative", Exe: "/bin/true"}, scripts, func(string, ...string) error { return nil }); err == nil {
+	if err := launch(Installation{Terminal: terminals[0]}, Request{Dir: "relative", Exe: "/bin/true"}, scripts, func(string, ...string) error { return nil }, nil); err == nil {
 		t.Fatal("a bad folder is refused before anything runs")
 	}
 }
@@ -221,7 +222,7 @@ func TestLaunchSweepsStaleScripts(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := launch(Installation{Terminal: terminals[0], AppPath: "/Apps/Terminal.app"}, Request{Dir: t.TempDir(), Exe: "/bin/true"}, scripts, func(string, ...string) error { return nil }); err != nil {
+	if err := launch(Installation{Terminal: terminals[0], AppPath: "/Apps/Terminal.app"}, Request{Dir: t.TempDir(), Exe: "/bin/true"}, scripts, func(string, ...string) error { return nil }, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(old); !os.IsNotExist(err) {
@@ -282,7 +283,7 @@ func TestWindowsTerminalCommandLine(t *testing.T) {
 	err := launch(Installation{Terminal: term, AppPath: `C:\wt.exe`}, Request{Dir: dir, Exe: `C:\ccwrap.exe`, Args: []string{"--continue"}}, t.TempDir(), func(name string, args ...string) error {
 		got = append([]string{name}, args...)
 		return nil
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,5 +292,148 @@ func TestWindowsTerminalCommandLine(t *testing.T) {
 	}
 	if script := decodePowerShell(t, got[6]); !strings.Contains(script, "& 'C:\\ccwrap.exe' '--continue'") {
 		t.Fatalf("script %q", script)
+	}
+}
+
+// linuxEntry is the Linux terminal with id.
+func linuxEntry(t *testing.T, id string) Terminal {
+	t.Helper()
+	for _, x := range terminals {
+		if x.ID == id && x.goos == "linux" {
+			return x
+		}
+	}
+	t.Fatalf("no Linux terminal %q", id)
+	return Terminal{}
+}
+
+// A Linux terminal is started, not waited for, on the fixed script with the
+// folder, the program and its arguments after it, each its own argument.
+func TestLinuxTerminalArguments(t *testing.T) {
+	dir := t.TempDir()
+	req := Request{Dir: dir, Exe: "/usr/bin/ccwrap", Args: []string{"--profile", "it's mine"}}
+	for _, tc := range []struct{ id, flags string }{
+		{"x-terminal-emulator", "-e"},
+		{"ghostty", "-e"},
+		{"kitty", ""},
+		{"alacritty", "-e"},
+		{"wezterm", "start --"},
+		{"gnome-terminal", "--"},
+		{"konsole", "-e"},
+		{"xfce4-terminal", "-x"},
+		{"mate-terminal", "-x"},
+		{"tilix", "-e"},
+		{"foot", ""},
+		{"xterm", "-e"},
+	} {
+		var got []string
+		ran := func(string, ...string) error { t.Errorf("%s: waited for the terminal", tc.id); return nil }
+		start := func(name string, args ...string) error { got = append([]string{name}, args...); return nil }
+		if err := launch(Installation{Terminal: linuxEntry(t, tc.id), AppPath: "/usr/bin/" + tc.id}, req, t.TempDir(), ran, start); err != nil {
+			t.Fatalf("%s: %v", tc.id, err)
+		}
+		want := append([]string{"/usr/bin/" + tc.id}, strings.Fields(tc.flags)...)
+		want = append(want, "/bin/sh", "-c", linuxShell, "sh", dir, "/usr/bin/ccwrap", "--profile", "it's mine")
+		if !slices.Equal(got, want) {
+			t.Errorf("%s:\n got %q\nwant %q", tc.id, got, want)
+		}
+	}
+}
+
+// The script runs the command in the folder with every argument intact, and
+// on failure waits for Enter, keeping the exit status.
+func TestLinuxShellRunsArgumentsVerbatim(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs /bin/sh")
+	}
+	dir := t.TempDir()
+	args := []string{"it's", "a b", "$HOME", "*", `"; rm -rf /"`}
+	out, err := exec.Command("/bin/sh", append([]string{"-c", linuxShell, "sh", dir, "/bin/sh", "-c", `pwd -P; for a; do printf '[%s]\n' "$a"; done`, "x"}, args...)...).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	real, _ := filepath.EvalSymlinks(dir)
+	want := real + "\n"
+	for _, a := range args {
+		want += "[" + a + "]\n"
+	}
+	if string(out) != want {
+		t.Fatalf("got %q\nwant %q", out, want)
+	}
+	cmd := exec.Command("/bin/sh", "-c", linuxShell, "sh", dir, "/bin/sh", "-c", "exit 3")
+	cmd.Stdin = strings.NewReader("\n")
+	out, err = cmd.Output()
+	if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != 3 || !strings.Contains(string(out), "[exit status 3; press Enter to close]") {
+		t.Fatalf("failure: %v, %q", err, out)
+	}
+}
+
+// Terminals are looked for on their own system only, and Linux ones only
+// with a graphical session.
+func TestPathExe(t *testing.T) {
+	for _, x := range terminals {
+		if x.goos != "" && x.goos != runtime.GOOS && pathExe(x) != "" {
+			t.Errorf("%s (%s) found on %s", x.ID, x.goos, runtime.GOOS)
+		}
+	}
+	if runtime.GOOS == "linux" {
+		t.Setenv("DISPLAY", "")
+		t.Setenv("WAYLAND_DISPLAY", "")
+		if p := pathExe(linuxEntry(t, "xterm")); p != "" {
+			t.Errorf("found %s without a graphical session", p)
+		}
+	}
+	got := find(nil, nil, func(x Terminal) string {
+		if x.goos == "linux" && (x.ID == "kitty" || x.ID == "xterm") {
+			return "/usr/bin/" + x.ID
+		}
+		return ""
+	})
+	if len(got) != 2 || got[0].ID != "kitty" || got[1].ID != "xterm" || got[1].AppPath != "/usr/bin/xterm" {
+		t.Fatalf("installed = %+v", got)
+	}
+}
+
+// On Linux, $TERMINAL comes after the saved and Claude Code choices, then
+// the system default, then the first installed.
+func TestChooseOnLinux(t *testing.T) {
+	installed := []Installation{
+		{Terminal: linuxEntry(t, "x-terminal-emulator")},
+		{Terminal: linuxEntry(t, "kitty")},
+		{Terminal: linuxEntry(t, "konsole")},
+	}
+	state := t.TempDir()
+	t.Setenv("TERMINAL", "")
+	if in, _ := Choose(installed, state, ""); in.ID != "x-terminal-emulator" {
+		t.Fatalf("default = %s", in.ID)
+	}
+	t.Setenv("TERMINAL", "/usr/bin/konsole")
+	if in, _ := Choose(installed, state, ""); in.ID != "konsole" {
+		t.Fatalf("$TERMINAL = %s", in.ID)
+	}
+	if in, _ := Choose(installed, state, "kitty"); in.ID != "kitty" {
+		t.Fatalf("Claude Code's choice = %s", in.ID)
+	}
+	if in, _ := Choose(installed[1:], state, "alacritty"); in.ID != "konsole" {
+		t.Fatalf("uninstalled choices fall through to $TERMINAL: %s", in.ID)
+	}
+}
+
+// startDetached returns while the terminal still runs, and reports one that
+// fails at once with what it printed.
+func TestStartDetached(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs /bin/sh")
+	}
+	began := time.Now()
+	if err := startDetached("/bin/sh", "-c", "sleep 3"); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(began); took > startCheck+time.Second {
+		t.Fatalf("waited %s for a terminal that still runs", took)
+	}
+	err := startDetached("/bin/sh", "-c", "echo no display >&2; exit 2")
+	if err == nil || !strings.Contains(err.Error(), "no display") {
+		t.Fatalf("err = %v", err)
 	}
 }

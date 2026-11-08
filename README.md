@@ -233,7 +233,7 @@ Projects 页里，每个文件夹可以 Continue（接着这里最近的一次�
 
 ![image-20261030111515843](assets/image-20261030111515843.png)
 
-在 SSH 里或者没有图形界面时，`ccwrap open` 不开浏览器，而是打印链接和一条 `ssh -L <端口>:127.0.0.1:<端口> <这台机器>` 转发命令，在自己的电脑上执行后就能打开；想让这条命令一直有效，用 `CCWRAP_UI_PORT` 固定端口。Projects 页里在终端中启动会话目前只支持 macOS（Terminal、iTerm、Ghostty）。
+在 SSH 里或者没有图形界面时，`ccwrap open` 不开浏览器，而是打印链接和一条 `ssh -L <端口>:127.0.0.1:<端口> <这台机器>` 转发命令，在自己的电脑上执行后就能打开；想让这条命令一直有效，用 `CCWRAP_UI_PORT` 固定端口。Projects 页里在终端中启动会话支持 macOS（Terminal、iTerm、Ghostty）、Windows（Windows Terminal）和 Linux（常见的终端，需要图形界面）。
 
 ## 启动 flags
 
