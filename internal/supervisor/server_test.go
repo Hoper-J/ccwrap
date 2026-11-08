@@ -90,6 +90,22 @@ func TestSupervisorNewAcceptsNilLaunchContext(t *testing.T) {
 	}
 }
 
+// Shutdown releases the session's log file, so the launcher can remove the
+// session dir afterwards; Windows cannot delete a file that is still open.
+func TestShutdownReleasesTheLogFile(t *testing.T) {
+	paths := testutil.ShortAppPaths(t, "lf.sock")
+	sv, err := New(paths, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sv.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(paths.LogPath); err != nil {
+		t.Fatalf("remove the session log after Shutdown: %v", err)
+	}
+}
+
 func TestSupervisorNewAcceptsLaunchContext(t *testing.T) {
 	paths := testutil.ShortAppPaths(t, "c.sock")
 	lc := &LaunchContext{

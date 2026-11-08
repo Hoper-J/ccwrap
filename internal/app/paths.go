@@ -136,6 +136,11 @@ func defaultRuntimeDir() string {
 	if v := os.Getenv("CCWRAP_RUNTIME_DIR"); v != "" {
 		return v
 	}
+	if runtime.GOOS == "windows" {
+		// %TEMP% is per-user already (Claude Code keeps %TEMP%\claude there),
+		// and a short path keeps session sockets within AF_UNIX's 108 bytes.
+		return filepath.Join(os.TempDir(), "ccwrap")
+	}
 	u := currentUID()
 	switch runtime.GOOS {
 	case "darwin":

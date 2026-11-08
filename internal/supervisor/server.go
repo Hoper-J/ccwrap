@@ -196,6 +196,9 @@ type Supervisor struct {
 
 	transport *http.Transport
 	logger    *log.Logger
+	// logFile is closed by Shutdown: Windows cannot remove the session dir
+	// while it is open.
+	logFile *os.File
 
 	mu           sync.RWMutex
 	session      *sessionState
@@ -261,6 +264,7 @@ func New(paths app.Paths, idleTimeout time.Duration, launchCtx *LaunchContext) (
 		unmaskCredentials: unmask,
 		transport:         transport,
 		logger:            logger,
+		logFile:           logFile,
 		profileStore:      profileapi.NewStore(paths.StateDir),
 		subscribers:       map[int]chan model.Event{},
 		lastActive:        time.Now(),
@@ -363,6 +367,9 @@ func (s *Supervisor) Shutdown(ctx context.Context) error {
 			_ = s.listener.Close()
 		}
 		_ = os.Remove(s.paths.SocketPath)
+		if s.logFile != nil {
+			_ = s.logFile.Close()
+		}
 	})
 	return err
 }

@@ -3,6 +3,8 @@ package app
 import (
 	"errors"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/windows"
@@ -94,5 +96,19 @@ func symlink(t *testing.T, oldname, newname string) {
 			t.Skipf("creating a symlink needs Developer Mode or an elevated prompt: %v", err)
 		}
 		t.Fatal(err)
+	}
+}
+
+// A session's control socket, the longest path in the runtime dir, has to
+// fit in sockaddr_un.
+func TestDefaultRuntimeDirIsShortAndPerUser(t *testing.T) {
+	t.Setenv("CCWRAP_RUNTIME_DIR", "")
+	dir := defaultRuntimeDir()
+	if want := filepath.Join(os.TempDir(), "ccwrap"); dir != want {
+		t.Fatalf("defaultRuntimeDir() = %q, want %q", dir, want)
+	}
+	sock := Paths{RuntimeDir: dir}.SessionPaths(strings.Repeat("f", 16)).SocketPath
+	if len(sock) >= 108 {
+		t.Fatalf("session socket path %q is %d bytes, too long for AF_UNIX", sock, len(sock))
 	}
 }
