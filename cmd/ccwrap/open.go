@@ -224,6 +224,10 @@ func openInBrowser(link string, getenv func(string) string, goos string, run fun
 			return false, nil
 		}
 		return true, run("xdg-open", link)
+	case "windows":
+		// The URL protocol handler starts the default browser without a
+		// shell parsing the link, as `cmd /c start` would.
+		return true, run("rundll32", "url.dll,FileProtocolHandler", link)
 	}
 	return false, nil
 }

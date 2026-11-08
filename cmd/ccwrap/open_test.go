@@ -90,6 +90,8 @@ func TestOpenInBrowserChoosesOpener(t *testing.T) {
 		{"darwin", map[string]string{"SSH_CONNECTION": "1 2 3 4"}, false, ""},
 		{"linux", nil, false, ""},
 		{"linux", map[string]string{"DISPLAY": ":0"}, true, "xdg-open " + link},
+		{"windows", nil, true, "rundll32 url.dll,FileProtocolHandler " + link},
+		{"windows", map[string]string{"SSH_CONNECTION": "1 2 3 4"}, false, ""},
 	}
 	for _, tc := range cases {
 		ran = nil
