@@ -23,6 +23,9 @@ npm install -g ccwrap-cli
 # or: install script (downloads the prebuilt binary)
 curl -fsSL https://raw.githubusercontent.com/Hoper-J/ccwrap/main/install.sh | sh
 
+# the install script on Windows (PowerShell)
+irm https://raw.githubusercontent.com/Hoper-J/ccwrap/main/install.ps1 | iex
+
 # or: install with Go
 go install github.com/Hoper-J/ccwrap/cmd/ccwrap@latest
 ```
@@ -40,9 +43,20 @@ ccwrap upgrade          # channel-aware: npm installs upgrade via npm; release b
 ccwrap version --check  # check only, install nothing
 ```
 
-New releases are also surfaced in the launch banner and on session exit (checked at most once daily; disable with `CCWRAP_NO_UPDATE_CHECK=1`). Manual equivalents: `npm i -g ccwrap-cli@latest`, re-run install.sh, or `go install github.com/Hoper-J/ccwrap/cmd/ccwrap@latest`.
+New releases are also surfaced in the launch banner and on session exit (checked at most once daily; disable with `CCWRAP_NO_UPDATE_CHECK=1`). Manual equivalents: `npm i -g ccwrap-cli@latest`, re-run install.sh (install.ps1 on Windows), or `go install github.com/Hoper-J/ccwrap/cmd/ccwrap@latest`.
 
 `ccwrap update` is an alias for `ccwrap upgrade` and upgrades ccwrap itself; to update Claude Code, run `claude update` directly (or `ccwrap -- update` to route it through the ccwrap session environment).
+
+### Windows
+
+Windows 10 / 11 (x64, ARM64) is supported, through npm or install.ps1. install.ps1 puts `ccwrap.exe` in `%USERPROFILE%\.local\bin`, the folder where Claude Code's native installer puts `claude.exe`, and adds it to your user PATH when needed; `CCWRAP_BINDIR` picks another folder, `CCWRAP_NO_MODIFY_PATH=1` leaves PATH alone.
+
+Where Windows differs from macOS / Linux:
+
+- With Claude Code installed through npm, `claude` on PATH is `claude.cmd`. cmd.exe re-parses the arguments a batch file gets, so ccwrap starts the `claude.exe` behind it directly; other `.cmd` / `.bat` files are refused — point `--claude-bin` at `claude.exe`.
+- Each session shows two `ccwrap.exe` processes: the outer one waits, the inner one runs the session in its own console process group. The Ctrl+C that `ccwrap stop` sends reaches that session alone, not the shell or script that started it.
+- State lives in `%USERPROFILE%\.ccwrap\`, runtime files in `%TEMP%\ccwrap\`.
+- Inside WSL, install the Linux build; it works as on Linux.
 
 ## Quick start
 
@@ -260,7 +274,7 @@ Over SSH or without a graphical session, `ccwrap open` opens no browser: it prin
 <details>
 <summary>schema · resolution precedence · CLI · hot-swap · egress self-test</summary>
 
-A profile is a named bundle of config: base URL, auth, model aliases, upstream headers, egress mode. Profiles live in `~/Library/Application Support/ccwrap/profiles.json` on macOS, `~/.config/ccwrap/profiles.json` or `$XDG_STATE_HOME/ccwrap/profiles.json` on Linux.
+A profile is a named bundle of config: base URL, auth, model aliases, upstream headers, egress mode. Profiles live in `~/Library/Application Support/ccwrap/profiles.json` on macOS, `~/.config/ccwrap/profiles.json` or `$XDG_STATE_HOME/ccwrap/profiles.json` on Linux, and `%USERPROFILE%\.ccwrap\profiles.json` on Windows.
 
 ### Schema
 
@@ -520,6 +534,7 @@ Claude and inherited child processes are launched with:
 - a composite CA bundle env (`system roots + ccwrap root`) for Python / curl / Git
 - loopback-only `NO_PROXY`
 - `CCWRAP_SESSION_ID` → this ccwrap session's ID, so commands and hooks run inside Claude Code can find their session
+- `DISABLE_AUTOUPDATER=1` → Claude Code does not update itself during a session (a value you set yourself is kept). An update downloads through the session's proxy, which goes away with the session, and on Windows a cut-short update leaves an install without `claude.exe`. When a newer Claude Code is out, ccwrap says so at session end and in `ccwrap doctor`; run `claude update` outside ccwrap
 - `CLAUDE_CODE_GZIP_REQUEST_BODIES=0` → uncompressed request bodies. Model aliasing, system-block stripping and the request inspector all read them; Claude Code skips gzip behind a proxy anyway, so this only overrides an explicit `=1`
 - a ccwrap-generated `--settings` mirroring the values above into Claude flag settings. It is passed as inline JSON: Claude Code reports the directory of a `--settings` file upstream, and for inline JSON it reports its own temp dir, so no ccwrap path leaves the machine. If you pass your own `--settings` file, the merged result goes into a 0600 file under `/tmp/claude-<uid>/` instead, keeping its contents out of the process list
 
@@ -631,6 +646,7 @@ Default `<runtime>` and `<state>`:
 
 - macOS: state in `~/Library/Application Support/ccwrap/`, runtime in `$TMPDIR/ccwrap-<UID>/` (typically under `/var/folders/...`)
 - Linux: state in `~/.local/state/ccwrap/` (or `$XDG_STATE_HOME/ccwrap/`), runtime in `$XDG_RUNTIME_DIR/ccwrap/`, or `/tmp/ccwrap-<UID>/` without `XDG_RUNTIME_DIR`
+- Windows: state in `%USERPROFILE%\.ccwrap\`, runtime in `%TEMP%\ccwrap\`
 - Override with `CCWRAP_STATE_DIR` / `CCWRAP_RUNTIME_DIR`
 
 The runtime dir must be your own: not a symlink, owned by you, and not writable by other users. Otherwise ccwrap refuses to use it and suggests setting `CCWRAP_RUNTIME_DIR`.

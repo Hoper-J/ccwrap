@@ -30,7 +30,7 @@
 开 issue 时请尽量包含：
 
 - **复现步骤**：从哪条命令开始、期望什么、实际发生了什么
-- **版本信息**：`ccwrap version` 的输出，以及操作系统（macOS / Linux）
+- **版本信息**：`ccwrap version` 的输出，以及操作系统（macOS / Linux / Windows）
 - **路由形态**：走的是一方直连还是第三方网关（**不要**贴 API key 或任何凭据）
 - 相关的终端输出或 ccwrap ui 里的表现
 

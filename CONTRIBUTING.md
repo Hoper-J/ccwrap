@@ -30,7 +30,7 @@ All contributions are welcome — bug reports, documentation improvements, code 
 When opening an issue, please include as much of the following as you can:
 
 - **Steps to reproduce**: the command you started from, what you expected, what actually happened
-- **Version info**: the output of `ccwrap version`, and your OS (macOS / Linux)
+- **Version info**: the output of `ccwrap version`, and your OS (macOS / Linux / Windows)
 - **Routing shape**: first-party passthrough or a third-party gateway (do **not** paste API keys or any credentials)
 - Relevant terminal output or what ccwrap ui shows
 
