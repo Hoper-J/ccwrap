@@ -120,7 +120,7 @@ jobs:
           # ./-prefix the paths: npm reads a bare single-slash arg like `npm/ccwrap`
           # as a github:owner/repo spec, not a local directory (the two-slash
           # platform paths happen to dodge it, but be explicit for both).
-          for d in darwin-arm64 darwin-amd64 linux-arm64 linux-amd64; do
+          for d in darwin-arm64 darwin-amd64 linux-arm64 linux-amd64 windows-arm64 windows-amd64; do
             publish "./npm/platforms/$d"
           done
           publish ./npm/ccwrap-cli

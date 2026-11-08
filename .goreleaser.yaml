@@ -20,6 +20,7 @@ builds:
     goos:
       - darwin
       - linux
+      - windows
     goarch:
       - amd64
       - arm64
@@ -38,6 +39,11 @@ archives:
     # and tolerates their absence, so no explicit `files:` is needed yet.
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    # Windows gets a zip (ccwrap.exe inside): what install.ps1, Explorer and
+    # `ccwrap upgrade` on Windows open without tar.
+    format_overrides:
+      - goos: windows
+        formats: [zip]
 
 checksum:
   name_template: "checksums.txt"

@@ -10,18 +10,19 @@ const path = require("node:path");
 const fs = require("node:fs");
 
 function resolveBinary() {
-  const platform = process.platform; // 'darwin' | 'linux'
+  const osMap = { darwin: "darwin", linux: "linux", win32: "windows" };
   const archMap = { x64: "amd64", arm64: "arm64" };
+  const goos = osMap[process.platform];
   const goarch = archMap[process.arch];
 
-  if ((platform !== "darwin" && platform !== "linux") || !goarch) {
+  if (!goos || !goarch) {
     throw new Error(
-      `ccwrap: unsupported platform ${platform}/${process.arch} ` +
-        "(supported: darwin/linux on x64/arm64)"
+      `ccwrap: unsupported platform ${process.platform}/${process.arch} ` +
+        "(supported: darwin/linux/win32 on x64/arm64)"
     );
   }
 
-  const pkg = `@hoper-j/ccwrap-cli-${platform}-${goarch}`;
+  const pkg = `@hoper-j/ccwrap-cli-${goos}-${goarch}`;
   let pkgJson;
   try {
     pkgJson = require.resolve(`${pkg}/package.json`);
@@ -31,7 +32,7 @@ function resolveBinary() {
         "If you installed with --no-optional or --omit=optional, reinstall without it."
     );
   }
-  const bin = path.join(path.dirname(pkgJson), "bin", "ccwrap");
+  const bin = path.join(path.dirname(pkgJson), "bin", goos === "windows" ? "ccwrap.exe" : "ccwrap");
   if (!fs.existsSync(bin)) {
     throw new Error(`ccwrap: binary missing from ${pkg} (expected ${bin})`);
   }

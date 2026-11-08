@@ -24,6 +24,8 @@
     "@hoper-j/ccwrap-cli-darwin-arm64": "0.0.0",
     "@hoper-j/ccwrap-cli-darwin-amd64": "0.0.0",
     "@hoper-j/ccwrap-cli-linux-arm64": "0.0.0",
-    "@hoper-j/ccwrap-cli-linux-amd64": "0.0.0"
+    "@hoper-j/ccwrap-cli-linux-amd64": "0.0.0",
+    "@hoper-j/ccwrap-cli-windows-amd64": "0.0.0",
+    "@hoper-j/ccwrap-cli-windows-arm64": "0.0.0"
   }
 }
