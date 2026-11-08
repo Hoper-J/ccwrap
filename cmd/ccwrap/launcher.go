@@ -356,6 +356,9 @@ func (l *sessionLauncher) ResolveClaudeBin() error {
 			"or point ccwrap at it with --claude-bin /path/to/claude (or set CLAUDE_BIN=/path/to/claude)",
 			l.launch.ClaudeBin, err)
 	}
+	if bin, err = directClaudeBin(bin); err != nil {
+		return err
+	}
 	l.bin = bin
 	return nil
 }
