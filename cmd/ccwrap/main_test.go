@@ -830,8 +830,14 @@ func TestPrintStatusStructure(t *testing.T) {
 }
 
 func TestStopGCMessagesUseShortID(t *testing.T) {
-	if got := stopMessage("74c5fcaf812ff6d5"); !strings.Contains(got, "74c5fcaf") || strings.Contains(got, "74c5fcaf812ff6d5") {
+	stopped := sessionCandidate{
+		ds:   model.DiscoveredSession{Manifest: model.SessionManifest{SessionID: "74c5fcaf812ff6d5", ProjectDir: "/work/app"}},
+		sess: &model.Session{ID: "74c5fcaf812ff6d5", ProjectDir: "/work/app", ActiveProfileName: "deepseek"},
+	}
+	if got := stopMessage(stopped); !strings.Contains(got, "74c5fcaf") || strings.Contains(got, "74c5fcaf812ff6d5") {
 		t.Fatalf("stop message must use 8-char id, got %q", got)
+	} else if !strings.Contains(got, "app · deepseek") {
+		t.Fatalf("stop message must name the folder and profile, got %q", got)
 	}
 	got := gcRemovedLine([]string{"74c5fcaf812ff6d5", "8a92e018aa11bb22"})
 	if strings.Contains(got, "812ff6d5") || strings.Contains(got, "aa11bb22") {

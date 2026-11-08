@@ -211,7 +211,7 @@ ccwrap open       [--print] [SESSION-ID | PROJECT]
 ccwrap ui         [status | stop]
 ccwrap dashboard  [--session ID] [--view overview|requests|errors|diagnostics]
 ccwrap doctor     [--json] [--verbose] [--session ID] [--profile NAME]
-ccwrap stop       [--session ID | --all]
+ccwrap stop       [--all | SESSION-ID | PROJECT]
 ccwrap gc         [--json]
 ccwrap upgrade    [--egress-proxy auto|direct|URL]
 ccwrap version    [--check] [--egress-proxy auto|direct|URL]
@@ -224,6 +224,8 @@ ccwrap profile    {ls | status | switch <name> | test [name] | test-egress [name
 ```
 
 Without a management subcommand, `ccwrap` launches Claude Code directly. In launch mode it consumes only the flags it recognizes; unknown flags, positional arguments, or `--` are passed to Claude verbatim.
+
+To name a session, the first characters of its ID are enough (the 8-character ID `ccwrap status` shows will do), with `--session` too. `ccwrap open` and `ccwrap stop` also take a project folder name. With neither, they pick the session they run in (say, a command Claude Code runs), else the one whose project holds the current directory, else the only one running.
 
 `ccwrap ui` is one local web app per user: look at sessions, manage profiles, and start sessions by project there. A launch starts it in the background (`CCWRAP_NO_UI=1` turns that off; it also stays off when stderr is not a terminal), and it exits on its own after 10 minutes with no page open and no session running. `ccwrap open` starts it when needed and opens the session you are in, or the Projects page when no session is running.
 

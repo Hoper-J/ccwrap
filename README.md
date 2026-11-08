@@ -211,7 +211,7 @@ ccwrap open       [--print] [SESSION-ID | PROJECT]
 ccwrap ui         [status | stop]
 ccwrap dashboard  [--session ID] [--view overview|requests|errors|diagnostics]
 ccwrap doctor     [--json] [--verbose] [--session ID] [--profile NAME]
-ccwrap stop       [--session ID | --all]
+ccwrap stop       [--all | SESSION-ID | PROJECT]
 ccwrap gc         [--json]
 ccwrap upgrade    [--egress-proxy auto|direct|URL]
 ccwrap version    [--check] [--egress-proxy auto|direct|URL]
@@ -224,6 +224,8 @@ ccwrap profile    {ls | status | switch <name> | test [name] | test-egress [name
 ```
 
 不带管理子命令时，`ccwrap` 会直接启动 Claude Code。在启动模式下，ccwrap 只消费它认识的flag，不认识的 flag、位置参数或 `--` 会原封不动传给 Claude。
+
+要指定会话时，写会话 ID 的前几位就行（`ccwrap status` 显示的 8 位短 ID 足够），`--session` 也一样。`ccwrap open` 和 `ccwrap stop` 还可以写项目文件夹名。都不写时，在会话里运行（比如 Claude Code 执行的命令）就选这个会话，否则选当前目录所在项目的会话；只有一个会话在运行时就选它。
 
 `ccwrap ui` 是每个用户一个的本地网页，看会话、管理 profile、按项目启动会话都在这里。启动会话时它会在后台自动拉起（`CCWRAP_NO_UI=1` 关闭；stderr 不是终端时也不拉起）；没有页面开着、也没有会话在跑时，10 分钟后自己退出。`ccwrap open` 会在需要时启动它，然后在浏览器里打开当前所在的会话，没有会话时打开 Projects 页。
 

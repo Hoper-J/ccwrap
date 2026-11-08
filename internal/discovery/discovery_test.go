@@ -200,3 +200,32 @@ func TestScanRefusesRuntimeDirOthersCanWrite(t *testing.T) {
 		t.Fatalf("Scan() error = %v, want a refusal", err)
 	}
 }
+
+// Match takes a session's full ID or a prefix of exactly one session's ID,
+// so the 8-character IDs ccwrap prints can name a session.
+func TestMatch(t *testing.T) {
+	var sessions []model.DiscoveredSession
+	for _, id := range []string{"46613c6d8343c8ec", "4661aaaa00000000", "c24c23b73cf888f9", "beef", "beef0001"} {
+		sessions = append(sessions, model.DiscoveredSession{Manifest: model.SessionManifest{SessionID: id}})
+	}
+	for _, tc := range []struct{ id, want string }{
+		{"46613c6d8343c8ec", "46613c6d8343c8ec"},
+		{"46613c6d", "46613c6d8343c8ec"},
+		{"c", "c24c23b73cf888f9"},
+		{"beef", "beef"}, // a full ID wins over the IDs it begins
+		{"4661", `!"4661" matches several sessions (46613c6d8343c8ec, 4661aaaa00000000)`},
+		{"zz", "!session zz not found"},
+		{"", "!no session ID given"},
+	} {
+		got, err := Match(sessions, tc.id)
+		if want, ok := strings.CutPrefix(tc.want, "!"); ok {
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("Match(%q) = %v, %v; want error %q", tc.id, got, err, want)
+			}
+			continue
+		}
+		if err != nil || got.Manifest.SessionID != tc.want {
+			t.Errorf("Match(%q) = %v, %v; want %s", tc.id, got, err, tc.want)
+		}
+	}
+}

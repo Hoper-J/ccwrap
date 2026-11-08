@@ -6,20 +6,13 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
-	"sort"
-	"strings"
 	"time"
 
 	"github.com/Hoper-J/ccwrap/internal/app"
 	"github.com/Hoper-J/ccwrap/internal/discovery"
-	"github.com/Hoper-J/ccwrap/internal/model"
-	"github.com/Hoper-J/ccwrap/internal/projects"
-	"github.com/Hoper-J/ccwrap/internal/ui"
 )
 
 // openCommand opens a session in ccwrap ui, starting the app if needed —
@@ -41,22 +34,14 @@ func openCommand(paths app.Paths, args []string) error {
 	if err != nil {
 		return err
 	}
-	var live []openCandidate
-	for _, ds := range discovered {
-		if ds.Stale || !ds.Reachable {
-			continue
-		}
-		c := openCandidate{ds: ds}
-		if sess, err := fetchSnapshot(ds); err == nil {
-			c.sess = sess
-		}
-		live = append(live, c)
-	}
 	cwd, _ := os.Getwd()
-	picked, pickErr := pickOpenSession(live, fs.Arg(0), os.Getenv, cwd)
+	picked, pickErr := pickSession(liveCandidates(discovered, fetchSnapshot), fs.Arg(0), os.Getenv, cwd, "open")
 	// No session at all is not an error when the app is there: it opens on
 	// Projects, where sessions start.
-	noSession := pickErr != nil && len(live) == 0 && fs.Arg(0) == ""
+	noSession := errors.Is(pickErr, errNoSession)
+	if noSession && fs.Arg(0) != "" {
+		return fmt.Errorf("%w; start one with `ccwrap`", pickErr)
+	}
 	if pickErr != nil && !noSession {
 		return pickErr
 	}
@@ -77,131 +62,6 @@ func openCommand(paths app.Paths, args []string) error {
 		printNoBrowserHint(os.Stdout, info.HTTPAddr)
 	}
 	return nil
-}
-
-type openCandidate struct {
-	ds   model.DiscoveredSession
-	sess *model.Session // live snapshot; nil when the control socket did not answer
-}
-
-func (c openCandidate) projectDir() string {
-	if c.sess != nil && c.sess.ProjectDir != "" {
-		return c.sess.ProjectDir
-	}
-	return c.ds.Manifest.ProjectDir
-}
-
-// label is how a session reads in ccwrap open's output: folder · profile.
-func (c openCandidate) label() string {
-	parts := []string{ui.DisplayDir(c.projectDir())}
-	if parts[0] == "" {
-		parts[0] = ui.ShortID(c.ds.Manifest.SessionID)
-	}
-	if c.sess != nil && c.sess.ActiveProfileName != "" {
-		parts = append(parts, c.sess.ActiveProfileName)
-	}
-	return strings.Join(parts, " · ")
-}
-
-// pickOpenSession chooses the session to open:
-//  1. the argument: a session ID prefix or a project folder name;
-//  2. the session this process runs in (CCWRAP_SESSION_ID, else the port in
-//     HTTPS_PROXY);
-//  3. the session whose project folder holds cwd (the deepest one);
-//  4. the only running session.
-//
-// With several left it returns an error listing them.
-func pickOpenSession(live []openCandidate, arg string, getenv func(string) string, cwd string) (openCandidate, error) {
-	if len(live) == 0 {
-		return openCandidate{}, errors.New("no running ccwrap session; start one with `ccwrap`")
-	}
-	if arg != "" {
-		var hits []openCandidate
-		for _, c := range live {
-			if strings.HasPrefix(c.ds.Manifest.SessionID, arg) || (c.projectDir() != "" && filepath.Base(c.projectDir()) == arg) {
-				hits = append(hits, c)
-			}
-		}
-		switch len(hits) {
-		case 0:
-			return openCandidate{}, fmt.Errorf("no running session matches %q\n%s", arg, listOpenCandidates(live))
-		case 1:
-			return hits[0], nil
-		default:
-			return openCandidate{}, fmt.Errorf("%q matches several sessions; use a longer session ID\n%s", arg, listOpenCandidates(hits))
-		}
-	}
-	if id := getenv(sessionIDEnv); id != "" {
-		for _, c := range live {
-			if c.ds.Manifest.SessionID == id {
-				return c, nil
-			}
-		}
-	}
-	if port := proxyPort(getenv("HTTPS_PROXY")); port != "" {
-		for _, c := range live {
-			if _, p, err := net.SplitHostPort(c.ds.Manifest.ProxyListenAddr); err == nil && p == port {
-				return c, nil
-			}
-		}
-	}
-	if best, ok := deepestProjectFor(live, cwd); ok {
-		return best, nil
-	}
-	if len(live) == 1 {
-		return live[0], nil
-	}
-	return openCandidate{}, fmt.Errorf("several sessions are running; pick one with `ccwrap open <session-id or project>`\n%s", listOpenCandidates(live))
-}
-
-func proxyPort(proxy string) string {
-	u, err := url.Parse(strings.TrimSpace(proxy))
-	if err != nil || u.Host == "" {
-		return ""
-	}
-	if host, _, _ := net.SplitHostPort(u.Host); host != "127.0.0.1" && host != "localhost" && host != "::1" {
-		return ""
-	}
-	return u.Port()
-}
-
-// deepestProjectFor is the session whose project folder is cwd or its
-// closest ancestor. Symlinks are resolved on both sides (macOS /tmp is
-// /private/tmp).
-func deepestProjectFor(live []openCandidate, cwd string) (openCandidate, bool) {
-	if cwd == "" {
-		return openCandidate{}, false
-	}
-	here := projects.Canonical(cwd)
-	var best openCandidate
-	bestLen := -1
-	for _, c := range live {
-		dir := c.projectDir()
-		if dir == "" {
-			continue
-		}
-		dir = projects.Canonical(dir)
-		if here == dir || strings.HasPrefix(here, dir+string(filepath.Separator)) {
-			if len(dir) > bestLen {
-				best, bestLen = c, len(dir)
-			}
-		}
-	}
-	return best, bestLen >= 0
-}
-
-func listOpenCandidates(cs []openCandidate) string {
-	sorted := append([]openCandidate(nil), cs...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ds.Manifest.CreatedAt.Before(sorted[j].ds.Manifest.CreatedAt) })
-	var b strings.Builder
-	for _, c := range sorted {
-		age := ""
-		if up := ui.Uptime(c.ds.Manifest.CreatedAt); up != "" {
-			age = " · up " + up
-		}
-		fmt.Fprintf(&b, "  %s  %s%s\n", ui.ShortID(c.ds.Manifest.SessionID), c.label(), age)
-	}
-	return strings.TrimRight(b.String(), "\n")
 }
 
 // startCommand runs a browser opener; a seam for tests.

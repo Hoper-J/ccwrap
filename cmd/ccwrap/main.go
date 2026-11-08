@@ -175,7 +175,7 @@ Management commands:
   ccwrap ui         [status | stop]                   (the per-user app; a launch starts it unless CCWRAP_NO_UI=1, CCWRAP_UI_PORT fixes its port)
   ccwrap dashboard  [--session ID] [--view overview|requests|errors|diagnostics]
   ccwrap doctor     [--json] [--verbose] [--session ID] [--profile NAME]
-  ccwrap stop       [--session ID | --all]
+  ccwrap stop       [--all | SESSION-ID | PROJECT]    (picks the session the way open does; --all stops every session)
   ccwrap gc         [--json]
   ccwrap capture    [--with-tls|--tls-only] [--main-inference] [--no-response]
                     [--headers] [--full] [--unmask] [--host H] [--path P]
@@ -186,6 +186,9 @@ Management commands:
   ccwrap profile    {ls | status | switch <name> | test [name] | test-egress [name] |
                      add <name> | edit <name> | rm <name> | set-default <name>}
                     [--session ID]
+
+SESSION-ID and --session ID also take the first characters of an ID, such as the
+8 that ccwrap status shows.
 `)
 }
 
