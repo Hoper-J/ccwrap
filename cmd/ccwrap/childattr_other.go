@@ -7,14 +7,12 @@ import (
 	"syscall"
 )
 
-// childSysProcAttr is a no-op off Linux. macOS / BSD have no Pdeathsig
-// equivalent, so the hard-process-death linkage Linux gets is unavailable;
-// the supervisor-goroutine-returns case is still handled in Wait(), and
-// leftover runtime dirs are reaped by the next launch's orphan sweep.
+// childSysProcAttr adds nothing here: macOS and the BSDs have no Pdeathsig,
+// so bindChildLifetime starts a guard process instead.
 func childSysProcAttr() *syscall.SysProcAttr {
 	return nil
 }
 
-// bindChildLifetime has nothing to do here: there is no way to have the
-// child end with this process.
-func bindChildLifetime(*os.Process) error { return nil }
+// bindChildLifetime starts a guard that ends the child if ccwrap dies before
+// it (see startGuard), as Pdeathsig does on Linux.
+func bindChildLifetime(p *os.Process) error { return startGuard(p) }

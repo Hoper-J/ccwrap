@@ -54,7 +54,14 @@ func exitFor(err error) (int, string) {
 	return 1, err.Error()
 }
 
+// guardCommand is the hidden subcommand that runs the guard process
+// bindChildLifetime starts on macOS and the BSDs.
+const guardCommand = "__guard"
+
 func realMain() error {
+	if len(os.Args) > 1 && os.Args[1] == guardCommand {
+		return runGuard(os.Args[2:])
+	}
 	// version dispatches BEFORE DefaultPaths so it works in degraded
 	// environments — bug reports about "ccwrap version exits with state-
 	// dir error" are exactly the contexts (containers without HOME,

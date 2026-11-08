@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -12,7 +14,8 @@ import (
 // helperCommand runs this test binary as a stand-in child process, where a
 // shell one-liner would need sh: "exit N" exits with status N, "sleep D"
 // sleeps for the duration D, "spawn-sleep D" also starts a child that sleeps
-// and prints its pid. See TestHelperProcess.
+// and prints its pid, "deaf-sleep D" sleeps ignoring SIGTERM. See
+// TestHelperProcess.
 func helperCommand(args ...string) *exec.Cmd {
 	cmd := exec.Command(os.Args[0], append([]string{"-test.run=^TestHelperProcess$", "--"}, args...)...)
 	cmd.Env = append(os.Environ(), "CCWRAP_TEST_HELPER_PROCESS=1")
@@ -37,6 +40,13 @@ func TestHelperProcess(t *testing.T) {
 			}
 		case "sleep":
 			if d, err := time.ParseDuration(args[2]); err == nil {
+				time.Sleep(d)
+				os.Exit(0)
+			}
+		case "deaf-sleep":
+			if d, err := time.ParseDuration(args[2]); err == nil {
+				signal.Ignore(syscall.SIGTERM)
+				fmt.Println("ready")
 				time.Sleep(d)
 				os.Exit(0)
 			}
