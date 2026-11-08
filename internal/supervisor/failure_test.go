@@ -63,7 +63,7 @@ func TestUpstreamFailureMasksEchoedKeys(t *testing.T) {
 
 func TestFailureHint(t *testing.T) {
 	unmapped := failureContext{status: 404, unmapped: true, model: "claude-fable-5-1", profile: "gw", aliasTarget: "gpt-6"}
-	if got := failureHint(unmapped, &model.RequestFailure{}); !strings.Contains(got, "ccwrap profile edit gw --model-alias 'claude-fable-5-1=gpt-6'") || !strings.Contains(got, "'*=gpt-6'") {
+	if got := failureHint(unmapped, &model.RequestFailure{}); !strings.Contains(got, testutil.ShellQuotes("ccwrap profile edit gw --model-alias 'claude-fable-5-1=gpt-6'")) || !strings.Contains(got, testutil.ShellQuotes("'*=gpt-6'")) {
 		t.Errorf("unmapped hint = %q", got)
 	}
 	if got := failureHint(failureContext{status: 401, firstParty: true}, &model.RequestFailure{}); !strings.Contains(got, "/login") {
@@ -204,7 +204,7 @@ func TestSessionProxyRecordsModelsAndUpstreamFailures(t *testing.T) {
 			if f == nil || f.Source != "upstream" || f.Type != "not_found_error" || f.Message != "model not found: claude-fable-5-1" {
 				t.Fatalf("failure = %+v", f)
 			}
-			if !strings.Contains(f.Hint, "ccwrap profile edit gw --model-alias 'claude-fable-5-1=gpt-6'") {
+			if !strings.Contains(f.Hint, testutil.ShellQuotes("ccwrap profile edit gw --model-alias 'claude-fable-5-1=gpt-6'")) {
 				t.Fatalf("hint = %q", f.Hint)
 			}
 			if rec.BodyRef != nil || rec.ResponseBodyRef != nil {

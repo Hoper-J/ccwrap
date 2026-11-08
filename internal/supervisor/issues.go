@@ -420,9 +420,9 @@ func renderIssue(e *issueEntry) model.Issue {
 			fixes = append(fixes, model.IssueFix{Label: "Keep Claude names", Action: model.FixModelDefault, Value: modelalias.KeepName})
 			note = "Saves the choice to profile " + v.profile + " and applies it now."
 		} else if len(targets) == 1 {
-			note = "Relaunch with --model-alias '*=" + targets[0] + "' to send them to " + targets[0] + ", or '*=*' to keep their Claude names."
+			note = "Relaunch with --model-alias " + modelalias.ShellArg(modelalias.DefaultKey, targets[0]) + " to send them to " + targets[0] + ", or " + modelalias.ShellArg(modelalias.DefaultKey, modelalias.KeepName) + " to keep their Claude names."
 		} else {
-			note = "Relaunch with --model-alias '*=<model>' to send them to one upstream model, or '*=*' to keep their Claude names."
+			note = "Relaunch with --model-alias " + modelalias.ShellArg(modelalias.DefaultKey, "<model>") + " to send them to one upstream model, or " + modelalias.ShellArg(modelalias.DefaultKey, modelalias.KeepName) + " to keep their Claude names."
 		}
 	case model.IssueCredentialsRejected:
 		switch {

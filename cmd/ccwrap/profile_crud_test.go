@@ -1284,7 +1284,7 @@ func TestProfileAliasesAskForDefault(t *testing.T) {
 	_, errOut := withCapturedStdio(t, func() {
 		profileAdd(paths, []string{"gw", "--base-url", "https://gw.example", "--auth-mode", "ccwrap_bearer", "--auth-key", "k", "--model-alias", "claude-opus-4-8=deepseek-v4-flash"})
 	})
-	for _, want := range []string{"Claude models without their own alias reach the upstream under their Claude names", "ccwrap profile edit gw --model-alias '*=deepseek-v4-flash'", "ccwrap profile edit gw --model-alias '*=*'"} {
+	for _, want := range []string{"Claude models without their own alias reach the upstream under their Claude names", testutil.ShellQuotes("ccwrap profile edit gw --model-alias '*=deepseek-v4-flash'"), testutil.ShellQuotes("ccwrap profile edit gw --model-alias '*=*'")} {
 		if !strings.Contains(errOut, want) {
 			t.Fatalf("add: missing %q in:\n%s", want, errOut)
 		}

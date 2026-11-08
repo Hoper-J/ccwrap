@@ -100,7 +100,7 @@ func TestModelDefaultRefusals(t *testing.T) {
 	_, bare, _ := newSupervisedSession(t)
 	status, out := apiCall(t, bare.proxy.supervisor.paths.SocketPath, "POST", "/api/v1/model-default", `{"target":"gpt-6"}`)
 	msg, _ := out["error"].(map[string]any)["message"].(string)
-	if status != 409 || errCode(out) != "no_profile" || !strings.Contains(msg, "--model-alias '*=gpt-6'") {
+	if status != 409 || errCode(out) != "no_profile" || !strings.Contains(msg, testutil.ShellQuotes("--model-alias '*=gpt-6'")) {
 		t.Fatalf("no profile: %d %v", status, out)
 	}
 }

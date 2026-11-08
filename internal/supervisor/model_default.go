@@ -1,7 +1,6 @@
 package supervisor
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -21,7 +20,7 @@ func (sp *sessionProxy) applyModelDefault(target string) (SwitchOutcome, *apiErr
 	ap := sp.session.active.Load()
 	if ap == nil || ap.r.profileName == "" {
 		return SwitchOutcome{}, &apiError{http.StatusConflict, "no_profile",
-			fmt.Sprintf("this session runs without a profile; relaunch with --model-alias '%s=%s'", modelalias.DefaultKey, target)}
+			"this session runs without a profile; relaunch with --model-alias " + modelalias.ShellArg(modelalias.DefaultKey, target)}
 	}
 	name := ap.r.profileName
 	if e := sp.supervisor.profileStore.SetModelDefault(name, target); e != nil {

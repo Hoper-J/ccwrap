@@ -112,8 +112,8 @@ func failureHint(fc failureContext, f *model.RequestFailure) string {
 		}
 		return "The base URL ends in /v1 and Claude Code adds /v1 itself, so this went to /v1/v1/messages. Drop the /v1: " + fix
 	case model.IssueUnaliasedModel:
-		return fmt.Sprintf("No alias for %s on this route, so the upstream got that name as-is. Fix: %s '%s=%s' (this model) or '%s=%s' (every unaliased Claude model)",
-			fc.model, editCmd, fc.model, target, modelalias.DefaultKey, target)
+		return fmt.Sprintf("No alias for %s on this route, so the upstream got that name as-is. Fix: %s %s (this model) or %s (every unaliased Claude model)",
+			fc.model, editCmd, modelalias.ShellArg(fc.model, target), modelalias.ShellArg(modelalias.DefaultKey, target))
 	case model.IssueCredentialsRejected:
 		if fc.firstParty {
 			return "Anthropic rejected Claude Code's credentials — run /login in Claude Code"
