@@ -378,9 +378,10 @@ func (l *sessionLauncher) SpawnChild() error {
 	cmd := exec.Command(bin, args...)
 	cmd.Env = l.childEnv
 	// Bind the child's lifetime to ours where the OS allows (Linux
-	// Pdeathsig) so a hard death of ccwrap — SIGKILL/OOM/bare-goroutine
-	// panic, none of which run Wait()'s in-process kill — does not leave
-	// Claude orphaned against a dead proxy. No-op off Linux.
+	// Pdeathsig, a Windows job object after Start) so a hard death of
+	// ccwrap — SIGKILL/OOM/bare-goroutine panic, none of which run Wait()'s
+	// in-process kill — does not leave Claude orphaned against a dead
+	// proxy. No-op elsewhere.
 	cmd.SysProcAttr = childSysProcAttr()
 	cmd.Stdin = os.Stdin
 	if l.childStdout != nil {
@@ -392,6 +393,9 @@ func (l *sessionLauncher) SpawnChild() error {
 	cmd.Dir = l.cwd
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start claude: %w", err)
+	}
+	if err := bindChildLifetime(cmd.Process); err != nil {
+		fmt.Fprintf(os.Stderr, "ccwrap: Claude Code would keep running if ccwrap were killed: %v\n", err)
 	}
 	l.cmd = cmd
 	l.rollback.push(func() {

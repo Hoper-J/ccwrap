@@ -11,7 +11,8 @@ import (
 
 // helperCommand runs this test binary as a stand-in child process, where a
 // shell one-liner would need sh: "exit N" exits with status N, "sleep D"
-// sleeps for the duration D. See TestHelperProcess.
+// sleeps for the duration D, "spawn-sleep D" also starts a child that sleeps
+// and prints its pid. See TestHelperProcess.
 func helperCommand(args ...string) *exec.Cmd {
 	cmd := exec.Command(os.Args[0], append([]string{"-test.run=^TestHelperProcess$", "--"}, args...)...)
 	cmd.Env = append(os.Environ(), "CCWRAP_TEST_HELPER_PROCESS=1")
@@ -38,6 +39,16 @@ func TestHelperProcess(t *testing.T) {
 			if d, err := time.ParseDuration(args[2]); err == nil {
 				time.Sleep(d)
 				os.Exit(0)
+			}
+		case "spawn-sleep":
+			// Start a grandchild that sleeps, print its pid, then sleep too.
+			if d, err := time.ParseDuration(args[2]); err == nil {
+				gc := helperCommand("sleep", args[2])
+				if gc.Start() == nil {
+					fmt.Println(gc.Process.Pid)
+					time.Sleep(d)
+					os.Exit(0)
+				}
 			}
 		}
 	}

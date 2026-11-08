@@ -2,7 +2,10 @@
 
 package main
 
-import "syscall"
+import (
+	"os"
+	"syscall"
+)
 
 // childSysProcAttr asks the kernel to send the child SIGTERM if THIS
 // process dies (Pdeathsig). It is the Linux-only guarantee for the hard
@@ -21,3 +24,7 @@ import "syscall"
 func childSysProcAttr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM}
 }
+
+// bindChildLifetime has nothing to add: Pdeathsig, set before the child
+// starts, already ends it with this process.
+func bindChildLifetime(*os.Process) error { return nil }

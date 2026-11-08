@@ -2,10 +2,15 @@
 
 package uiservice
 
-import "syscall"
+import (
+	"os/exec"
+	"syscall"
+)
 
-// detachedProcAttr starts the service in its own session, away from the
+// startDetached starts newCmd's command in its own session, away from the
 // caller's terminal and its hangup.
-func detachedProcAttr() *syscall.SysProcAttr {
-	return &syscall.SysProcAttr{Setsid: true}
+func startDetached(newCmd func() *exec.Cmd) (*exec.Cmd, error) {
+	cmd := newCmd()
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	return cmd, cmd.Start()
 }

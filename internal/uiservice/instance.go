@@ -200,10 +200,12 @@ func start(paths app.Paths, exe string) error {
 		return err
 	}
 	defer logf.Close()
-	cmd := exec.Command(exe, "ui", "serve")
-	cmd.Stdout, cmd.Stderr = logf, logf
-	cmd.SysProcAttr = detachedProcAttr()
-	if err := cmd.Start(); err != nil {
+	cmd, err := startDetached(func() *exec.Cmd {
+		c := exec.Command(exe, "ui", "serve")
+		c.Stdout, c.Stderr = logf, logf
+		return c
+	})
+	if err != nil {
 		return err
 	}
 	// Reap it when it exits: a session launch that started it lives on for
