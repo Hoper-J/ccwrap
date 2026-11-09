@@ -26,7 +26,7 @@ func TestDoctorReportsModelAliasCoverage(t *testing.T) {
 	t.Setenv(modelalias.EnvAliasesJSON, `{"claude-opus-5-5":"gpt-6"}`)
 
 	c := doctorChecksByName(runDoctorJSON(t, paths, []string{"--json"}))["model_aliases"]
-	if c.Status != "warn" || !strings.Contains(c.Summary, "model fable (from user settings) has no alias") || !strings.Contains(c.Detail, "--model-alias '*=gpt-6'") {
+	if c.Status != "warn" || !strings.Contains(c.Summary, "model fable (from user settings) has no alias") || !strings.Contains(c.Detail, testutil.ShellQuotes("--model-alias '*=gpt-6'")) {
 		t.Fatalf("uncovered: model_aliases = %#v", c)
 	}
 
@@ -54,7 +54,7 @@ func TestModelCoverageLinesNameTheProfileFix(t *testing.T) {
 		UncoveredModel:    &preflight.UncoveredModel{Model: "fable", Source: "user settings"},
 	}
 	got := strings.Join(modelCoverageLines(pre, nil), "\n")
-	for _, want := range []string{"Claude Code's model fable (from user settings) has no alias", "ccwrap profile edit enjoy --model-alias '*=gpt-6'", "keep them: ccwrap profile edit enjoy --model-alias '*=*'"} {
+	for _, want := range []string{"Claude Code's model fable (from user settings) has no alias", testutil.ShellQuotes("ccwrap profile edit enjoy --model-alias '*=gpt-6'"), testutil.ShellQuotes("keep them: ccwrap profile edit enjoy --model-alias '*=*'")} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in:\n%s", want, got)
 		}
@@ -72,7 +72,7 @@ func TestAliasFixLinesListSeveralTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Join(aliasFixLines(cfg, ""), "\n")
-	if !strings.Contains(got, "--model-alias '*=<model>' (this route uses big, small)") || !strings.Contains(got, "--model-alias '*=*'") {
+	if !strings.Contains(got, testutil.ShellQuotes("--model-alias '*=<model>' (this route uses big, small)")) || !strings.Contains(got, testutil.ShellQuotes("--model-alias '*=*'")) {
 		t.Fatalf("fix lines:\n%s", got)
 	}
 }
@@ -134,8 +134,8 @@ func TestLaunchWarnsAboutRememberedUnaliasedModels(t *testing.T) {
 	got := strings.Join(launchWarningLines(pre(map[string]string{"claude-opus-4-8": "deepseek-v4-flash"}), stateDir), "\n")
 	for _, want := range []string{
 		"Claude Code sent claude-opus-5-5 with no alias on deepseek before; the upstream got that name as-is.",
-		"ccwrap profile edit deepseek --model-alias '*=deepseek-v4-flash'",
-		"ccwrap profile edit deepseek --model-alias '*=*'",
+		testutil.ShellQuotes("ccwrap profile edit deepseek --model-alias '*=deepseek-v4-flash'"),
+		testutil.ShellQuotes("ccwrap profile edit deepseek --model-alias '*=*'"),
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in:\n%s", want, got)
@@ -158,7 +158,7 @@ func TestUnmappedExitLines(t *testing.T) {
 	got := strings.Join(unmappedExitLines(sess, nil), "\n")
 	for _, want := range []string{
 		"ccwrap: Claude Code sent claude-opus-5-5, claude-haiku-4-5 with no alias on deepseek; the upstream got those names as-is.",
-		"ccwrap profile edit deepseek --model-alias '*=deepseek-v4-flash'",
+		testutil.ShellQuotes("ccwrap profile edit deepseek --model-alias '*=deepseek-v4-flash'"),
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in:\n%s", want, got)
@@ -188,7 +188,7 @@ func TestDoctorReportsRememberedUnaliasedModels(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := doctorChecksByName(runDoctorJSON(t, paths, []string{"--json", "--profile", "gw"}))["model_aliases"]
-	if c.Status != "warn" || !strings.Contains(c.Summary, "sent claude-opus-5-5 with no alias on gw before") || !strings.Contains(c.Detail, "ccwrap profile edit gw --model-alias '*=gpt-6'") {
+	if c.Status != "warn" || !strings.Contains(c.Summary, "sent claude-opus-5-5 with no alias on gw before") || !strings.Contains(c.Detail, testutil.ShellQuotes("ccwrap profile edit gw --model-alias '*=gpt-6'")) {
 		t.Fatalf("model_aliases = %#v", c)
 	}
 }

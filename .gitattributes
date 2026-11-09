@@ -1,0 +1,3 @@
+# LF in every checkout, Windows included: templates are embedded with
+# go:embed and tests compare bytes.
+* text=auto eol=lf

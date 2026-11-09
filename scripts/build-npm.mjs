@@ -3,7 +3,7 @@
 // Reads the cross-built archives in dist/ (produced by `goreleaser release` or
 // `goreleaser release --snapshot`), extracts each platform binary into its
 // per-platform npm package, and stamps the version into every package.json
-// (main + 4 platform packages + the main package's optionalDependencies).
+// (main + 6 platform packages + the main package's optionalDependencies).
 //
 // It does NOT publish — it prints the `npm publish` commands to run when you are
 // ready. Publish the platform packages BEFORE the main package so the main
@@ -33,6 +33,8 @@ const PLATFORMS = [
   { os: "darwin", goarch: "amd64" },
   { os: "linux", goarch: "arm64" },
   { os: "linux", goarch: "amd64" },
+  { os: "windows", goarch: "arm64" },
+  { os: "windows", goarch: "amd64" },
 ];
 
 function setVersion(pkgJsonPath, mutate) {
@@ -44,7 +46,10 @@ function setVersion(pkgJsonPath, mutate) {
 
 // 1. Per-platform packages: extract the binary + stamp the version.
 for (const { os, goarch } of PLATFORMS) {
-  const archive = resolve(dist, `ccwrap_${version}_${os}_${goarch}.tar.gz`);
+  // .goreleaser.yaml packs Windows as a zip holding ccwrap.exe.
+  const windows = os === "windows";
+  const binName = windows ? "ccwrap.exe" : "ccwrap";
+  const archive = resolve(dist, `ccwrap_${version}_${os}_${goarch}${windows ? ".zip" : ".tar.gz"}`);
   if (!existsSync(archive)) {
     console.error(`missing archive: ${archive}\n(run goreleaser first)`);
     process.exit(1);
@@ -53,8 +58,12 @@ for (const { os, goarch } of PLATFORMS) {
   const binDir = resolve(pkgDir, "bin");
   mkdirSync(binDir, { recursive: true });
   // Extract just the ccwrap binary out of the archive into the package's bin/.
-  execFileSync("tar", ["-xzf", archive, "-C", binDir, "ccwrap"]);
-  chmodSync(resolve(binDir, "ccwrap"), 0o755);
+  if (windows) {
+    execFileSync("unzip", ["-o", "-j", archive, binName, "-d", binDir]);
+  } else {
+    execFileSync("tar", ["-xzf", archive, "-C", binDir, binName]);
+  }
+  chmodSync(resolve(binDir, binName), 0o755);
   setVersion(resolve(pkgDir, "package.json"));
   console.log(`staged @hoper-j/ccwrap-cli-${os}-${goarch}@${version}`);
 }
@@ -96,7 +105,7 @@ const npmReadme =
 
 ## npm distribution
 
-This package is a thin launcher: the actual binary ships in a per-OS/arch optional dependency (\`@hoper-j/ccwrap-cli-<os>-<arch>\`) and npm installs only the one matching your machine (macOS / Linux, x64 / arm64). \`npm install -g ccwrap-cli\` is all you need (the command it installs is \`ccwrap\`).
+This package is a thin launcher: the actual binary ships in a per-OS/arch optional dependency (\`@hoper-j/ccwrap-cli-<os>-<arch>\`) and npm installs only the one matching your machine (macOS / Linux / Windows, x64 / arm64). \`npm install -g ccwrap-cli\` is all you need (the command it installs is \`ccwrap\`).
 
 Full documentation — commands, flags, profiles, the security model, and more — lives in the [project README](https://github.com/${SLUG}).
 

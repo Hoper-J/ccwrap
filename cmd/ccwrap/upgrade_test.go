@@ -137,7 +137,7 @@ func TestUpgradePMExitPropagates(t *testing.T) {
 		}
 		upgradeLookPath = func(string) (string, error) { return "/usr/bin/npm", nil }
 		upgradeRun = func(name string, args ...string) error {
-			return exec.Command("sh", "-c", "exit 7").Run() // a real *exec.ExitError
+			return helperCommand("exit", "7").Run() // a real *exec.ExitError
 		}
 		err := upgradeCommand(app.Paths{StateDir: os.Getenv("CCWRAP_TEST_STATE_DIR")}, nil)
 		// Must not reach this point: a non-zero exit has to propagate
@@ -197,7 +197,7 @@ func TestUpgradeCheckFailureFallbackHint(t *testing.T) {
 	if err == nil {
 		t.Fatal("check failure must error")
 	}
-	if !strings.Contains(err.Error(), allChannelsHint) {
+	if !strings.Contains(err.Error(), allChannelsHint()) {
 		t.Fatalf("unknown channel must fall back to the all-channels hint, got: %v", err)
 	}
 }
@@ -216,5 +216,16 @@ func TestUpgradeDetectFailureHasHint(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "releases/tag/v99.0.0") {
 		t.Fatalf("detect-failure error must carry the release link, got: %v", err)
+	}
+}
+
+// A folder ccwrap cannot write is met with what works on the platform: an
+// administrator terminal on Windows, sudo elsewhere.
+func TestNotWritableErrorFitsThePlatform(t *testing.T) {
+	if msg := notWritableError(`C:\Tools`, "windows").Error(); !strings.Contains(msg, "administrator terminal") || strings.Contains(msg, "sudo") {
+		t.Errorf("windows: %s", msg)
+	}
+	if msg := notWritableError("/usr/local/bin", "linux").Error(); !strings.Contains(msg, "sudo ccwrap upgrade") {
+		t.Errorf("linux: %s", msg)
 	}
 }

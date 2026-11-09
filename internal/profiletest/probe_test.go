@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -175,7 +176,9 @@ func TestProbe_OK(t *testing.T) {
 	if got.ModelEchoed != "claude-haiku-4-5-20251001" {
 		t.Errorf("model_echoed: got %q", got.ModelEchoed)
 	}
-	if got.Latency <= 0 {
+	// Windows's monotonic clock moves in timer ticks, so a loopback round
+	// trip can measure 0 there.
+	if got.Latency < 0 || (got.Latency == 0 && runtime.GOOS != "windows") {
 		t.Errorf("latency must be positive, got %v", got.Latency)
 	}
 }

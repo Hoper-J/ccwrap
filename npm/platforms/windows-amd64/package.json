@@ -1,0 +1,20 @@
+{
+  "name": "@hoper-j/ccwrap-cli-windows-amd64",
+  "version": "0.0.0",
+  "description": "ccwrap binary for Windows amd64",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin/"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Hoper-J/ccwrap.git"
+  },
+  "homepage": "https://github.com/Hoper-J/ccwrap",
+  "license": "MIT"
+}

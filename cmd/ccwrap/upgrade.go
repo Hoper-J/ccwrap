@@ -27,7 +27,9 @@ const applyTimeout = 10 * time.Minute
 // is unknown. The npm package already went through the npm→ccwrap-cli
 // rename; hardcoded commands scattered across call sites are a real
 // drift risk, so they live in one place.
-const allChannelsHint = "npm install -g ccwrap-cli@latest  |  curl -fsSL https://raw.githubusercontent.com/Hoper-J/ccwrap/main/install.sh | sh  |  go install github.com/Hoper-J/ccwrap/cmd/ccwrap@latest"
+func allChannelsHint() string {
+	return "npm install -g ccwrap-cli@latest  |  " + update.ManualHint(update.ChannelBinary) + "  |  go install github.com/Hoper-J/ccwrap/cmd/ccwrap@latest"
+}
 
 // upgradeRun / upgradeDetect / upgradeLookPath are test seams: channel
 // dispatch is a table-tested pure function (update.DetectChannel), but
@@ -104,7 +106,7 @@ func upgradeCommand(paths app.Paths, args []string) error {
 		// pick the right hint, and fall back to the all-channels hint
 		// when detection fails too; network-flavored failures also
 		// point at --egress-proxy.
-		hint := allChannelsHint
+		hint := allChannelsHint()
 		if _, ch, derr := upgradeDetect(); derr == nil {
 			hint = update.ManualHint(ch)
 		}
@@ -117,7 +119,7 @@ func upgradeCommand(paths app.Paths, args []string) error {
 
 	exePath, ch, err := upgradeDetect()
 	if err != nil {
-		return fmt.Errorf("upgrade: cannot locate running binary: %w\nmanual fallback — reinstall via your original channel:\n  %s\nrelease: https://github.com/Hoper-J/ccwrap/releases/tag/v%s", err, allChannelsHint, latest)
+		return fmt.Errorf("upgrade: cannot locate running binary: %w\nmanual fallback — reinstall via your original channel:\n  %s\nrelease: https://github.com/Hoper-J/ccwrap/releases/tag/v%s", err, allChannelsHint(), latest)
 	}
 
 	switch ch {
@@ -135,7 +137,7 @@ func upgradeCommand(paths app.Paths, args []string) error {
 		// download as one budget
 		if aerr := update.Apply(ctx, update.NewClient(cfg, 0), update.DefaultReleaseBase, latest, runtime.GOOS, runtime.GOARCH, exePath, os.Stderr); aerr != nil {
 			if errors.Is(aerr, os.ErrPermission) {
-				return fmt.Errorf("%s is not writable — re-run as `sudo ccwrap upgrade`, or reinstall to a writable dir:\n  CCWRAP_BINDIR=~/.local/bin %s", filepath.Dir(exePath), update.ManualHint(ch))
+				return notWritableError(filepath.Dir(exePath), runtime.GOOS)
 			}
 			return fmt.Errorf("upgrade failed: %w\nmanual fallback:\n  %s\nrelease: https://github.com/Hoper-J/ccwrap/releases/tag/v%s", aerr, update.ManualHint(ch), latest)
 		}
@@ -161,4 +163,14 @@ func upgradeCommand(paths app.Paths, args []string) error {
 	fmt.Printf("ccwrap upgraded to %s\n", latest)
 	fmt.Println("note: running sessions keep the old binary until relaunched")
 	return nil
+}
+
+// notWritableError is what to do when the folder holding ccwrap cannot be
+// written: upgrade with more rights, or reinstall where the user can write
+// (install.ps1's default folder is the user's own).
+func notWritableError(dir, goos string) error {
+	if goos == "windows" {
+		return fmt.Errorf("%s is not writable — run `ccwrap upgrade` from an administrator terminal, or reinstall to your own folder:\n  %s", dir, update.ManualHint(update.ChannelBinary))
+	}
+	return fmt.Errorf("%s is not writable — re-run as `sudo ccwrap upgrade`, or reinstall to a writable dir:\n  CCWRAP_BINDIR=~/.local/bin %s", dir, update.ManualHint(update.ChannelBinary))
 }

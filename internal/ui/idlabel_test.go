@@ -40,3 +40,19 @@ func TestShortMethodLabel(t *testing.T) {
 		t.Fatalf("Web MethodLabel must stay SYNTHETIC, got %q", syn.MethodLabel())
 	}
 }
+
+func TestClaudeVersionFromUserAgent(t *testing.T) {
+	for ua, want := range map[string]string{
+		"claude-cli/2.1.296 (external, sdk-cli)":  "2.1.296",
+		"claude-cli/2.1.319":                      "2.1.319",
+		"claude-cli/2.2.0-beta.1 (external, cli)": "2.2.0-beta.1",
+		"claude-cli/latest":                       "",
+		"curl/8.7.1":                              "",
+		"Mozilla/5.0 claude-cli/2.1.296":          "",
+		"":                                        "",
+	} {
+		if got := ClaudeVersionFromUserAgent(ua); got != want {
+			t.Errorf("ClaudeVersionFromUserAgent(%q) = %q, want %q", ua, got, want)
+		}
+	}
+}

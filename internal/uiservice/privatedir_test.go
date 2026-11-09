@@ -18,9 +18,7 @@ import (
 func TestUIRefusesRuntimeDirOthersCanWrite(t *testing.T) {
 	paths := testutil.ShortAppPaths(t, "ui.sock")
 	startUI(t, paths, nil, time.Hour)
-	if err := os.Chmod(paths.RuntimeDir, 0o777); err != nil {
-		t.Fatal(err)
-	}
+	testutil.MakeWritableByOthers(t, paths.RuntimeDir)
 	t.Cleanup(func() { _ = os.Chmod(paths.RuntimeDir, 0o700) })
 
 	if _, ok := Running(context.Background(), paths); ok {

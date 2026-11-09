@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -32,24 +33,22 @@ func statusCommand(paths app.Paths, args []string) error {
 		return err
 	}
 	if *sessionID != "" {
-		for _, ds := range discovered {
-			if ds.Manifest.SessionID != *sessionID {
-				continue
-			}
-			snap, ferr := fetchSnapshot(ds)
-			if ferr != nil {
-				fmt.Fprintf(os.Stderr, "ccwrap: fetch snapshot for %s: %v\n", ds.Manifest.SessionID, ferr)
-			}
-			if *jsonOut {
-				return printJSON(struct {
-					Discovery model.DiscoveredSession `json:"discovery"`
-					Session   *model.Session          `json:"session,omitempty"`
-				}{ds, snap})
-			}
-			printStatus(discovered, []*model.Session{snap})
-			return nil
+		ds, err := discovery.Match(discovered, *sessionID)
+		if err != nil {
+			return err
 		}
-		return fmt.Errorf("session %s not found", *sessionID)
+		snap, ferr := fetchSnapshot(*ds)
+		if ferr != nil {
+			fmt.Fprintf(os.Stderr, "ccwrap: fetch snapshot for %s: %v\n", ds.Manifest.SessionID, ferr)
+		}
+		if *jsonOut {
+			return printJSON(struct {
+				Discovery model.DiscoveredSession `json:"discovery"`
+				Session   *model.Session          `json:"session,omitempty"`
+			}{*ds, snap})
+		}
+		printStatus(discovered, []*model.Session{snap})
+		return nil
 	}
 	var sessions []*model.Session
 	for _, ds := range discovered {
@@ -79,6 +78,13 @@ func dashboardCommand(paths app.Paths, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if *sessionID != "" {
+		ds, err := discovery.Find(paths, *sessionID)
+		if err != nil {
+			return err
+		}
+		*sessionID = ds.Manifest.SessionID
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return dashboard.Run(ctx, paths, dashboard.Options{SessionID: *sessionID, View: *view, Interval: *interval})
@@ -86,8 +92,12 @@ func dashboardCommand(paths app.Paths, args []string) error {
 
 func stopCommand(paths app.Paths, args []string) error {
 	fs := flag.NewFlagSet("stop", flag.ContinueOnError)
-	sessionID := fs.String("session", "", "specific session id")
+	sessionID := fs.String("session", "", "session ID, or its first characters")
 	all := fs.Bool("all", false, "stop all live sessions")
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), "usage: ccwrap stop [--all | --session ID | SESSION-ID | PROJECT]")
+		fs.PrintDefaults()
+	}
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -95,10 +105,45 @@ func stopCommand(paths app.Paths, args []string) error {
 	if err != nil {
 		return err
 	}
-	var targets []model.DiscoveredSession
-	var skipped []string
+	cwd, _ := os.Getwd()
+	targets, skipped, err := stopTargets(discovered, *all, *sessionID, fs.Args(), fetchSnapshot, os.Getenv, cwd)
+	if len(skipped) > 0 {
+		sort.Strings(skipped)
+		fmt.Fprintf(os.Stderr, "ccwrap: skipped unreachable/stale sessions: %s\n", strings.Join(skipped, ", "))
+	}
+	if err != nil {
+		return err
+	}
+	for _, c := range targets {
+		if err := requestStop(c.ds); err != nil {
+			return err
+		}
+	}
+	// Each session forwards the stop to its Claude Code and waits for it to
+	// exit, killing it after stopGrace; wait that long plus teardown time.
+	deadline := time.Now().Add(stopGrace + 5*time.Second)
+	for _, c := range targets {
+		if waitForSessionStop(paths, c.ds.Manifest.SessionID, time.Until(deadline)) {
+			fmt.Println(stopMessage(c))
+		} else {
+			fmt.Println("stop requested " + c.row())
+		}
+	}
+	return nil
+}
+
+// stopTargets picks the sessions ccwrap stop acts on: every reachable one
+// with --all (skipped names the others), the one --session names, else the
+// one an argument or pickSession's defaults name, as for ccwrap open.
+func stopTargets(discovered []model.DiscoveredSession, all bool, sessionID string, args []string, snapshot func(model.DiscoveredSession) (*model.Session, error), getenv func(string) string, cwd string) (targets []sessionCandidate, skipped []string, err error) {
 	switch {
-	case *all:
+	case len(args) > 1:
+		return nil, nil, fmt.Errorf("ccwrap stop takes one session, got: %s", strings.Join(args, " "))
+	case all && (sessionID != "" || len(args) > 0):
+		return nil, nil, errors.New("--all stops every session; leave out the session")
+	case sessionID != "" && len(args) > 0:
+		return nil, nil, errors.New("name the session once: as an argument or with --session")
+	case all:
 		for _, ds := range discovered {
 			if !ds.Reachable {
 				if ds.Manifest.SessionID != "" {
@@ -106,50 +151,31 @@ func stopCommand(paths app.Paths, args []string) error {
 				}
 				continue
 			}
-			targets = append(targets, ds)
+			targets = append(targets, newCandidate(ds, snapshot))
 		}
-	case *sessionID != "":
-		found := false
-		for _, ds := range discovered {
-			if ds.Manifest.SessionID != *sessionID {
-				continue
-			}
-			found = true
-			if !ds.Reachable {
-				return fmt.Errorf("session %s is not reachable; refuse pid-only stop and run ccwrap gc after the process exits", ds.Manifest.SessionID)
-			}
-			targets = append(targets, ds)
-			break
+		if len(targets) == 0 {
+			return nil, skipped, errNoSession
 		}
-		if !found {
-			return fmt.Errorf("session %s not found", *sessionID)
+		return targets, skipped, nil
+	case sessionID != "":
+		ds, err := discovery.Match(discovered, sessionID)
+		if err != nil {
+			return nil, nil, err
 		}
-	default:
-		return fmt.Errorf("use --session ID or --all")
-	}
-	if len(skipped) > 0 {
-		sort.Strings(skipped)
-		fmt.Fprintf(os.Stderr, "ccwrap: skipped unreachable/stale sessions: %s\n", strings.Join(skipped, ", "))
-	}
-	if len(targets) == 0 {
-		return fmt.Errorf("no matching reachable sessions")
-	}
-	for _, ds := range targets {
-		if err := requestStop(ds); err != nil {
-			return err
+		if !ds.Reachable {
+			return nil, nil, fmt.Errorf("session %s is not reachable; refuse pid-only stop and run ccwrap gc after the process exits", ds.Manifest.SessionID)
 		}
+		return []sessionCandidate{newCandidate(*ds, snapshot)}, nil, nil
 	}
-	// Each session forwards the stop to its Claude Code and waits for it to
-	// exit, killing it after stopGrace; wait that long plus teardown time.
-	deadline := time.Now().Add(stopGrace + 5*time.Second)
-	for _, ds := range targets {
-		if waitForSessionStop(paths, ds.Manifest.SessionID, time.Until(deadline)) {
-			fmt.Println(stopMessage(ds.Manifest.SessionID))
-		} else {
-			fmt.Printf("stop requested %s\n", ui.ShortID(ds.Manifest.SessionID))
-		}
+	arg := ""
+	if len(args) == 1 {
+		arg = args[0]
 	}
-	return nil
+	picked, err := pickSession(liveCandidates(discovered, snapshot), arg, getenv, cwd, "stop")
+	if err != nil {
+		return nil, nil, err
+	}
+	return []sessionCandidate{picked}, nil, nil
 }
 
 func gcCommand(paths app.Paths, args []string) error {
@@ -188,7 +214,7 @@ func sweepOrphanSessions(paths app.Paths) {
 // success messages, behavior otherwise unchanged (gcRemovedLine still
 // emits one "removed <id>" line per id; --json paths keep full IDs as
 // wire output).
-func stopMessage(id string) string { return "stopped " + ui.ShortID(id) }
+func stopMessage(c sessionCandidate) string { return "stopped " + c.row() }
 
 func gcRemovedLine(ids []string) string {
 	var b strings.Builder

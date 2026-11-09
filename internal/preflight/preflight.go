@@ -325,6 +325,15 @@ func BuildChildEnv(parentEnv []string, proxyURL, caCertPath, caBundlePath string
 	if tz != "" {
 		env["TZ"] = tz
 	}
+	// Claude Code does not update itself in a session: its update runs npm
+	// through this session's proxy, which goes away with the session, and on
+	// Windows it first renames its running claude.exe, so an update the
+	// session outlasts leaves no claude.exe. `claude update` outside ccwrap
+	// updates it; ccwrap says when a newer one is out. A value the user set
+	// stays.
+	if !hasEnvKey(env, "DISABLE_AUTOUPDATER") {
+		env["DISABLE_AUTOUPDATER"] = "1"
+	}
 	keys := make([]string, 0, len(env))
 	for key := range env {
 		keys = append(keys, key)
@@ -622,6 +631,16 @@ func formatStringMapKeys(values map[string]string) string {
 	}
 	sort.Strings(keys)
 	return strings.Join(keys, ", ")
+}
+
+// hasEnvKey reports whether env sets key, ignoring case as Windows does.
+func hasEnvKey(env map[string]string, key string) bool {
+	for k := range env {
+		if strings.EqualFold(k, key) {
+			return true
+		}
+	}
+	return false
 }
 
 func toMap(env []string) map[string]string {

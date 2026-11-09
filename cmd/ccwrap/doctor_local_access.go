@@ -29,6 +29,6 @@ func addLocalAccessCheck(add func(name, status, summary, detail string), getenv 
 		add("local_access", "fail", fmt.Sprintf("session port access check misidentified this process as uid %d (expected %d); Claude Code's own connections could be refused", uid, self),
 			fmt.Sprintf("set %s=0 to turn the check off", localpeer.DisableEnv))
 	default:
-		add("local_access", "pass", fmt.Sprintf("session ports and ccwrap ui accept only your own processes (uid %d) and root", self), "")
+		add("local_access", "pass", fmt.Sprintf("session ports and ccwrap ui accept only your own processes (%s) and %s", localpeer.OwnerName(self), localpeer.RootName), "")
 	}
 }

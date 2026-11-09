@@ -19,7 +19,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/Hoper-J/ccwrap/internal/app"
@@ -197,6 +196,11 @@ type Supervisor struct {
 
 	transport *http.Transport
 	logger    *log.Logger
+	// logFile is closed by Shutdown: Windows cannot remove the session dir
+	// while it is open.
+	logFile *os.File
+	// stopRequested is set once ccwrap stop asks the session to end.
+	stopRequested atomic.Bool
 
 	mu           sync.RWMutex
 	session      *sessionState
@@ -262,6 +266,7 @@ func New(paths app.Paths, idleTimeout time.Duration, launchCtx *LaunchContext) (
 		unmaskCredentials: unmask,
 		transport:         transport,
 		logger:            logger,
+		logFile:           logFile,
 		profileStore:      profileapi.NewStore(paths.StateDir),
 		subscribers:       map[int]chan model.Event{},
 		lastActive:        time.Now(),
@@ -364,6 +369,9 @@ func (s *Supervisor) Shutdown(ctx context.Context) error {
 			_ = s.listener.Close()
 		}
 		_ = os.Remove(s.paths.SocketPath)
+		if s.logFile != nil {
+			_ = s.logFile.Close()
+		}
 	})
 	return err
 }
@@ -382,15 +390,19 @@ func (s *Supervisor) handleShutdown(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	s.stopRequested.Store(true)
 	writeJSON(w, map[string]string{"schema_version": model.ControlAPIVersion, "status": "terminating"})
 	if flusher, ok := w.(http.Flusher); ok {
 		flusher.Flush()
 	}
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+		_ = s.stopSelf()
 	}()
 }
+
+// StopRequested reports whether ccwrap stop asked the session to end.
+func (s *Supervisor) StopRequested() bool { return s.stopRequested.Load() }
 
 func (s *Supervisor) handleSessions(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -1127,6 +1139,9 @@ func (s *Supervisor) recordRequest(id string, record model.RequestRecord) {
 	if conversation := record.RequestHeaders.Get(ui.ClaudeSessionHeader); conversation != "" {
 		sess.public.ClaudeSessionID = conversation
 	}
+	if v := ui.ClaudeVersionFromUserAgent(record.RequestHeaders.Get("User-Agent")); v != "" {
+		sess.public.ClaudeVersion = v
+	}
 	if failed {
 		sess.failedRequests++
 	}
@@ -1445,10 +1460,10 @@ func (s *Supervisor) updateSessionLifecycle() {
 			switch {
 			case err == nil:
 				gone = !exists || !match
-			case !processExists(public.ClaudePID):
+			case !procmeta.Exists(public.ClaudePID):
 				gone = true
 			}
-		} else if !processExists(public.ClaudePID) {
+		} else if !procmeta.Exists(public.ClaudePID) {
 			gone = true
 		}
 		if gone {
@@ -1534,14 +1549,6 @@ func appendCapped[T any](in []T, item T, limit int) []T {
 	over := len(in) - limit
 	copy(in, in[over:])
 	return in[:limit]
-}
-
-func processExists(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	return err == nil || err == syscall.EPERM
 }
 
 func writeJSON(w http.ResponseWriter, value interface{}) {

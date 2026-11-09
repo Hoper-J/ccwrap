@@ -241,10 +241,13 @@ type Session struct {
 	// ClaudeSessionID is the Claude Code conversation the session's latest
 	// model request belonged to (its X-Claude-Code-Session-Id); `claude
 	// --resume` takes it.
-	ClaudeSessionID string     `json:"claude_session_id,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
-	EndedAt         *time.Time `json:"ended_at,omitempty"`
+	ClaudeSessionID string `json:"claude_session_id,omitempty"`
+	// ClaudeVersion is the Claude Code version its requests name
+	// (User-Agent claude-cli/<version>).
+	ClaudeVersion string     `json:"claude_version,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+	EndedAt       *time.Time `json:"ended_at,omitempty"`
 	// LastActivityAt is the newest request, error or trace entry's time.
 	LastActivityAt                     *time.Time        `json:"last_activity_at,omitempty"`
 	State                              SessionState      `json:"state"`

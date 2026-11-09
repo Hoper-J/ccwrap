@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -22,6 +23,9 @@ import (
 // "$READY" once its traps are set is waited for, so no signal arrives first.
 func startChild(t *testing.T, script string, args ...string) *exec.Cmd {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("passing stop signals on to Claude Code is Unix-only so far")
+	}
 	ready := filepath.Join(t.TempDir(), "ready")
 	cmd := exec.Command("sh", append([]string{"-c", script}, args...)...)
 	cmd.Env = append(os.Environ(), "READY="+ready)
@@ -149,6 +153,24 @@ func TestWait_SignalExitStatusAndReason(t *testing.T) {
 	}
 	if l.closeReason != "stopped by SIGTERM" {
 		t.Fatalf("closeReason = %q, want stopped by SIGTERM", l.closeReason)
+	}
+}
+
+// A session ended by ccwrap stop exits 143 with the stop as its end reason
+// on every platform, whatever Claude Code exits with: 143 after SIGTERM on
+// Unix, 0 after the Ctrl+C on Windows.
+func TestWait_CcwrapStopExitStatusAndReason(t *testing.T) {
+	for _, exit := range []string{"0", "143"} {
+		cmd := helperCommand("exit", exit)
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		l := &sessionLauncher{cmd: cmd, supervisorErr: make(chan error, 1), stopRequested: func() bool { return true }}
+		l.noteStopSignal(syscall.SIGINT)
+		code, err := l.Wait()
+		if err != nil || code != 128+int(syscall.SIGTERM) || l.closeReason != "stopped by ccwrap stop" {
+			t.Fatalf("exit %s: Wait = %d, %v, reason %q; want 143, nil, stopped by ccwrap stop", exit, code, err, l.closeReason)
+		}
 	}
 }
 

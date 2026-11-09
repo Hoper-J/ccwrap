@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"path"
 	"strings"
 
 	"github.com/Hoper-J/ccwrap/internal/preflight"
@@ -72,6 +73,12 @@ func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// assetTypes are the types of what the page loads, set here rather than
+// taken from the system: Windows reads them from the registry, where other
+// software can make .js text/plain, and a browser does not run a script of
+// that type.
+var assetTypes = map[string]string{".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8"}
+
 // assets serves /assets/css/… and /assets/js/…. A new ccwrap is a new
 // service instance (the page reloads), so files are revalidated, not cached.
 func assets() http.Handler {
@@ -88,6 +95,9 @@ func assets() http.Handler {
 		}
 		pageHeaders(w.Header())
 		w.Header().Set("Cache-Control", "no-cache")
+		if typ, ok := assetTypes[path.Ext(name)]; ok {
+			w.Header().Set("Content-Type", typ)
+		}
 		r2 := r.Clone(r.Context())
 		r2.URL.Path = "/" + name
 		files.ServeHTTP(w, r2)

@@ -11,6 +11,7 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"runtime"
 	"sort"
 	"strings"
 )
@@ -1109,4 +1110,15 @@ func dedupe(in []string) []string {
 		out = append(out, v)
 	}
 	return out
+}
+
+// ShellArg is the alias pair logical=provider quoted for a command the user
+// copies into their shell: in single quotes for a POSIX shell, where * would
+// expand, and in double quotes on Windows, which PowerShell and cmd.exe both
+// strip (cmd.exe would keep single quotes in the argument).
+func ShellArg(logical, provider string) string {
+	if runtime.GOOS == "windows" {
+		return `"` + logical + "=" + provider + `"`
+	}
+	return "'" + logical + "=" + provider + "'"
 }

@@ -1,6 +1,10 @@
 package ui
 
-import "github.com/Hoper-J/ccwrap/internal/model"
+import (
+	"regexp"
+
+	"github.com/Hoper-J/ccwrap/internal/model"
+)
 
 // ShortID truncates a session ID to the 8-char form used by every
 // surface's default rendering. The full ID surfaces only in
@@ -19,6 +23,19 @@ func ShortID(id string) string {
 // the supervisor scan, and the TUI header — so the spelling/casing can
 // never drift between them.
 const ClaudeSessionHeader = "X-Claude-Code-Session-Id"
+
+// claudeUserAgent is how Claude Code names itself in User-Agent:
+// "claude-cli/2.1.296 (external, sdk-cli)".
+var claudeUserAgent = regexp.MustCompile(`^claude-cli/(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?:[ (]|$)`)
+
+// ClaudeVersionFromUserAgent is the Claude Code version a request's
+// User-Agent names, or "" when it is not Claude Code's.
+func ClaudeVersionFromUserAgent(ua string) string {
+	if m := claudeUserAgent.FindStringSubmatch(ua); m != nil {
+		return m[1]
+	}
+	return ""
+}
 
 // LatestClaudeSessionID returns the ClaudeSessionHeader value carried by
 // the most recent record that has it. Records are appended oldest-first,

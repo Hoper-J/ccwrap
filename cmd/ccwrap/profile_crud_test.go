@@ -12,6 +12,7 @@ import (
 
 	"github.com/Hoper-J/ccwrap/internal/app"
 	"github.com/Hoper-J/ccwrap/internal/profiles"
+	"github.com/Hoper-J/ccwrap/internal/testutil"
 )
 
 func TestReadStdinAuthKey_StripsTrailingLF(t *testing.T) {
@@ -1122,7 +1123,7 @@ func TestProfileRm_LastProfile_LeavesEmptyFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("file should exist; stat err=%v", err)
 	}
-	if got := st.Mode().Perm(); got != 0o600 {
+	if got := st.Mode().Perm(); got != 0o600 && testutil.HasUnixPermissions() {
 		t.Fatalf("expected 0o600; got %o", got)
 	}
 	file, _ := profiles.Load(path)
@@ -1283,7 +1284,7 @@ func TestProfileAliasesAskForDefault(t *testing.T) {
 	_, errOut := withCapturedStdio(t, func() {
 		profileAdd(paths, []string{"gw", "--base-url", "https://gw.example", "--auth-mode", "ccwrap_bearer", "--auth-key", "k", "--model-alias", "claude-opus-4-8=deepseek-v4-flash"})
 	})
-	for _, want := range []string{"Claude models without their own alias reach the upstream under their Claude names", "ccwrap profile edit gw --model-alias '*=deepseek-v4-flash'", "ccwrap profile edit gw --model-alias '*=*'"} {
+	for _, want := range []string{"Claude models without their own alias reach the upstream under their Claude names", testutil.ShellQuotes("ccwrap profile edit gw --model-alias '*=deepseek-v4-flash'"), testutil.ShellQuotes("ccwrap profile edit gw --model-alias '*=*'")} {
 		if !strings.Contains(errOut, want) {
 			t.Fatalf("add: missing %q in:\n%s", want, errOut)
 		}

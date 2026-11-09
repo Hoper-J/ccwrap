@@ -4,6 +4,7 @@ package update
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"strings"
 
@@ -88,6 +89,9 @@ func ManualHint(ch Channel) string {
 		return strings.Join(argv, " ")
 	}
 	if ch == ChannelBinary {
+		if runtime.GOOS == "windows" {
+			return "irm https://raw.githubusercontent.com/Hoper-J/ccwrap/main/install.ps1 | iex"
+		}
 		return "curl -fsSL https://raw.githubusercontent.com/Hoper-J/ccwrap/main/install.sh | sh"
 	}
 	return "git pull && go build -o ccwrap ./cmd/ccwrap"

@@ -23,6 +23,9 @@ npm install -g ccwrap-cli
 # or: install script (downloads the prebuilt binary)
 curl -fsSL https://raw.githubusercontent.com/Hoper-J/ccwrap/main/install.sh | sh
 
+# the install script on Windows (PowerShell)
+irm https://raw.githubusercontent.com/Hoper-J/ccwrap/main/install.ps1 | iex
+
 # or: install with Go
 go install github.com/Hoper-J/ccwrap/cmd/ccwrap@latest
 ```
@@ -40,9 +43,20 @@ ccwrap upgrade          # channel-aware: npm installs upgrade via npm; release b
 ccwrap version --check  # check only, install nothing
 ```
 
-New releases are also surfaced in the launch banner and on session exit (checked at most once daily; disable with `CCWRAP_NO_UPDATE_CHECK=1`). Manual equivalents: `npm i -g ccwrap-cli@latest`, re-run install.sh, or `go install github.com/Hoper-J/ccwrap/cmd/ccwrap@latest`.
+New releases are also surfaced in the launch banner and on session exit (checked at most once daily; disable with `CCWRAP_NO_UPDATE_CHECK=1`). Manual equivalents: `npm i -g ccwrap-cli@latest`, re-run install.sh (install.ps1 on Windows), or `go install github.com/Hoper-J/ccwrap/cmd/ccwrap@latest`.
 
 `ccwrap update` is an alias for `ccwrap upgrade` and upgrades ccwrap itself; to update Claude Code, run `claude update` directly (or `ccwrap -- update` to route it through the ccwrap session environment).
+
+### Windows
+
+Windows 10 / 11 (x64, ARM64) is supported, through npm or install.ps1. install.ps1 puts `ccwrap.exe` in `%USERPROFILE%\.local\bin`, the folder where Claude Code's native installer puts `claude.exe`, and adds it to your user PATH when needed; `CCWRAP_BINDIR` picks another folder, `CCWRAP_NO_MODIFY_PATH=1` leaves PATH alone.
+
+Where Windows differs from macOS / Linux:
+
+- With Claude Code installed through npm, `claude` on PATH is `claude.cmd`. cmd.exe re-parses the arguments a batch file gets, so ccwrap starts the `claude.exe` behind it directly; other `.cmd` / `.bat` files are refused — point `--claude-bin` at `claude.exe`.
+- Each session shows two `ccwrap.exe` processes: the outer one waits, the inner one runs the session in its own console process group. The Ctrl+C that `ccwrap stop` sends reaches that session alone, not the shell or script that started it.
+- State lives in `%USERPROFILE%\.ccwrap\`, runtime files in `%TEMP%\ccwrap\`.
+- Inside WSL, install the Linux build; it works as on Linux.
 
 ## Quick start
 
@@ -211,7 +225,7 @@ ccwrap open       [--print] [SESSION-ID | PROJECT]
 ccwrap ui         [status | stop]
 ccwrap dashboard  [--session ID] [--view overview|requests|errors|diagnostics]
 ccwrap doctor     [--json] [--verbose] [--session ID] [--profile NAME]
-ccwrap stop       [--session ID | --all]
+ccwrap stop       [--all | SESSION-ID | PROJECT]
 ccwrap gc         [--json]
 ccwrap upgrade    [--egress-proxy auto|direct|URL]
 ccwrap version    [--check] [--egress-proxy auto|direct|URL]
@@ -225,13 +239,15 @@ ccwrap profile    {ls | status | switch <name> | test [name] | test-egress [name
 
 Without a management subcommand, `ccwrap` launches Claude Code directly. In launch mode it consumes only the flags it recognizes; unknown flags, positional arguments, or `--` are passed to Claude verbatim.
 
+To name a session, the first characters of its ID are enough (the 8-character ID `ccwrap status` shows will do), with `--session` too. `ccwrap open` and `ccwrap stop` also take a project folder name. With neither, they pick the session they run in (say, a command Claude Code runs), else the one whose project holds the current directory, else the only one running.
+
 `ccwrap ui` is one local web app per user: look at sessions, manage profiles, and start sessions by project there. A launch starts it in the background (`CCWRAP_NO_UI=1` turns that off; it also stays off when stderr is not a terminal), and it exits on its own after 10 minutes with no page open and no session running. `ccwrap open` starts it when needed and opens the session you are in, or the Projects page when no session is running.
 
 On the Projects page each folder offers Continue (the latest conversation there), Resume… (pick one from the folder's conversations) and New (a new conversation). While a session runs in the folder, Resume… is in the row's ⋯ menu; the list marks the conversation that is open and opens its session instead of a second Claude Code on the same conversation. More in Claude Code… at the bottom opens Claude Code's own list. Once a session has ended, Continue on its page resumes that session's own conversation.
 
 ![image-20261030111515843](assets/image-20261030111515843.png)
 
-Over SSH or without a graphical session, `ccwrap open` opens no browser: it prints the link and an `ssh -L <port>:127.0.0.1:<port> <this host>` command to run on your own machine. To keep that command valid, pin the port with `CCWRAP_UI_PORT`. Starting a session in a terminal from the Projects page works on macOS only for now (Terminal, iTerm, Ghostty).
+Over SSH or without a graphical session, `ccwrap open` opens no browser: it prints the link and an `ssh -L <port>:127.0.0.1:<port> <this host>` command to run on your own machine. To keep that command valid, pin the port with `CCWRAP_UI_PORT`. Starting a session in a terminal from the Projects page works on macOS (Terminal, iTerm, Ghostty), Windows (Windows Terminal) and Linux (the common terminals, in a graphical session).
 
 ## Launch flags
 
@@ -258,7 +274,7 @@ Over SSH or without a graphical session, `ccwrap open` opens no browser: it prin
 <details>
 <summary>schema · resolution precedence · CLI · hot-swap · egress self-test</summary>
 
-A profile is a named bundle of config: base URL, auth, model aliases, upstream headers, egress mode. Profiles live in `~/Library/Application Support/ccwrap/profiles.json` on macOS, `~/.config/ccwrap/profiles.json` or `$XDG_STATE_HOME/ccwrap/profiles.json` on Linux.
+A profile is a named bundle of config: base URL, auth, model aliases, upstream headers, egress mode. Profiles live in `~/Library/Application Support/ccwrap/profiles.json` on macOS, `~/.config/ccwrap/profiles.json` or `$XDG_STATE_HOME/ccwrap/profiles.json` on Linux, and `%USERPROFILE%\.ccwrap\profiles.json` on Windows.
 
 ### Schema
 
@@ -518,6 +534,7 @@ Claude and inherited child processes are launched with:
 - a composite CA bundle env (`system roots + ccwrap root`) for Python / curl / Git
 - loopback-only `NO_PROXY`
 - `CCWRAP_SESSION_ID` → this ccwrap session's ID, so commands and hooks run inside Claude Code can find their session
+- `DISABLE_AUTOUPDATER=1` → Claude Code does not update itself during a session (a value you set yourself is kept). An update downloads through the session's proxy, which goes away with the session, and on Windows a cut-short update leaves an install without `claude.exe`. When a newer Claude Code is out, ccwrap says so at session end and in `ccwrap doctor`; run `claude update` outside ccwrap
 - `CLAUDE_CODE_GZIP_REQUEST_BODIES=0` → uncompressed request bodies. Model aliasing, system-block stripping and the request inspector all read them; Claude Code skips gzip behind a proxy anyway, so this only overrides an explicit `=1`
 - a ccwrap-generated `--settings` mirroring the values above into Claude flag settings. It is passed as inline JSON: Claude Code reports the directory of a `--settings` file upstream, and for inline JSON it reports its own temp dir, so no ccwrap path leaves the machine. If you pass your own `--settings` file, the merged result goes into a 0600 file under `/tmp/claude-<uid>/` instead, keeping its contents out of the process list
 
@@ -629,6 +646,7 @@ Default `<runtime>` and `<state>`:
 
 - macOS: state in `~/Library/Application Support/ccwrap/`, runtime in `$TMPDIR/ccwrap-<UID>/` (typically under `/var/folders/...`)
 - Linux: state in `~/.local/state/ccwrap/` (or `$XDG_STATE_HOME/ccwrap/`), runtime in `$XDG_RUNTIME_DIR/ccwrap/`, or `/tmp/ccwrap-<UID>/` without `XDG_RUNTIME_DIR`
+- Windows: state in `%USERPROFILE%\.ccwrap\`, runtime in `%TEMP%\ccwrap\`
 - Override with `CCWRAP_STATE_DIR` / `CCWRAP_RUNTIME_DIR`
 
 The runtime dir must be your own: not a symlink, owned by you, and not writable by other users. Otherwise ccwrap refuses to use it and suggests setting `CCWRAP_RUNTIME_DIR`.

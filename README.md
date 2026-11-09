@@ -23,6 +23,9 @@ npm install -g ccwrap-cli
 # 或：安装脚本（下载预编译二进制）
 curl -fsSL https://raw.githubusercontent.com/Hoper-J/ccwrap/main/install.sh | sh
 
+# Windows（PowerShell）的安装脚本
+irm https://raw.githubusercontent.com/Hoper-J/ccwrap/main/install.ps1 | iex
+
 # 或：用 Go 直接装
 go install github.com/Hoper-J/ccwrap/cmd/ccwrap@latest
 ```
@@ -40,9 +43,20 @@ ccwrap upgrade          # 渠道感知：npm 装的走 npm，二进制装的原�
 ccwrap version --check  # 只查不装
 ```
 
-新版本也会在启动横幅、会话退出时提示（每日最多检查一次，`CCWRAP_NO_UPDATE_CHECK=1` 关闭）。手动升级等价命令：`npm i -g ccwrap-cli@latest`、重跑 install.sh、`go install github.com/Hoper-J/ccwrap/cmd/ccwrap@latest`。
+新版本也会在启动横幅、会话退出时提示（每日最多检查一次，`CCWRAP_NO_UPDATE_CHECK=1` 关闭）。手动升级等价命令：`npm i -g ccwrap-cli@latest`、重跑 install.sh（Windows 上是 install.ps1）、`go install github.com/Hoper-J/ccwrap/cmd/ccwrap@latest`。
 
 `ccwrap update` 是 `ccwrap upgrade` 的别名，升级的是 ccwrap 自己；要升级 Claude Code 本体请直接运行 `claude update`（想让它走 ccwrap 的会话环境则用 `ccwrap -- update`）。
+
+### Windows
+
+支持 Windows 10 / 11（x64、ARM64），npm 和 install.ps1 都能装。install.ps1 把 `ccwrap.exe` 装到 `%USERPROFILE%\.local\bin`，和 Claude Code 原生安装器放 `claude.exe` 的是同一个目录，需要时顺手加进用户 PATH；`CCWRAP_BINDIR` 换目录，`CCWRAP_NO_MODIFY_PATH=1` 不改 PATH。
+
+和 macOS / Linux 不一样的几处：
+
+- Claude Code 用 npm 装的话，PATH 上的 `claude` 是 `claude.cmd`。cmd.exe 会重新解析传给批处理的参数，所以 ccwrap 直接启动它背后的 `claude.exe`；别的 `.cmd` / `.bat` 不接受，用 `--claude-bin` 指向 `claude.exe` 就行。
+- 每个会话会有两个 `ccwrap.exe`：外层只负责等待，内层带着会话跑在自己的控制台进程组里。这样 `ccwrap stop` 发的 Ctrl+C 只到这个会话，不会打断启动它的 shell 或脚本。
+- state 在 `%USERPROFILE%\.ccwrap\`，runtime 在 `%TEMP%\ccwrap\`。
+- 在 WSL 里装 Linux 版，用法和 Linux 一样。
 
 ## 快速开始
 
@@ -211,7 +225,7 @@ ccwrap open       [--print] [SESSION-ID | PROJECT]
 ccwrap ui         [status | stop]
 ccwrap dashboard  [--session ID] [--view overview|requests|errors|diagnostics]
 ccwrap doctor     [--json] [--verbose] [--session ID] [--profile NAME]
-ccwrap stop       [--session ID | --all]
+ccwrap stop       [--all | SESSION-ID | PROJECT]
 ccwrap gc         [--json]
 ccwrap upgrade    [--egress-proxy auto|direct|URL]
 ccwrap version    [--check] [--egress-proxy auto|direct|URL]
@@ -225,13 +239,15 @@ ccwrap profile    {ls | status | switch <name> | test [name] | test-egress [name
 
 不带管理子命令时，`ccwrap` 会直接启动 Claude Code。在启动模式下，ccwrap 只消费它认识的flag，不认识的 flag、位置参数或 `--` 会原封不动传给 Claude。
 
+要指定会话时，写会话 ID 的前几位就行（`ccwrap status` 显示的 8 位短 ID 足够），`--session` 也一样。`ccwrap open` 和 `ccwrap stop` 还可以写项目文件夹名。都不写时，在会话里运行（比如 Claude Code 执行的命令）就选这个会话，否则选当前目录所在项目的会话；只有一个会话在运行时就选它。
+
 `ccwrap ui` 是每个用户一个的本地网页，看会话、管理 profile、按项目启动会话都在这里。启动会话时它会在后台自动拉起（`CCWRAP_NO_UI=1` 关闭；stderr 不是终端时也不拉起）；没有页面开着、也没有会话在跑时，10 分钟后自己退出。`ccwrap open` 会在需要时启动它，然后在浏览器里打开当前所在的会话，没有会话时打开 Projects 页。
 
 Projects 页里，每个文件夹可以 Continue（接着这里最近的一次对话）、Resume…（从这个文件夹的对话列表里挑一段恢复）或 New（开始新对话）。文件夹里已经有会话在运行时，Resume… 在行末的 ⋯ 菜单里；列表会标出正开着的对话，点它会打开那个会话，不会再开一个 Claude Code 写同一段对话。列表底部的 More in Claude Code… 进入 Claude Code 自己的列表。会话结束后，它页面上的 Continue 会恢复这个会话自己的那段对话。
 
 ![image-20261030111515843](assets/image-20261030111515843.png)
 
-在 SSH 里或者没有图形界面时，`ccwrap open` 不开浏览器，而是打印链接和一条 `ssh -L <端口>:127.0.0.1:<端口> <这台机器>` 转发命令，在自己的电脑上执行后就能打开；想让这条命令一直有效，用 `CCWRAP_UI_PORT` 固定端口。Projects 页里在终端中启动会话目前只支持 macOS（Terminal、iTerm、Ghostty）。
+在 SSH 里或者没有图形界面时，`ccwrap open` 不开浏览器，而是打印链接和一条 `ssh -L <端口>:127.0.0.1:<端口> <这台机器>` 转发命令，在自己的电脑上执行后就能打开；想让这条命令一直有效，用 `CCWRAP_UI_PORT` 固定端口。Projects 页里在终端中启动会话支持 macOS（Terminal、iTerm、Ghostty）、Windows（Windows Terminal）和 Linux（常见的终端，需要图形界面）。
 
 ## 启动 flags
 
@@ -258,7 +274,7 @@ Projects 页里，每个文件夹可以 Continue（接着这里最近的一次�
 <details>
 <summary>schema · 解析优先级 · CLI · 热切换 · Egress 自检</summary>
 
-profile 是预定义的配置：base URL、auth、model alias、上游 header、egress mode。macOS 放在 `~/Library/Application Support/ccwrap/profiles.json`，Linux 放在 `~/.config/ccwrap/profiles.json` 或 `$XDG_STATE_HOME/ccwrap/profiles.json`。
+profile 是预定义的配置：base URL、auth、model alias、上游 header、egress mode。macOS 放在 `~/Library/Application Support/ccwrap/profiles.json`，Linux 放在 `~/.config/ccwrap/profiles.json` 或 `$XDG_STATE_HOME/ccwrap/profiles.json`，Windows 放在 `%USERPROFILE%\.ccwrap\profiles.json`。
 
 ### Schema
 
@@ -518,6 +534,7 @@ Claude 和它继承的子进程启动时会带上：
 - 复合 CA bundle env（`系统根 + ccwrap 根`）给 Python / curl / Git
 - 仅 loopback 的 `NO_PROXY`
 - `CCWRAP_SESSION_ID` → 这次的 ccwrap 会话 ID，Claude Code 里跑的命令和 hook 可以靠它找到对应的会话
+- `DISABLE_AUTOUPDATER=1` → Claude Code 在会话里不自动更新（你自己设过就用你的值）。会话里的更新经会话代理下载，会话一结束就会中断，Windows 上还会留下一个没有 `claude.exe` 的安装。有新版本时 ccwrap 会在会话结束时提示，`ccwrap doctor` 里也有一行；在 ccwrap 外运行 `claude update` 即可
 - `CLAUDE_CODE_GZIP_REQUEST_BODIES=0` → 请求 body 不压缩。ccwrap 的别名改写、system 块裁剪和请求查看器都要读 body；Claude Code 走代理时本来就不压缩，这一项只是盖过显式设置的 `=1`
 - 一份 ccwrap 生成的 `--settings`，把上面这些值镜像到 Claude flag 设置里。默认以 inline JSON 传入：Claude Code 会把 `--settings` 文件所在目录随请求上报，inline 时报的是它自己的临时目录，不会带出 ccwrap 的路径。你自己传了 `--settings` 文件时，合并结果改写进 `/tmp/claude-<uid>/` 下的 0600 文件，免得文件内容出现在进程列表里
 
@@ -629,6 +646,7 @@ State：
 
 - macOS：state 在 `~/Library/Application Support/ccwrap/`，runtime 在 `$TMPDIR/ccwrap-<UID>/`（通常在 `/var/folders/...` 下）
 - Linux：state 在 `~/.local/state/ccwrap/`（或 `$XDG_STATE_HOME/ccwrap/`），runtime 在 `$XDG_RUNTIME_DIR/ccwrap/`，没有 `XDG_RUNTIME_DIR` 时是 `/tmp/ccwrap-<UID>/`
+- Windows：state 在 `%USERPROFILE%\.ccwrap\`，runtime 在 `%TEMP%\ccwrap\`
 - 可用 `CCWRAP_STATE_DIR` / `CCWRAP_RUNTIME_DIR` 覆盖
 
 runtime 目录必须是当前用户自己的：不能是符号链接，属主必须是你，其他用户不能写入。不满足时 ccwrap 拒绝使用它，并提示设置 `CCWRAP_RUNTIME_DIR`。

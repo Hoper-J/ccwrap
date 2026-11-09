@@ -115,6 +115,9 @@ func (d *doctorChecks) runtimeChecks(paths app.Paths) {
 				warnDetail = detail + " ; " + warnDetail
 			}
 			d.addWithFields("ca", "warn", "local CA bundle ready but falling back to ccwrap-only (no system roots)", warnDetail, fields)
+		} else if status.StaleWarning != "" {
+			fields["stale_warning"] = status.StaleWarning
+			d.addWithFields("ca", "warn", "local CA bundle kept from an earlier launch (a program had it open)", status.StaleWarning, fields)
 		} else {
 			d.addWithFields("ca", "pass", "local composite CA bundle is ready", maybeDetail(d.verbose, detail), fields)
 		}
@@ -127,6 +130,7 @@ func (d *doctorChecks) runtimeChecks(paths app.Paths) {
 		d.add("session_listener", "pass", "session proxy port can bind", "")
 	}
 	addLocalAccessCheck(d.add, os.Getenv, localpeer.SelfTest)
+	addClaudeUpdateCheck(d.add, paths.StateDir)
 	// Update awareness: cache-only read — doctor never hits the network
 	// for this row; `ccwrap version --check` / `ccwrap upgrade` are the
 	// explicit network probes.

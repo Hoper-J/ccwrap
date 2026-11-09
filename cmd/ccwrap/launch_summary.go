@@ -220,13 +220,13 @@ func aliasFixLines(alias modelalias.Config, profile string) []string {
 		cmd = "ccwrap profile edit " + profile + " --model-alias"
 	}
 	target, candidates := alias.SuggestedDefault()
-	send := fmt.Sprintf("    Send them to one model: %s '%s=%s'", cmd, modelalias.DefaultKey, fallbackText(target, "<model>"))
+	send := fmt.Sprintf("    Send them to one model: %s %s", cmd, modelalias.ShellArg(modelalias.DefaultKey, fallbackText(target, "<model>")))
 	if target == "" && len(candidates) > 1 {
 		send += " (this route uses " + strings.Join(candidates, ", ") + ")"
 	}
 	return []string{
 		send,
-		fmt.Sprintf("    Or, if the upstream serves Claude names, keep them: %s '%s=%s'", cmd, modelalias.DefaultKey, modelalias.KeepName),
+		fmt.Sprintf("    Or, if the upstream serves Claude names, keep them: %s %s", cmd, modelalias.ShellArg(modelalias.DefaultKey, modelalias.KeepName)),
 	}
 }
 

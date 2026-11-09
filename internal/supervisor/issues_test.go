@@ -12,6 +12,7 @@ import (
 	"github.com/Hoper-J/ccwrap/internal/model"
 	"github.com/Hoper-J/ccwrap/internal/modelalias"
 	"github.com/Hoper-J/ccwrap/internal/preflight"
+	"github.com/Hoper-J/ccwrap/internal/testutil"
 )
 
 // issueRoute is a third-party route under profile, x-api-key auth, with the
@@ -286,7 +287,7 @@ func TestIssueUnaliasedModelWithoutProfile(t *testing.T) {
 	rec.Model, rec.ModelUnmapped = "claude-opus-5-5", true
 	sv.recordRequest(sess.public.ID, rec)
 	is := onlyIssue(t, sess)
-	if is.Fixes != nil || is.Note != "Relaunch with --model-alias '*=gpt-6' to send them to gpt-6, or '*=*' to keep their Claude names." {
+	if is.Fixes != nil || is.Note != testutil.ShellQuotes("Relaunch with --model-alias '*=gpt-6' to send them to gpt-6, or '*=*' to keep their Claude names.") {
 		t.Fatalf("issue = %+v", is)
 	}
 }

@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
+
+	"github.com/Hoper-J/ccwrap/internal/filelock"
 )
 
 // Lock acquires an exclusive, cross-process advisory lock guarding the
@@ -24,9 +25,10 @@ import (
 // convention as the CA lock; see internal/certs/ca.go's acquireLock), NOT
 // on profiles.json itself: OverwriteFile replaces profiles.json via an
 // atomic rename, which swaps the inode out from under any lock held on the
-// original file's fd. flock is associated with the open file description,
-// so two acquisitions from the same process (each opening its own fd) also
-// serialize — making this the cross-process complement to profileFileMu.
+// original file's fd. The lock belongs to the open file (flock's open file
+// description, LockFileEx's handle), so two acquisitions from the same
+// process (each opening its own fd) also serialize — making this the
+// cross-process complement to profileFileMu.
 func Lock(stateDir string) (unlock func(), err error) {
 	lockPath := filepath.Join(stateDir, "locks", "profiles.lock")
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
@@ -36,12 +38,12 @@ func Lock(stateDir string) (unlock func(), err error) {
 	if err != nil {
 		return nil, fmt.Errorf("open profiles lock: %w", err)
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	if err := filelock.Lock(f); err != nil {
 		_ = f.Close()
-		return nil, fmt.Errorf("flock profiles lock: %w", err)
+		return nil, fmt.Errorf("lock profiles lock: %w", err)
 	}
 	return func() {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = filelock.Unlock(f)
 		_ = f.Close()
 	}, nil
 }

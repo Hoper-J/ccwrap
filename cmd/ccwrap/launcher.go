@@ -103,6 +103,8 @@ type sessionLauncher struct {
 	ca            *certs.Manager
 	supervisor    *supervisor.Supervisor
 	supervisorErr chan error
+	// stopRequested reports whether ccwrap stop asked the session to end.
+	stopRequested func() bool
 	client        *control.Client
 	session       *model.Session
 	cmd           *exec.Cmd
@@ -219,6 +221,7 @@ func (l *sessionLauncher) StartSupervisor() error {
 		return err
 	}
 	l.supervisor = sv
+	l.stopRequested = sv.StopRequested
 	l.supervisorErr = make(chan error, 1)
 	go func() { l.supervisorErr <- sv.Run(l.ctx) }()
 	l.rollback.push(func() {
@@ -325,6 +328,21 @@ func (l *sessionLauncher) WriteSessionSettings() error {
 	return nil
 }
 
+// claudeVersion is the Claude Code version the session's requests named, or
+// "" (no request yet, or no supervisor to ask).
+func (l *sessionLauncher) claudeVersion() string {
+	if l.client == nil || l.sessionID == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	sess, err := l.client.GetSession(ctx, l.sessionID)
+	if err != nil || sess == nil {
+		return ""
+	}
+	return sess.ClaudeVersion
+}
+
 // sessionIDEnv names the ccwrap session a process runs under.
 const sessionIDEnv = "CCWRAP_SESSION_ID"
 
@@ -356,6 +374,9 @@ func (l *sessionLauncher) ResolveClaudeBin() error {
 			"or point ccwrap at it with --claude-bin /path/to/claude (or set CLAUDE_BIN=/path/to/claude)",
 			l.launch.ClaudeBin, err)
 	}
+	if bin, err = directClaudeBin(bin); err != nil {
+		return err
+	}
 	l.bin = bin
 	return nil
 }
@@ -375,9 +396,10 @@ func (l *sessionLauncher) SpawnChild() error {
 	cmd := exec.Command(bin, args...)
 	cmd.Env = l.childEnv
 	// Bind the child's lifetime to ours where the OS allows (Linux
-	// Pdeathsig) so a hard death of ccwrap — SIGKILL/OOM/bare-goroutine
-	// panic, none of which run Wait()'s in-process kill — does not leave
-	// Claude orphaned against a dead proxy. No-op off Linux.
+	// Pdeathsig, a Windows job object after Start) so a hard death of
+	// ccwrap — SIGKILL/OOM/bare-goroutine panic, none of which run Wait()'s
+	// in-process kill — does not leave Claude orphaned against a dead
+	// proxy. No-op elsewhere.
 	cmd.SysProcAttr = childSysProcAttr()
 	cmd.Stdin = os.Stdin
 	if l.childStdout != nil {
@@ -389,6 +411,9 @@ func (l *sessionLauncher) SpawnChild() error {
 	cmd.Dir = l.cwd
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start claude: %w", err)
+	}
+	if err := bindChildLifetime(cmd.Process); err != nil {
+		fmt.Fprintf(os.Stderr, "ccwrap: Claude Code would keep running if ccwrap were killed: %v\n", err)
 	}
 	l.cmd = cmd
 	l.rollback.push(func() {
@@ -527,14 +552,21 @@ func (l *sessionLauncher) Wait() (int, error) {
 		if sig := syscall.Signal(l.stopSig.Load()); sig != 0 {
 			l.closeReason = "stopped by " + signalName(sig)
 		}
-		if waitErr == nil {
-			return 0, nil
-		}
+		code := 0
 		var exitErr *exec.ExitError
 		if errors.As(waitErr, &exitErr) {
-			return exitStatus(exitErr), nil
+			code = exitStatus(exitErr)
+		} else if waitErr != nil {
+			return 0, waitErr
 		}
-		return 0, waitErr
+		if l.stopRequested != nil && l.stopRequested() {
+			// ccwrap stop ends ccwrap with 143 everywhere: Claude Code exits
+			// 143 on Unix, where it gets SIGTERM, but 0 on Windows, where
+			// it gets a Ctrl+C.
+			l.closeReason = "stopped by ccwrap stop"
+			code = 128 + int(syscall.SIGTERM)
+		}
+		return code, nil
 	case svErr := <-l.supervisorErr:
 		// Supervisor died before Claude — the data-plane proxy is gone.
 		// Kill the now-useless child and reap it so cmd resources are

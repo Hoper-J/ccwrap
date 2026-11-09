@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/Hoper-J/ccwrap/internal/testutil"
 )
 
 func TestRememberLaunch(t *testing.T) {
@@ -24,7 +26,7 @@ func TestRememberLaunch(t *testing.T) {
 	if m["/w/a"].LastProfile != "official" || m["/w/b"].LastProfile != "" || len(m) != 2 {
 		t.Fatalf("memories = %+v", m)
 	}
-	if info, err := os.Stat(filepath.Join(dir, memoryFile)); err != nil || info.Mode().Perm() != 0o600 {
+	if info, err := os.Stat(filepath.Join(dir, memoryFile)); err != nil || (testutil.HasUnixPermissions() && info.Mode().Perm() != 0o600) {
 		t.Fatalf("file: %v %v", info, err)
 	}
 	if len(Memories(t.TempDir())) != 0 {

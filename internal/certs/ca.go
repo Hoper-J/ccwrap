@@ -20,10 +20,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/Hoper-J/ccwrap/internal/app"
+	"github.com/Hoper-J/ccwrap/internal/filelock"
 )
 
 type BundleStatus struct {
@@ -32,6 +32,9 @@ type BundleStatus struct {
 	HasSystemCA     bool
 	HasCCWRAPRoot   bool
 	SystemCAWarning string
+	// StaleWarning says why the bundle on disk could not be updated and was
+	// kept as it was; it still trusts ccwrap's root.
+	StaleWarning string
 }
 
 type Manager struct {
@@ -251,7 +254,8 @@ func (m *Manager) ensureCompositeBundleLocked() (BundleStatus, error) {
 	ccwrapPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: m.caCert.Raw})
 	systemPEM, sysErr := m.systemCABundleLocked()
 	if sysErr != nil {
-		if err := writePrivateAtomic(m.paths.CABundlePath, ccwrapPEM, 0o600); err != nil {
+		stale, err := writeBundle(m.paths.CABundlePath, ccwrapPEM, ccwrapPEM)
+		if err != nil {
 			return BundleStatus{}, err
 		}
 		return BundleStatus{
@@ -260,10 +264,12 @@ func (m *Manager) ensureCompositeBundleLocked() (BundleStatus, error) {
 			HasSystemCA:     false,
 			HasCCWRAPRoot:   len(bytes.TrimSpace(ccwrapPEM)) > 0,
 			SystemCAWarning: sysErr.Error(),
+			StaleWarning:    stale,
 		}, nil
 	}
 	combined := append(append([]byte{}, systemPEM...), ccwrapPEM...)
-	if err := writePrivateAtomic(m.paths.CABundlePath, combined, 0o600); err != nil {
+	stale, err := writeBundle(m.paths.CABundlePath, combined, ccwrapPEM)
+	if err != nil {
 		return BundleStatus{}, err
 	}
 	return BundleStatus{
@@ -271,7 +277,27 @@ func (m *Manager) ensureCompositeBundleLocked() (BundleStatus, error) {
 		BundlePath:    m.paths.CABundlePath,
 		HasSystemCA:   len(bytes.TrimSpace(systemPEM)) > 0,
 		HasCCWRAPRoot: len(bytes.TrimSpace(ccwrapPEM)) > 0,
+		StaleWarning:  stale,
 	}, nil
+}
+
+// writeBundle makes the bundle at path hold data, writing only when it
+// differs. A bundle that cannot be replaced (on Windows, one a program has
+// open) but already trusts ccwrap's root stays as it is: it still works,
+// only without root changes since it was written. stale says why it was
+// kept.
+func writeBundle(path string, data, ccwrapPEM []byte) (stale string, err error) {
+	old, readErr := os.ReadFile(path)
+	if readErr == nil && bytes.Equal(old, data) {
+		return "", nil
+	}
+	if err := writePrivateAtomic(path, data, 0o600); err != nil {
+		if readErr == nil && bytes.Contains(old, ccwrapPEM) {
+			return fmt.Sprintf("could not update %s, kept the previous one: %v", path, err), nil
+		}
+		return "", err
+	}
+	return "", nil
 }
 
 func containsPEMCertificate(data []byte) bool {
@@ -307,12 +333,7 @@ func readSystemCABundle() ([]byte, error) {
 		}
 		return data, nil
 	}
-	switch runtime.GOOS {
-	case "darwin":
-		return readDarwinSystemCAs()
-	default:
-		return readLinuxSystemCAs()
-	}
+	return readPlatformSystemCAs()
 }
 
 func readLinuxSystemCAs() ([]byte, error) {
@@ -447,10 +468,15 @@ func writePrivateAtomic(path string, data []byte, mode os.FileMode) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return err
+	// Windows refuses to replace a file another program has open; such a
+	// reader is usually done within moments.
+	for attempt := 0; ; attempt++ {
+		err = os.Rename(tmpPath, path)
+		if err == nil || runtime.GOOS != "windows" || attempt == 10 {
+			return err
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
-	return nil
 }
 
 func acquireLock(path string) (func(), error) {
@@ -461,12 +487,12 @@ func acquireLock(path string) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	if err := filelock.Lock(f); err != nil {
 		_ = f.Close()
 		return nil, err
 	}
 	return func() {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = filelock.Unlock(f)
 		_ = f.Close()
 	}, nil
 }

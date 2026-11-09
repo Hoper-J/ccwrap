@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -320,20 +319,12 @@ func TestProfileSwitchAgainstLiveSupervisor(t *testing.T) {
 
 func TestRunProfileSubcommand_NoArgs_UsageListsAllVerbs(t *testing.T) {
 	paths := pathsFor(t) // helper from profile_crud_test.go (same package)
-	r, w, _ := os.Pipe()
-	origStderr := os.Stderr
-	os.Stderr = w
-	t.Cleanup(func() { os.Stderr = origStderr })
-
-	code := runProfileSubcommand(paths, []string{})
-	w.Close()
-	captured, _ := io.ReadAll(r)
-	os.Stderr = origStderr
+	var code int
+	got := captureStderr(t, func() { code = runProfileSubcommand(paths, []string{}) })
 
 	if code != 2 {
 		t.Fatalf("expected 2; got %d", code)
 	}
-	got := string(captured)
 	for _, verb := range []string{"ls", "status", "switch", "test", "add", "edit", "rm", "set-default"} {
 		if !strings.Contains(got, verb) {
 			t.Fatalf("usage missing verb %q; got %q", verb, got)
@@ -343,20 +334,12 @@ func TestRunProfileSubcommand_NoArgs_UsageListsAllVerbs(t *testing.T) {
 
 func TestRunProfileSubcommand_UnknownVerb_UsageListsAllVerbs(t *testing.T) {
 	paths := pathsFor(t)
-	r, w, _ := os.Pipe()
-	origStderr := os.Stderr
-	os.Stderr = w
-	t.Cleanup(func() { os.Stderr = origStderr })
-
-	code := runProfileSubcommand(paths, []string{"bogus"})
-	w.Close()
-	captured, _ := io.ReadAll(r)
-	os.Stderr = origStderr
+	var code int
+	got := captureStderr(t, func() { code = runProfileSubcommand(paths, []string{"bogus"}) })
 
 	if code != 2 {
 		t.Fatalf("expected 2; got %d", code)
 	}
-	got := string(captured)
 	for _, verb := range []string{"ls", "status", "switch", "test", "add", "edit", "rm", "set-default"} {
 		if !strings.Contains(got, verb) {
 			t.Fatalf("usage missing verb %q; got %q", verb, got)

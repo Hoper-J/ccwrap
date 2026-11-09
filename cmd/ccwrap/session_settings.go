@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
+	"runtime"
+
+	"github.com/Hoper-J/ccwrap/internal/app"
 )
 
 // sessionSettingsArg returns the value ccwrap passes to Claude Code's
@@ -45,15 +47,19 @@ func sessionSettingsArg(doc map[string]any, userSettingsFile bool) (string, func
 }
 
 // claudeTempRoot returns Claude Code's per-uid temp root,
-// ${CLAUDE_CODE_TMPDIR:-/tmp}/claude-<uid>, creating it 0700. Like Claude
-// Code it refuses a root that is a symlink or owned by another user (a
+// ${CLAUDE_CODE_TMPDIR:-/tmp}/claude-<uid> (on Windows
+// ${CLAUDE_CODE_TMPDIR:-%TEMP%}\claude), creating it 0700. Like Claude Code
+// it refuses a root that is a symlink or owned by another user (a
 // pre-planted /tmp entry).
 func claudeTempRoot() (string, error) {
 	base := os.Getenv("CLAUDE_CODE_TMPDIR")
 	if base == "" {
 		base = "/tmp"
+		if runtime.GOOS == "windows" {
+			base = os.TempDir()
+		}
 	}
-	dir := filepath.Join(base, fmt.Sprintf("claude-%d", os.Getuid()))
+	dir := filepath.Join(base, claudeTempDirName())
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
@@ -64,10 +70,19 @@ func claudeTempRoot() (string, error) {
 	if !fi.IsDir() {
 		return "", fmt.Errorf("refusing Claude Code temp dir %s: not a directory (a symlink?); set CLAUDE_CODE_TMPDIR to a directory you own", dir)
 	}
-	if st, ok := fi.Sys().(*syscall.Stat_t); ok && int(st.Uid) != os.Getuid() {
-		return "", fmt.Errorf("refusing Claude Code temp dir %s: owned by uid %d; set CLAUDE_CODE_TMPDIR to a directory you own", dir, st.Uid)
+	if owner, foreign := app.ForeignOwner(dir, fi); foreign {
+		return "", fmt.Errorf("refusing Claude Code temp dir %s: owned by %s; set CLAUDE_CODE_TMPDIR to a directory you own", dir, owner)
 	}
 	return dir, nil
+}
+
+// claudeTempDirName is the name of Claude Code's temp root: per uid, except
+// on Windows, whose temp dir is per-user already.
+func claudeTempDirName() string {
+	if runtime.GOOS == "windows" {
+		return "claude"
+	}
+	return fmt.Sprintf("claude-%d", os.Getuid())
 }
 
 func writeSessionSettingsFile(path string, doc map[string]any) error {

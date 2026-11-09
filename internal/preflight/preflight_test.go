@@ -121,6 +121,19 @@ func TestBuildChildEnvEmptyTimezoneNoTZWhenAbsent(t *testing.T) {
 	}
 }
 
+func TestBuildChildEnvPausesClaudeUpdates(t *testing.T) {
+	build := func(parent ...string) string {
+		return strings.Join(BuildChildEnv(append([]string{"PATH=/usr/bin"}, parent...), "http://127.0.0.1:4444", "/tmp/ca-cert.pem", "/tmp/ca-bundle.pem", nil, ChildAuthBootstrap{}, ""), "\n")
+	}
+	if env := build(); !strings.Contains(env, "DISABLE_AUTOUPDATER=1") {
+		t.Fatalf("expected DISABLE_AUTOUPDATER=1; got:\n%s", env)
+	}
+	// The user's own setting stays, whatever its case.
+	if env := build("disable_autoupdater=0"); strings.Contains(env, "DISABLE_AUTOUPDATER=1") || !strings.Contains(env, "disable_autoupdater=0") {
+		t.Fatalf("the user's DISABLE_AUTOUPDATER must be kept; got:\n%s", env)
+	}
+}
+
 func TestEffectiveEgressEnvReadsClaudeSettingsProxy(t *testing.T) {
 	tmp := t.TempDir()
 	configDir := filepath.Join(tmp, ".claude")

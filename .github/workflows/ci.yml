@@ -31,12 +31,18 @@ jobs:
           fi
       - name: go vet
         run: go vet ./...
+      - name: go vet (windows)
+        # The test job runs the Windows suite too; this catches a Windows
+        # compile break in the lint job's few minutes.
+        run: GOOS=windows go vet ./...
 
   test:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # The arm runners cover the linux/arm64 and windows/arm64 releases on
+        # real hardware; the other jobs only cross-compile them.
+        os: [ubuntu-latest, macos-latest, windows-latest, ubuntu-24.04-arm, windows-11-arm]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
@@ -71,8 +77,9 @@ jobs:
         run: go test -race ./...
 
   scripts:
-    # The distribution entry points (install.sh, the npm launcher) aren't covered
-    # by `go test` but are exactly the files a user pipes into `sh` / runs via npx.
+    # The distribution entry points (install.sh, install.ps1, the npm launcher)
+    # aren't covered by `go test` but are exactly the files a user pipes into
+    # `sh` / `iex` or runs via npx.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -86,13 +93,23 @@ jobs:
         run: |
           node --check npm/ccwrap-cli/bin/ccwrap.js
           node --check scripts/build-npm.mjs
+      - name: parse install.ps1
+        # PowerShell's own parser: a syntax error fails here, not halfway
+        # through someone's `irm | iex`. Windows PowerShell 5.1 reads a
+        # downloaded copy in the ANSI code page, so it must stay ASCII.
+        shell: pwsh
+        run: |
+          $errors = $null
+          $null = [System.Management.Automation.Language.Parser]::ParseFile("$PWD/install.ps1", [ref]$null, [ref]$errors)
+          if ($errors) { $errors | ForEach-Object { $_.ToString() }; exit 1 }
+          if ((Get-Content -Raw install.ps1) -match '[^\x00-\x7F]') { 'install.ps1 must be ASCII'; exit 1 }
 
   release-config:
     # Validate the release pipeline on every PR: `goreleaser check` catches a
     # broken .goreleaser.yaml, and a snapshot release cross-compiles ALL targets
-    # (darwin/linux x amd64/arm64) — the host-only `test` job above would miss a
-    # linux/arm64 or darwin/amd64 cross-compile break — and produces the real
-    # archives, so the npm staging step below can prove it still mates with them.
+    # (darwin/linux/windows x amd64/arm64) — the `test` job above would miss a
+    # darwin/amd64 cross-compile break — and produces the real archives, so the
+    # npm staging step below can prove it still mates with them.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

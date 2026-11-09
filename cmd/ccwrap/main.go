@@ -14,18 +14,28 @@ import (
 
 	"github.com/Hoper-J/ccwrap/internal/app"
 	"github.com/Hoper-J/ccwrap/internal/preflight"
+	"github.com/Hoper-J/ccwrap/internal/procgroup"
 	"github.com/Hoper-J/ccwrap/internal/profiles"
 	"github.com/Hoper-J/ccwrap/internal/settings"
 	"github.com/Hoper-J/ccwrap/internal/supervisor"
 	"github.com/Hoper-J/ccwrap/internal/tlsfp"
 	"github.com/Hoper-J/ccwrap/internal/ui"
+	"github.com/Hoper-J/ccwrap/internal/update"
 )
 
 func main() {
+	// A Windows console takes ccwrap's colors and cursor movement only with
+	// virtual terminal processing on; its mode is put back on the way out.
+	restoreConsole := ui.EnableVT(os.Stdout, os.Stderr)
+	// What a Windows upgrade moved aside while it ran goes once it is free.
+	if exe, err := os.Executable(); err == nil {
+		update.RemoveReplaced(exe)
+	}
 	code, msg := exitFor(realMain())
 	if msg != "" {
 		fmt.Fprintf(os.Stderr, "ccwrap: %s\n", msg)
 	}
+	restoreConsole()
 	os.Exit(code)
 }
 
@@ -48,7 +58,14 @@ func exitFor(err error) (int, string) {
 	return 1, err.Error()
 }
 
+// guardCommand is the hidden subcommand that runs the guard process
+// bindChildLifetime starts on macOS and the BSDs.
+const guardCommand = "__guard"
+
 func realMain() error {
+	if len(os.Args) > 1 && os.Args[1] == guardCommand {
+		return runGuard(os.Args[2:])
+	}
 	// version dispatches BEFORE DefaultPaths so it works in degraded
 	// environments — bug reports about "ccwrap version exits with state-
 	// dir error" are exactly the contexts (containers without HOME,
@@ -103,6 +120,15 @@ func realMain() error {
 		return runClaude(paths, os.Args[2:])
 	default:
 		return runClaude(paths, os.Args[1:])
+	}
+}
+
+// bindLaunchCopy ties the copy of ccwrap that runs a Windows launch to this
+// process: killing this ccwrap ends the copy, and with it Claude Code, which
+// the copy ties to itself the same way.
+func bindLaunchCopy(p *os.Process) {
+	if err := bindChildLifetime(p); err != nil {
+		fmt.Fprintf(os.Stderr, "ccwrap: the session would keep running if ccwrap were killed: %v\n", err)
 	}
 }
 
@@ -174,7 +200,7 @@ Management commands:
   ccwrap ui         [status | stop]                   (the per-user app; a launch starts it unless CCWRAP_NO_UI=1, CCWRAP_UI_PORT fixes its port)
   ccwrap dashboard  [--session ID] [--view overview|requests|errors|diagnostics]
   ccwrap doctor     [--json] [--verbose] [--session ID] [--profile NAME]
-  ccwrap stop       [--session ID | --all]
+  ccwrap stop       [--all | SESSION-ID | PROJECT]    (picks the session the way open does; --all stops every session)
   ccwrap gc         [--json]
   ccwrap capture    [--with-tls|--tls-only] [--main-inference] [--no-response]
                     [--headers] [--full] [--unmask] [--host H] [--path P]
@@ -185,6 +211,9 @@ Management commands:
   ccwrap profile    {ls | status | switch <name> | test [name] | test-egress [name] |
                      add <name> | edit <name> | rm <name> | set-default <name>}
                     [--session ID]
+
+SESSION-ID and --session ID also take the first characters of an ID, such as the
+8 that ccwrap status shows.
 `)
 }
 
@@ -295,6 +324,14 @@ func lookupEnv(env []string, key string) string {
 }
 
 func runClaude(paths app.Paths, args []string) error {
+	// A Windows launch runs in a copy of ccwrap that leads a console process
+	// group of its own, so that ccwrap stop's Ctrl+C reaches the session and
+	// not the shell that started it.
+	if !procgroup.Lead() {
+		if code, ok := procgroup.Respawn(os.Args[1:], bindLaunchCopy); ok {
+			return exitCodeError{code: code}
+		}
+	}
 	launch, err := parseLaunchArgs(args)
 	if err != nil {
 		return err
@@ -407,12 +444,17 @@ func runClaude(paths app.Paths, args []string) error {
 	l.PrintSummary()
 	updHandle := startBackgroundUpdateCheck(l.ctx, l.pre.Egress, paths.StateDir, versionString(), launch.NoUpdateCheck, os.Getenv, time.Now)
 	code, err := l.Wait()
+	claudeVersion := l.claudeVersion()
+	if claudeVersion != "" {
+		_ = update.SaveClaudeSeen(paths.StateDir, claudeVersion, time.Now())
+	}
 	l.PrintUnmappedNotice(os.Stderr)
 	// The exit notice prints after Wait and before any return/os.Exit:
 	// the banner covers "the next launch"; this line covers "this run,
 	// whose check just finished". Non-blocking read — it never delays
 	// exit.
 	printUpdateExitNotice(os.Stderr, updHandle, versionString(), ui.IsTerminal(os.Stderr))
+	printClaudeUpdateNotice(os.Stderr, paths.StateDir, claudeVersion, launch.NoUpdateCheck, os.Getenv, ui.IsTerminal(os.Stderr))
 	if err != nil {
 		return err
 	}

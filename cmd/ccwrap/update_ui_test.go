@@ -184,3 +184,68 @@ func TestPrintUpdateExitNotice(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+// Claude Code's latest version is read from the same registry as ccwrap's.
+func TestStartBackgroundUpdateCheckRecordsClaudeLatest(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/ccwrap-cli/latest":
+			fmt.Fprint(w, `{"version":"99.0.0"}`)
+		case "/@anthropic-ai/claude-code/latest":
+			fmt.Fprint(w, `{"version":"2.1.400"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	env := envWith(map[string]string{"CCWRAP_UPDATE_CHECK_URL": srv.URL + "/ccwrap-cli/latest"})
+	h := startBackgroundUpdateCheck(t.Context(), model.EgressConfig{Mode: "direct"}, dir, "0.0.1", false, env, time.Now)
+	h.waitDone()
+	if c, ok := update.LoadCache(dir); !ok || c.Latest != "99.0.0" || c.ClaudeLatest != "2.1.400" {
+		t.Fatalf("cache = %+v ok=%v", c, ok)
+	}
+}
+
+func TestPrintClaudeUpdateNotice(t *testing.T) {
+	dir := t.TempDir()
+	if err := update.SaveCache(dir, update.Cache{CheckedAt: time.Now(), Latest: "0.3.0", ClaudeLatest: "2.1.400"}); err != nil {
+		t.Fatal(err)
+	}
+	noEnv, ciEnv := envWith(nil), envWith(map[string]string{"CI": "1"})
+	var buf bytes.Buffer
+	printClaudeUpdateNotice(&buf, dir, "2.1.296", false, noEnv, true)
+	if !strings.Contains(buf.String(), "Claude Code 2.1.296 → 2.1.400") || !strings.Contains(buf.String(), "claude update") {
+		t.Fatalf("notice = %q", buf.String())
+	}
+	for name, run := range map[string]func(){
+		"current":  func() { printClaudeUpdateNotice(&buf, dir, "2.1.400", false, noEnv, true) },
+		"unknown":  func() { printClaudeUpdateNotice(&buf, dir, "", false, noEnv, true) },
+		"disabled": func() { printClaudeUpdateNotice(&buf, dir, "2.1.296", true, noEnv, true) },
+		"ci":       func() { printClaudeUpdateNotice(&buf, dir, "2.1.296", false, ciEnv, true) },
+		"non-tty":  func() { printClaudeUpdateNotice(&buf, dir, "2.1.296", false, noEnv, false) },
+	} {
+		buf.Reset()
+		run()
+		if buf.Len() != 0 {
+			t.Errorf("%s: notice = %q, want none", name, buf.String())
+		}
+	}
+}
+
+func TestAddClaudeUpdateCheck(t *testing.T) {
+	dir := t.TempDir()
+	var rows [][2]string
+	add := func(name, status, summary, detail string) { rows = append(rows, [2]string{status, summary}) }
+	addClaudeUpdateCheck(add, dir)
+	if len(rows) != 1 || rows[0][0] != "pass" || !strings.Contains(rows[0][1], "does not update itself in ccwrap sessions") {
+		t.Fatalf("without records: %v", rows)
+	}
+	_ = update.SaveCache(dir, update.Cache{CheckedAt: time.Now(), Latest: "0.3.0", ClaudeLatest: "2.1.400"})
+	_ = update.SaveClaudeSeen(dir, "2.1.296", time.Now())
+	rows = nil
+	addClaudeUpdateCheck(add, dir)
+	if len(rows) != 1 || rows[0][0] != "warn" || !strings.Contains(rows[0][1], "Claude Code 2.1.296 → 2.1.400") || !strings.Contains(rows[0][1], "claude update") {
+		t.Fatalf("with a newer release: %v", rows)
+	}
+}

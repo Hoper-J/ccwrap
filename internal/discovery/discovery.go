@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/Hoper-J/ccwrap/internal/app"
@@ -148,17 +147,43 @@ func probeControlSocket(ds *model.DiscoveredSession) {
 	ds.Reachable = true
 }
 
+// Find scans the sessions and returns the one sessionID names (see Match).
 func Find(paths app.Paths, sessionID string) (*model.DiscoveredSession, error) {
 	sessions, err := Scan(paths)
 	if err != nil {
 		return nil, err
 	}
+	return Match(sessions, sessionID)
+}
+
+// Match returns the session id names: the one with that ID, else the only
+// one whose ID starts with it, so the 8-character IDs ccwrap prints work.
+func Match(sessions []model.DiscoveredSession, id string) (*model.DiscoveredSession, error) {
+	if id == "" {
+		return nil, errors.New("no session ID given")
+	}
+	var hits []*model.DiscoveredSession
 	for i := range sessions {
-		if sessions[i].Manifest.SessionID == sessionID {
+		sid := sessions[i].Manifest.SessionID
+		if sid == id {
 			return &sessions[i], nil
 		}
+		if strings.HasPrefix(sid, id) {
+			hits = append(hits, &sessions[i])
+		}
 	}
-	return nil, os.ErrNotExist
+	switch len(hits) {
+	case 0:
+		return nil, fmt.Errorf("session %s not found", id)
+	case 1:
+		return hits[0], nil
+	}
+	ids := make([]string, len(hits))
+	for i, ds := range hits {
+		ids[i] = ds.Manifest.SessionID
+	}
+	sort.Strings(ids)
+	return nil, fmt.Errorf("%q matches several sessions (%s); use a longer session ID", id, strings.Join(ids, ", "))
 }
 
 func Active(paths app.Paths) ([]model.DiscoveredSession, error) {
@@ -211,16 +236,8 @@ func staleState(m model.SessionManifest) (bool, string) {
 		}
 		return false, ""
 	}
-	if !pidExists(m.SupervisorPID) {
+	if !procmeta.Exists(m.SupervisorPID) {
 		return true, "supervisor not running"
 	}
 	return false, ""
-}
-
-func pidExists(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
 }

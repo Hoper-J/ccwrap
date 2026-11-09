@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Hoper-J/ccwrap/internal/profiles"
+	"github.com/Hoper-J/ccwrap/internal/testutil"
 )
 
 // TestProfileCRUD_E2E walks the full create/read/update/delete cycle,
@@ -81,7 +82,7 @@ func TestProfileCRUD_E2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("step 9: file should exist; %v", err)
 	}
-	if got := st.Mode().Perm(); got != 0o600 {
+	if got := st.Mode().Perm(); got != 0o600 && testutil.HasUnixPermissions() {
 		t.Fatalf("step 9: expected 0o600; got %o", got)
 	}
 	file, _ := profiles.Load(path)

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -626,5 +627,15 @@ func TestStripsClaudeCodeExtras(t *testing.T) {
 	t.Setenv("CCWRAP_KEEP_CLAUDE_METADATA", "1")
 	if (Config{Forward: map[string]string{"claude-fable-5-1": "gpt-5.5"}}).StripsClaudeCodeExtras() {
 		t.Fatal("CCWRAP_KEEP_CLAUDE_METADATA=1 must keep Claude Code's extras")
+	}
+}
+
+func TestShellArgQuotesForTheLocalShell(t *testing.T) {
+	want := "'*=gpt-6'"
+	if runtime.GOOS == "windows" {
+		want = `"*=gpt-6"`
+	}
+	if got := ShellArg(DefaultKey, "gpt-6"); got != want {
+		t.Fatalf("ShellArg = %s, want %s", got, want)
 	}
 }

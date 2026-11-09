@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"io/fs"
+	"mime"
 	"net/http"
 	"os"
 	"os/exec"
@@ -62,6 +63,20 @@ func TestPageShell(t *testing.T) {
 	}
 	if !strings.Contains(pageCSP, "script-src 'self';") || strings.Contains(pageCSP, "unsafe") {
 		t.Fatalf("CSP = %q", pageCSP)
+	}
+}
+
+// The types hold whatever the system maps the extensions to, as some
+// Windows registries map .js to text/plain.
+func TestPageAssetTypesIgnoreTheSystemMapping(t *testing.T) {
+	if err := mime.AddExtensionType(".js", "text/plain"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = mime.AddExtensionType(".js", "text/javascript; charset=utf-8") })
+	paths := testutil.ShortAppPaths(t, "ui.sock")
+	r := startUI(t, paths, nil, time.Hour)
+	if resp, _ := get(t, r.info.URL()+"assets/js/main.js"); resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/javascript") {
+		t.Fatalf("main.js: %d %q", resp.StatusCode, resp.Header.Get("Content-Type"))
 	}
 }
 

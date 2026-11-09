@@ -132,10 +132,10 @@ func TestListenerAdmitsOwnUIDAndRootOnly(t *testing.T) {
 		}
 	}
 	logs := s.logText()
-	if n := strings.Count(logs, "refused connection from uid 1001"); n != 1 {
+	if n := strings.Count(logs, "refused connection from "+ownerName(1001, testSelf)); n != 1 {
 		t.Errorf("uid 1001 refusal logged %d times, want once:\n%s", n, logs)
 	}
-	for _, want := range []string{"the session port accepts only uid 1000 and root", "CCWRAP_LOCAL_PEER_CHECK=0", "no owning process", ErrNotFound.Error(), ErrUnsupported.Error(), errLayout.Error(), "panicked"} {
+	for _, want := range []string{"the session port accepts only " + ownerName(testSelf, testSelf) + " and " + RootName, "CCWRAP_LOCAL_PEER_CHECK=0", "no owning process", ErrNotFound.Error(), ErrUnsupported.Error(), errLayout.Error(), "panicked"} {
 		if !strings.Contains(logs, want) {
 			t.Errorf("log missing %q:\n%s", want, logs)
 		}
@@ -394,7 +394,7 @@ func TestStrictListenerRefusesUnidentifiedPeers(t *testing.T) {
 		}
 	}
 	logs := s.logText()
-	for _, want := range []string{"the ui port accepts only uid 1000 and root", "could not identify the owner", "refusing it", "CCWRAP_LOCAL_PEER_CHECK=0"} {
+	for _, want := range []string{"the ui port accepts only " + ownerName(testSelf, testSelf) + " and " + RootName, "could not identify the owner", "refusing it", "CCWRAP_LOCAL_PEER_CHECK=0"} {
 		if !strings.Contains(logs, want) {
 			t.Errorf("log missing %q:\n%s", want, logs)
 		}
