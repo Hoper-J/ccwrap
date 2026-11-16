@@ -146,6 +146,12 @@ func upgradeCommand(paths app.Paths, args []string) error {
 		if _, lerr := upgradeLookPath(argv[0]); lerr != nil {
 			return fmt.Errorf("%s not found in PATH — run manually:\n  %s", argv[0], update.ManualHint(ch))
 		}
+		if ch == update.ChannelNPM {
+			// On Windows npm cannot delete the package while this ccwrap.exe
+			// runs from it. Where this fails npm still upgrades, with a
+			// warning about what it left.
+			_ = update.FreeNPMPackage(exePath)
+		}
 		if rerr := upgradeRun(argv[0], argv[1:]...); rerr != nil {
 			var exitErr *exec.ExitError
 			if errors.As(rerr, &exitErr) {
